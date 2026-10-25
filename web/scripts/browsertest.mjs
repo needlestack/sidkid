@@ -11,6 +11,8 @@ import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { preview } from 'vite';
 import puppeteer from 'puppeteer-core';
 
+// BROWSER=firefox FIREFOX=/path/to/firefox runs the same tests in Firefox
+const BROWSER = process.env.BROWSER ?? 'chrome';
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ROOT = new URL('../../', import.meta.url).pathname;
 const OUT = `${ROOT}build/webtest`;
@@ -45,11 +47,22 @@ mkdirSync(OUT, { recursive: true });
 
 const server = await preview({ build: { outDir: 'dist-test' }, preview: { port: 0, open: false }, logLevel: 'warn' });
 const base = server.resolvedUrls.local[0];
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: true,
-  args: ['--autoplay-policy=no-user-gesture-required'],
-});
+// Colour scheme emulation needs CDP, which only Chrome has
+async function colorScheme(page, value) {
+  if (BROWSER === 'chrome') await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value }]);
+}
+
+const browser = await puppeteer.launch(
+  BROWSER === 'firefox'
+    ? {
+        browser: 'firefox',
+        executablePath: process.env.FIREFOX,
+        headless: true,
+        extraPrefsFirefox: { 'media.autoplay.default': 0, 'media.autoplay.blocking_policy': 0 },
+      }
+    : { executablePath: CHROME, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] },
+);
+console.log(`  ${BROWSER} ${await browser.version()}`);
 
 let failed = false;
 function report(ok, label, detail = '') {
@@ -143,12 +156,12 @@ try {
   report(muted, 'ui mutes voice 2 with key 2');
   await ui.keyboard.press('Digit2');
 
-  await ui.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
-  await ui.screenshot({ path: `${OUT}/ui-dark.png` });
-  await ui.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
-  await ui.screenshot({ path: `${OUT}/ui-light.png` });
+  await colorScheme(ui, 'dark');
+  await ui.screenshot({ path: `${OUT}/${BROWSER}-dark.png` });
+  await colorScheme(ui, 'light');
+  await ui.screenshot({ path: `${OUT}/${BROWSER}-light.png` });
 
-  await ui.keyboard.press('Space');
+  await ui.keyboard.press(' ');
   await ui.waitForFunction(() => !document.getElementById('play').classList.contains('playing'), { timeout: 2000 })
     .then(() => report(true, 'ui stops with space'), () => report(false, 'ui stops with space'));
 
@@ -156,9 +169,9 @@ try {
   await ui.waitForFunction(() => document.getElementById('title').textContent.includes('2x-speed'), { timeout: 5000 });
   const speed = await ui.$eval('#speed .on', (el) => el.dataset.speed);
   report(speed === '2', 'ui applies example speed setting', `speed ${speed}`);
-  await ui.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+  await colorScheme(ui, 'dark');
   await ui.click('.advanced summary');
-  await ui.screenshot({ path: `${OUT}/ui-settings.png`, fullPage: true });
+  await ui.screenshot({ path: `${OUT}/${BROWSER}-settings.png`, fullPage: true });
 
   report(errors.length === 0, 'ui without errors', errors.join(' | '));
 } finally {
