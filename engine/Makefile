@@ -13,6 +13,7 @@ EXAMPLES := $(ROOT)/vendor/gt2/examples
 
 CC ?= cc
 CXX ?= c++
+NODE ?= node
 # -ffp-contract=off: wasm never fuses multiply-adds, so native builds must
 # not either, or reSID's float math rounds differently and the audio drifts
 # by a few LSBs between native and browser.
@@ -103,7 +104,7 @@ $(REF)/obj/tools/sngrender.o: tools/sngrender.c sidkid.h
 
 test: $(NATIVE)/sngrender $(REF)/sngrender wasm
 	./tools/compare.sh $(NATIVE)/sngrender $(REF)/sngrender $(EXAMPLES) $(BUILD)/test
-	node tools/wasmcompare.mjs $(BUILD)/wasm/sidkid.js $(EXAMPLES) $(BUILD)/test
+	$(NODE) tools/wasmcompare.mjs $(BUILD)/wasm/sidkid.js $(EXAMPLES) $(BUILD)/test
 
 # --- wasm -----------------------------------------------------------------
 

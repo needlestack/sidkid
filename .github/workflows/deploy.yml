@@ -31,9 +31,12 @@ jobs:
           "$HOME/emsdk/emsdk" activate "$EMSDK_VERSION"
 
       - name: Engine tests (native vs. GoatTracker sources vs. wasm)
+        # emsdk_env.sh puts the emsdk root, which has a node/ directory, on
+        # PATH ahead of setup-node, so make can no longer find node itself
         run: |
+          NODE="$(command -v node)"
           source "$HOME/emsdk/emsdk_env.sh"
-          make -C engine -j4 test
+          make -C engine -j4 test NODE="$NODE"
 
       - name: Browser tests
         working-directory: web
