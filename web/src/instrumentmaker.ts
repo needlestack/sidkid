@@ -339,7 +339,38 @@ function useProgram(p: Program | null) {
   if (!ins) return;
   before();
   ins.targets[state.kind] = p ? { program: p, step: 0 } : null;
+  if (state.kind === WAVE) givePulseWidth(ins);
   changed(true);
+}
+
+/** Whether the instrument plays the pulse waveform at some point. */
+function usesPulse(ins: InstrumentDef): boolean {
+  const wave = ins.targets[WAVE]?.program;
+  if (!wave) return (ins.firstWave & WAVE_PULSE) !== 0;
+  return wave.steps.some((s) => {
+    const a = waveAction(s);
+    return a.type === 'wave' && (a.wave & WAVE_PULSE) !== 0;
+  });
+}
+
+/** A pulse wave with no pulse program: its width stays at 0%, which is silent. */
+const silentPulse = (ins: InstrumentDef) => usesPulse(ins) && !ins.targets[PULSE];
+
+/**
+ * A pulse wave needs a width, and only a pulse program sets one, so an
+ * instrument that starts using the pulse waveform without one gets a plain
+ * 50% square (the song's own, if it has one).
+ */
+function givePulseWidth(ins: InstrumentDef) {
+  if (!silentPulse(ins)) return;
+  const list = state.programs[PULSE];
+  let square = list.find((p) => p.steps.length === 1 && !p.next && p.steps[0].left === 0x88 && p.steps[0].right === 0x00);
+  if (!square) {
+    square = programFromPreset(PRESETS[PULSE].find((p) => p.name === 'Square')!);
+    list.push(square);
+  }
+  ins.targets[PULSE] = { program: square, step: 0 };
+  toast(`A pulse wave needs a width: ${insName(ins)} now uses the 50% “${square.name}” pulse program`);
 }
 
 /** Adds a new program to the song and uses it for this instrument. */
@@ -347,7 +378,10 @@ function addProgram(p: Program) {
   before();
   programs().push(p);
   const ins = instrument();
-  if (ins) ins.targets[state.kind] = { program: p, step: 0 };
+  if (ins) {
+    ins.targets[state.kind] = { program: p, step: 0 };
+    if (state.kind === WAVE) givePulseWidth(ins);
+  }
   changed(true);
 }
 
@@ -564,7 +598,9 @@ function renderEditor() {
   if (!p) {
     const kind = KIND_NAMES[state.kind].toLowerCase();
     empty.textContent = ins
-      ? `${insName(ins)} has no ${kind} program${state.kind === PULSE ? ', so its pulse width stays put' : state.kind === FILTER ? ', so it leaves the filter alone' : ''}. Pick one on the left to use it, or make a new one.`
+      ? state.kind === PULSE && silentPulse(ins)
+        ? `${insName(ins)} has no pulse program, but it plays the Pulse waveform: without a program the width stays at 0%, which is silent. Pick one on the left (Square is 50%), or make a new one.`
+        : `${insName(ins)} has no ${kind} program${state.kind === PULSE ? ', so its pulse width stays put' : state.kind === FILTER ? ', so it leaves the filter alone' : ''}. Pick one on the left to use it, or make a new one.`
       : 'Make an instrument below to start.';
     return;
   }
@@ -588,15 +624,10 @@ function renderNote() {
   const note = $('kind-note');
   const ins = instrument();
   let text = '';
-  if (state.kind === PULSE && ins) {
-    const wave = ins.targets[WAVE]?.program;
-    const usesPulse = wave
-      ? wave.steps.some((s) => {
-          const a = waveAction(s);
-          return a.type === 'wave' && a.wave & WAVE_PULSE;
-        })
-      : (ins.firstWave & WAVE_PULSE) !== 0;
-    if (!usesPulse) text = `${insName(ins)}’s wave program never picks the Pulse waveform, so the pulse width has no effect on how it sounds.`;
+  if (state.kind === WAVE && ins && silentPulse(ins)) {
+    text = `${insName(ins)} plays the Pulse waveform but has no pulse program, so its pulse width stays at 0% and the pulse parts are silent. Give it a pulse program on the Pulse tab.`;
+  } else if (state.kind === PULSE && ins) {
+    if (!usesPulse(ins)) text = `${insName(ins)}’s wave program never picks the Pulse waveform, so the pulse width has no effect on how it sounds.`;
   } else if (state.kind === FILTER) {
     text = 'The SID has one filter, shared by all three voices. While this instrument plays, its filter program takes over that filter for every voice routed through it.';
   }
@@ -859,7 +890,11 @@ function waveFields(s: Step, box: HTMLElement, update: Update, get: () => Step) 
   if (a.type === 'wave') {
     const setWave = (wave: number) => {
       update({ ...get(), left: waveLeft({ type: 'wave', wave }) });
-      renderSteps();
+      const ins = instrument();
+      if (ins && silentPulse(ins)) {
+        givePulseWidth(ins);
+        changed(true);
+      } else renderSteps();
       blip();
     };
     const control = () => {
