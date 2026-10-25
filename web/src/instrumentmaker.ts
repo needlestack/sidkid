@@ -10,7 +10,7 @@ import { loadModel, Player, saveModel } from './engine/player';
 import { adsrEditor, type Env } from './adsr';
 import { envelope } from './envelope';
 import { filterCurve, modeIcon } from './filtercurve';
-import { waveIcon, waveTone } from './waveicon';
+import { pulseIcon, waveIcon, waveTone } from './waveicon';
 import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
 import { noteName, parseSong, type Instrument } from './song';
 import {
@@ -678,18 +678,18 @@ function stepHue(i: number) {
 // What each step can do
 const STEP_TYPES: Record<number, [string, string][]> = {
   [WAVE]: [
-    ['wave', 'Change waveform'],
+    ['wave', 'Set waveform'],
     ['keep', 'Change pitch'],
     ['wait', 'Hold'],
     ['command', 'Effect (command)'],
   ],
   [PULSE]: [
-    ['width', 'Change width'],
+    ['width', 'Set width'],
     ['sweep', 'Sweep width'],
     ['hold', 'Hold'],
   ],
   [FILTER]: [
-    ['setup', 'Change filter'],
+    ['setup', 'Set filter'],
     ['cutoff', 'Move cutoff'],
     ['sweep', 'Sweep cutoff'],
   ],
@@ -975,8 +975,21 @@ function pitchField(s: Step, update: Update, get: () => Step): HTMLElement {
 function pulseFields(s: Step, box: HTMLElement, update: Update, get: () => Step) {
   const a = pulseAction(s);
   if (a.type === 'width') {
+    // The wave's shape follows the slider: how much of each cycle is high
+    const picture = pulseIcon(a.width);
     box.append(
-      slider(a.width, 0, 0xfff, (n) => percent(n / 4096), (n) => update(pulseStep({ type: 'width', width: n })), 'Pulse width: 50% is a square wave; near 0% or 100% it gets thin and quiet'),
+      picture.el,
+      slider(
+        a.width,
+        0,
+        0xfff,
+        (n) => percent(n / 4096),
+        (n) => {
+          picture.set(n);
+          update(pulseStep({ type: 'width', width: n }));
+        },
+        'Pulse width: 50% is a square wave; near 0% or 100% it gets thin and quiet',
+      ),
     );
   } else if (a.type === 'sweep') {
     box.append(

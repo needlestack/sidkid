@@ -941,6 +941,11 @@
   flex-wrap: wrap;
 }
 
+.pulse-icon {
+  color: var(--pulse);
+  flex: none;
+}
+
 .mode-icon {
   color: inherit;
 }
