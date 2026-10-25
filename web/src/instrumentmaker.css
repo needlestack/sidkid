@@ -691,7 +691,8 @@
 
 /* The instrument names the bar: picker on the left, tools under it */
 .instrument-field {
-  width: 210px;
+  position: relative;
+  width: 320px;
   gap: 4px;
 }
 
@@ -714,7 +715,66 @@
 
 .instrument-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
+}
+
+/* The note start panel, above the bar */
+.popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 12px);
+  z-index: 10;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 30px rgb(20 16 50 / 18%);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.popover-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.popover .toggle {
+  white-space: nowrap;
+}
+
+.popover-label {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.popover select {
+  height: 30px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: inherit;
+  padding: 0 6px;
+}
+
+.popover input[type='number'] {
+  width: 56px;
+  height: 28px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: inherit;
+  padding: 0 6px;
 }
 
 .mini {

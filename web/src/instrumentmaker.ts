@@ -672,12 +672,107 @@ function renderStart() {
 
 // --- Rendering: the instrument --------------------------------------------
 
+// Gate timer bits: no gate-off before a new note (legato), and no envelope
+// reset (hard restart) when the gate does go off
+const NO_RESTART = 0x40;
+const NO_HARD_RESTART = 0x80;
+
+// What a note's first frame plays, before the wave program takes over
+const FIRST_WAVES: [number, string][] = [
+  [0x09, 'Silence (a clean restart)'],
+  [0x00, 'Whatever the voice was playing (silent after a release)'],
+  [0x11, 'Triangle'],
+  [0x21, 'Saw'],
+  [0x41, 'Pulse'],
+  [0x81, 'Noise'],
+];
+
+/** The first waveform the instrument's wave program sets, with the gate on. */
+function openingWave(ins: InstrumentDef): number {
+  const wave = ins.targets[WAVE]?.program;
+  for (const st of wave?.steps ?? []) {
+    const a = waveAction(st);
+    if (a.type === 'wave' && a.wave & 0xf0) return (a.wave & 0xf0) | WAVE_GATE;
+  }
+  return 0x41;
+}
+
+/** How each new note starts: the instrument's gate timer and first waveform. */
+function renderNoteStart() {
+  const panel = $('note-start-panel');
+  const ins = instrument();
+  if (panel.hidden || !ins) return;
+  const set = (gateTimer: number, firstWave = ins.firstWave) => {
+    before();
+    ins.gateTimer = gateTimer;
+    ins.firstWave = firstWave;
+    schedulePreview();
+    persist();
+    renderNoteStart();
+  };
+  const legato = (ins.gateTimer & NO_RESTART) !== 0;
+  const rows: HTMLElement[] = [];
+  const row = (label: string, title: string, ...controls: HTMLElement[]) => {
+    const r = document.createElement('div');
+    r.className = 'popover-row';
+    r.title = title;
+    const l = document.createElement('span');
+    l.className = 'popover-label';
+    l.textContent = label;
+    r.append(l, ...controls);
+    rows.push(r);
+  };
+  row(
+    'Each new note',
+    'Restarting cuts the previous note just before the new one, so every note starts the same. Gliding on keeps the sound going and only changes the pitch and programs: smooth runs, like slurred notes.',
+    segmented(
+      [
+        [0, 'Restart', 'The previous note is cut just before, so each note attacks cleanly'],
+        [NO_RESTART, 'Glide (legato)', 'While a note is held, the next one carries on from it with no new attack'],
+      ],
+      ins.gateTimer & NO_RESTART,
+      // Gliding starts on the wave program's own waveform, gate on, so the
+      // sound runs on unbroken (and a note after silence still sounds)
+      (bit) => set((ins.gateTimer & ~NO_RESTART) | bit, bit ? openingWave(ins) : 0x09),
+    ),
+  );
+  if (!legato) {
+    row(
+      'Silence before it',
+      'How many frames before the new note the previous one is cut. More gives the envelope time to fall, for a crisper attack; fewer keeps notes closer together.',
+      numberField('', Math.max(1, ins.gateTimer & 0x3f), 1, 63, 'frames', (n) => set((ins.gateTimer & 0xc0) | n), 'Frames of silence before each note'),
+    );
+    row(
+      'Reset the envelope',
+      'Sets the volume envelope to a fast fade during that silence, so the next attack always starts from silence. Turning it off lets a long release ring into the next note.',
+      segmented(
+        [
+          [0, 'Yes', 'A hard restart: every attack starts from silence'],
+          [NO_HARD_RESTART, 'No', 'The release carries on until the new note'],
+        ],
+        ins.gateTimer & NO_HARD_RESTART,
+        (bit) => set((ins.gateTimer & ~NO_HARD_RESTART) | bit),
+      ),
+    );
+  }
+  const first = document.createElement('select');
+  for (const [v, name] of FIRST_WAVES) first.append(new Option(name, String(v)));
+  // Songs can use other values: show them as they are
+  if (!FIRST_WAVES.some(([v]) => v === ins.firstWave)) first.append(new Option(`${hex(ins.firstWave)} (from the song)`, String(ins.firstWave)));
+  first.value = String(ins.firstWave);
+  first.addEventListener('change', () => set(ins.gateTimer, Number(first.value)));
+  row('First frame plays', 'What the voice plays as the note begins, before the wave program’s first step', first);
+  panel.replaceChildren(...rows);
+}
+
+
 function renderInstrument() {
   const ins = instrument();
   const select = $<HTMLSelectElement>('instrument');
   select.replaceChildren(...state.instruments.map((i, n) => new Option(insName(i), String(n))));
   select.value = String(state.current);
-  for (const id of ['rename-instrument', 'duplicate-instrument', 'delete-instrument']) ($(id) as HTMLButtonElement).disabled = !ins;
+  for (const id of ['rename-instrument', 'duplicate-instrument', 'delete-instrument', 'note-start']) ($(id) as HTMLButtonElement).disabled = !ins;
+  renderNoteStart();
   drawAdsr();
 }
 
@@ -2307,6 +2402,21 @@ $<HTMLSelectElement>('instrument').addEventListener('change', (e) => {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') input.value = instrument()?.name ?? '';
     if (e.key === 'Enter' || e.key === 'Escape') input.blur();
+  });
+}
+
+// The note start panel opens above the bar, and closes on a click elsewhere
+{
+  const panel = $('note-start-panel');
+  const button = $('note-start');
+  const show = (open: boolean) => {
+    panel.hidden = !open;
+    button.setAttribute('aria-expanded', String(open));
+    renderNoteStart();
+  };
+  button.addEventListener('click', () => show(panel.hidden === true));
+  document.addEventListener('pointerdown', (e) => {
+    if (!panel.hidden && !panel.contains(e.target as Node) && e.target !== button) show(false);
   });
 }
 
