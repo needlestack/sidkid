@@ -210,8 +210,8 @@
   --step-fill: hsl(var(--hue) var(--clip-s) var(--clip-l));
   --step-edge: hsl(var(--hue) var(--clip-s) var(--clip-edge-l));
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  grid-template-areas: 'num main tools' '. info info';
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-areas: 'num main tools' 'num info info';
   align-items: center;
   gap: 4px 10px;
   padding: 6px 8px;
@@ -239,10 +239,53 @@
   }
 }
 
-.step-num {
+.step-lead {
   grid-area: num;
   align-self: start;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
   margin-top: 2px;
+}
+
+.wave-picker {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wave-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wave-choice .wave-icon {
+  color: inherit;
+}
+
+.step select.mixes {
+  max-width: 120px;
+}
+
+.step select.mixes.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.reveal {
+  height: 28px;
+  width: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.step-num {
   width: 26px;
   height: 26px;
   border-radius: 7px;
@@ -292,6 +335,17 @@
 
 .step-type {
   font-weight: 600;
+}
+
+.step-type-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-type-field > span {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .step input[type='number'] {
@@ -577,22 +631,112 @@
   height: 32px;
 }
 
-.adsr-inputs {
-  display: flex;
-  gap: 3px;
+.adsr {
+  display: grid;
+  gap: 2px;
 }
 
-.adsr-inputs input {
-  width: 30px;
-  height: 32px;
-  text-align: center;
-  font: inherit;
-  font-family: var(--mono);
-  text-transform: uppercase;
+.adsr-graph {
+  display: block;
+  overflow: visible;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface);
-  color: inherit;
+  touch-action: none;
+  user-select: none;
+}
+
+.adsr-area {
+  fill: var(--accent);
+  opacity: 0.12;
+}
+
+.adsr-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.adsr-keyup {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.adsr-keyup-text {
+  font-size: 9px;
+  dominant-baseline: middle;
+  fill: var(--muted);
+}
+
+.adsr-handle {
+  outline: none;
+}
+
+.adsr-handle.horizontal {
+  cursor: ew-resize;
+}
+
+.adsr-handle.vertical {
+  cursor: ns-resize;
+}
+
+.adsr-handle .hit {
+  fill: transparent;
+}
+
+.adsr-handle .arrow {
+  fill: var(--accent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.adsr-handle:hover .arrow,
+.adsr-handle:focus-visible .arrow,
+.adsr-handle.active .arrow {
+  opacity: 1;
+}
+
+.adsr-handle .dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+  transition: r 0.1s;
+}
+
+.adsr-handle:hover .dot,
+.adsr-handle:focus-visible .dot,
+.adsr-handle.active .dot {
+  fill: var(--accent);
+  r: 7px;
+}
+
+/* Four fixed columns, so values changing never shift anything */
+.adsr-readout {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  width: 240px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.adsr-readout > span {
+  display: grid;
+  justify-items: center;
+}
+
+.adsr-readout .value {
+  color: var(--text);
+}
+
+.adsr-readout .on .name,
+.adsr-readout .on .value {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 [hidden] {
@@ -614,7 +758,7 @@
 
   .step {
     grid-template-areas: 'num tools' 'main main' 'info info';
-    grid-template-columns: 30px 1fr;
+    grid-template-columns: 34px 1fr;
   }
 
   .step-tools {

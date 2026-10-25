@@ -6,6 +6,9 @@ import './tablemaker.css';
 import { Analyzer, type Trace } from './engine/analyzer';
 import type { TableData } from './engine/configure';
 import { loadModel, Player, saveModel } from './engine/player';
+import { adsrEditor } from './adsr';
+import { envelope } from './envelope';
+import { waveIcon, waveTone } from './waveicon';
 import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
 import { noteName, parseSong, type Instrument } from './song';
 import {
@@ -43,7 +46,6 @@ import {
   waveAction,
   waveLeft,
   waveName,
-  waveStorable,
   type Layout,
   type Pitch,
   type Program,
@@ -564,9 +566,12 @@ function stepRow(p: Program, s: Step, i: number): HTMLLIElement {
   li.style.setProperty('--hue', String(stepHue(i)));
   li.classList.toggle('live', i === liveStep);
 
+  const lead = document.createElement('span');
+  lead.className = 'step-lead';
   const num = document.createElement('span');
   num.className = 'step-num';
   num.textContent = String(i + 1);
+  lead.append(num);
   const loopsHere = p.next?.program === p && p.next.step === i;
   if (loopsHere) {
     num.classList.add('loop-target');
@@ -616,13 +621,19 @@ function stepRow(p: Program, s: Step, i: number): HTMLLIElement {
     toolButton('×', 'Delete step', () => removeStep(i)),
   );
 
+  const typeField = document.createElement('label');
+  typeField.className = 'step-type-field';
+  const typeLabel = document.createElement('span');
+  typeLabel.textContent = 'Step type';
+  typeField.append(typeLabel, type);
+
   const main = document.createElement('div');
   main.className = 'step-main';
-  main.append(type, fields);
+  main.append(typeField, fields);
   const info = document.createElement('div');
   info.className = 'step-info';
   info.append(text, raw);
-  li.append(num, main, info, tools);
+  li.append(lead, main, info, tools);
   li.addEventListener('pointerenter', () => setHoverStep(i));
   li.addEventListener('pointerleave', () => setHoverStep(-1));
   return li;
@@ -681,40 +692,52 @@ function stepFields(kind: number, s: Step, box: HTMLElement, update: Update, get
 function waveFields(s: Step, box: HTMLElement, update: Update, get: () => Step) {
   const a = waveAction(s);
   if (a.type === 'wave') {
-    const osc = toggles(
+    const setWave = (wave: number) => {
+      update({ ...get(), left: waveLeft({ type: 'wave', wave }) });
+      renderSteps();
+      blip();
+    };
+    const control = () => {
+      const cur = waveAction(get());
+      return cur.type === 'wave' ? cur.wave & 0x0f : WAVE_GATE;
+    };
+    box.append(wavePicker(a.wave, (osc) => setWave(osc | control())));
+
+    const gate = segmented(
       [
-        [WAVE_TRI, 'Tri', 'Triangle: soft, flute-like', 'tri'],
-        [WAVE_SAW, 'Saw', 'Sawtooth: bright and buzzy', 'saw'],
-        [WAVE_PULSE, 'Pulse', 'Pulse: hollow to nasal, shaped by the pulse program', 'pulse'],
-        [WAVE_NOISE, 'Noise', 'Noise: drums and effects', 'noise'],
+        [WAVE_GATE, 'Sound on', 'The note sounds: attack, decay, then sustain'],
+        [0, 'Release', 'Lets go of the note here: it fades out with the release time, even while the key is held'],
       ],
-      a.wave,
-      (bits) => {
-        const cur = waveAction(get());
-        const wave = cur.type === 'wave' ? (cur.wave & 0x0f) | bits : bits | WAVE_GATE;
-        return waveStorable(wave) ? (update({ ...get(), left: waveLeft({ type: 'wave', wave }) }), true) : false;
-      },
-      0xf0,
+      a.wave & WAVE_GATE,
+      (bit) => setWave((a.wave & ~WAVE_GATE) | bit),
     );
-    osc.title = 'Oscillators. Noise only mixes with triangle or saw.';
-    const ctl = toggles(
+    box.append(gate);
+
+    // Sync, ring modulation and the test bit are for special effects
+    const extras = WAVE_SYNC | WAVE_RING | WAVE_TEST;
+    const more = toggles(
       [
-        [WAVE_GATE, 'Gate', 'On: the note sounds (attack, decay, sustain). Off: it fades out (release).', 'gate'],
         [WAVE_SYNC, 'Sync', 'Syncs to another voice (voice 3 for voice 1): needs that voice playing', ''],
         [WAVE_RING, 'Ring', 'Ring modulation by another voice (voice 3 for voice 1): needs that voice playing, best with triangle', ''],
         [WAVE_TEST, 'Test', 'Test bit: silences and resets the oscillator', ''],
       ],
       a.wave,
-      (bits) => {
-        const cur = waveAction(get());
-        const wave = (cur.type === 'wave' ? cur.wave & 0xf0 : 0) | bits;
-        update({ ...get(), left: waveLeft({ type: 'wave', wave }) });
-        return true;
-      },
-      0x0f,
+      (bits) => (setWave((a.wave & ~extras) | bits), true),
+      extras,
     );
-    ctl.classList.add('minor');
-    box.append(osc, ctl, pitchField(s, update, get));
+    more.classList.add('minor');
+    more.hidden = !(a.wave & extras);
+    const reveal = document.createElement('button');
+    reveal.className = 'reveal';
+    reveal.textContent = '⋯';
+    reveal.title = 'Sync, ring modulation and test bit';
+    reveal.setAttribute('aria-label', reveal.title);
+    reveal.hidden = !more.hidden;
+    reveal.addEventListener('click', () => {
+      more.hidden = false;
+      reveal.hidden = true;
+    });
+    box.append(pitchField(s, update, get), reveal, more);
   } else if (a.type === 'keep') {
     box.append(pitchField(s, update, get));
   } else if (a.type === 'wait') {
@@ -815,6 +838,85 @@ function filterFields(s: Step, box: HTMLElement, update: Update, get: () => Step
       numberField('by', a.speed, -128, 127, 'a frame', (n) => update(filterStep({ ...(filterAction(get()) as Sweep), speed: n })), 'Change in cutoff each frame, out of 255. Negative closes the filter.'),
     );
   }
+}
+
+const BASIC_WAVES: [number, string, string][] = [
+  [WAVE_TRI, 'Tri', 'Triangle: soft and round, like a flute'],
+  [WAVE_SAW, 'Saw', 'Sawtooth: bright and buzzy, like brass or strings'],
+  [WAVE_PULSE, 'Pulse', 'Pulse: hollow to nasal, shaped by the pulse width'],
+  [WAVE_NOISE, 'Noise', 'Noise: hiss, for drums and effects'],
+];
+
+// Mixes that make a sound. The chip combines the waveforms' bits, so these
+// are quieter and thinner than one waveform, and differ between chips.
+const MIXED_WAVES: [number, string, string][] = [
+  [WAVE_SAW | WAVE_TRI, 'Saw + Triangle', 'reedy and hollow'],
+  [WAVE_PULSE | WAVE_TRI, 'Pulse + Triangle', 'a soft, muted pulse'],
+  [WAVE_PULSE | WAVE_SAW, 'Pulse + Saw', 'thin and metallic'],
+  [WAVE_PULSE | WAVE_SAW | WAVE_TRI, 'Pulse + Saw + Triangle', 'faint and glassy'],
+];
+
+/** Waveform buttons with pictures, and a list of the useful mixes. */
+function wavePicker(wave: number, change: (osc: number) => void): HTMLElement {
+  const osc = wave & 0xf0;
+  const wrap = document.createElement('span');
+  wrap.className = 'wave-picker';
+  const buttons = document.createElement('span');
+  buttons.className = 'toggles waves';
+  for (const [bit, name, title] of BASIC_WAVES) {
+    const b = document.createElement('button');
+    b.className = 'toggle wave-choice';
+    b.dataset.tone = waveTone(bit);
+    b.title = title;
+    b.setAttribute('aria-pressed', String(osc === bit));
+    b.append(waveIcon(bit, 22, 12), name);
+    b.addEventListener('click', () => change(bit));
+    buttons.append(b);
+  }
+  const mixes = document.createElement('select');
+  mixes.className = 'mixes';
+  mixes.setAttribute('aria-label', 'Mixed waveforms');
+  mixes.title = 'Two or three waveforms at once. The chip merges them into new, quieter tones, which sound different on the 6581 and 8580.';
+  mixes.append(new Option('More…', ''));
+  for (const [bits, name, hint] of MIXED_WAVES) mixes.append(new Option(`${name}: ${hint}`, String(bits)));
+  const isBasic = BASIC_WAVES.some(([bit]) => bit === osc);
+  const isMix = MIXED_WAVES.some(([bits]) => bits === osc);
+  // Songs can hold values the menu doesn't offer: show them as they are
+  if (!isBasic && !isMix) mixes.append(new Option(osc ? `${waveName(osc)} (silent: noise doesn't mix)` : 'No waveform (silent)', String(osc)));
+  mixes.value = isBasic ? '' : String(osc);
+  mixes.classList.toggle('on', !isBasic);
+  // A select only reports a change to a different option, so clear it while
+  // the menu is open: picking the mix already chosen then plays it again
+  const shown = mixes.value;
+  mixes.addEventListener('pointerdown', () => {
+    if (document.activeElement !== mixes) mixes.selectedIndex = -1;
+  });
+  mixes.addEventListener('blur', () => {
+    if (mixes.selectedIndex === -1) mixes.value = shown;
+  });
+  mixes.addEventListener('change', () => {
+    if (mixes.value !== '') change(Number(mixes.value));
+    else mixes.value = shown;
+  });
+  wrap.append(buttons, mixes);
+  return wrap;
+}
+
+/** One-of-several buttons for a value. */
+function segmented(items: [number, string, string][], value: number, change: (v: number) => void): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'toggles';
+  for (const [v, text, title] of items) {
+    const b = document.createElement('button');
+    b.className = 'toggle';
+    b.textContent = text;
+    b.title = title;
+    b.setAttribute('aria-pressed', String(v === value));
+    if (v === value && v) b.dataset.tone = 'gate';
+    b.addEventListener('click', () => v !== value && change(v));
+    wrap.append(b);
+  }
+  return wrap;
 }
 
 /** Toggle chips over some bits of a value; change returns false to refuse. */
@@ -943,7 +1045,7 @@ function renderTestSound() {
       schedulePreview();
     };
   });
-  for (const key of ['a', 'd', 's', 'r'] as const) $<HTMLInputElement>(`env-${key}`).value = test.env[key].toString(16).toUpperCase();
+  drawAdsr();
 }
 
 // --- The graph ------------------------------------------------------------
@@ -966,6 +1068,10 @@ function schedulePreview() {
     }
     if (analyzer) trace = analyzer.trace(a.tables, a.instrument, test.note, test.frames[state.kind], DEFAULT_SETTINGS);
     drawGraph();
+    if (blipPending) {
+      blipPending = false;
+      playBlip();
+    }
   });
 }
 
@@ -977,6 +1083,8 @@ interface Lane {
 
 const GUTTER = 64;
 const AXIS = 18;
+/** Room above the first lane's plot for its name and "& volume" */
+const PLOT_TOP = 36;
 let graphHover = -1;
 
 function colors() {
@@ -988,6 +1096,7 @@ function colors() {
     border: v('--border'),
     grid: v('--step-beat'),
     accent: v('--accent'),
+    surface: v('--surface'),
     surface2: v('--surface-2'),
     tri: v('--tri'),
     saw: v('--saw'),
@@ -1024,6 +1133,49 @@ function semitones(freq: number): number {
   return freq ? 12 * Math.log2(freq / played) : NaN;
 }
 
+interface Volume {
+  /** Envelope level (0-1), ENV_STEPS samples a frame */
+  level: Float32Array;
+  /** Frame the key goes up, or -1 while it is still held */
+  keyUp: number;
+  /** Whether this is a made-up example rather than the last note played */
+  example: boolean;
+  /** First frame after key up where the sound has all but died away, or the span */
+  end: number;
+  /** Frames to draw: a note being played is drawn as far as it has got */
+  shown: number;
+}
+
+const ENV_STEPS = 4;
+
+/**
+ * The test note's volume envelope. Before any note is played, or after the
+ * envelope settings change, an example with the key going up halfway
+ * through; otherwise the last note played, drawn as far as it has got.
+ */
+function volume(): Volume | null {
+  if (!trace || !traced) return null;
+  const frames = trace.frames;
+  const { ad, sr } = traced.instrument;
+  const env = (ad << 8) | sr;
+  // The note played with other settings no longer shows what they do
+  if (playedEnv !== env) playedEnv = null;
+  const example = playedEnv === null;
+  let keyUp = Math.round(frames / 2);
+  if (!example) keyUp = held !== null ? Math.max(frames, liveFrame() + 1) : (releasedAt ?? frames);
+  const gate = Array.from({ length: frames }, (_, f) => (trace!.control[f] & WAVE_GATE) !== 0 && f < keyUp);
+  const level = envelope(ad, sr, gate, ENV_STEPS);
+  let end = frames;
+  for (let f = Math.max(keyUp, 1); f < frames; f++) {
+    if (level[f * ENV_STEPS] < 0.02) {
+      end = f;
+      break;
+    }
+  }
+  const shown = example ? frames : animating ? Math.max(0, Math.min(frames, playheadFrame)) : held !== null ? frames : end;
+  return { level, keyUp: example || held === null ? keyUp : -1, example, end, shown };
+}
+
 function drawGraph() {
   const canvas = $<HTMLCanvasElement>('graph');
   const c = colors();
@@ -1035,6 +1187,13 @@ function drawGraph() {
   const frames = test.frames[state.kind];
   const fw = (width - GUTTER) / frames;
   const x = (f: number) => GUTTER + f * fw;
+  // Once the program stops (the sound holds its last step) or first loops
+  // back (it repeats), nothing new happens: everything from there is faded
+  const ran = steps.findIndex((v) => v >= 0);
+  const settled = ran < 0 ? -1 : steps.findIndex((v, f) => f > ran && (v === -2 || (v >= 0 && steps[f - 1] >= 0 && v < steps[f - 1])));
+  const held = settled > 0 && steps[settled] === -2 ? steps[settled - 1] : -1;
+  const settledText = settled < 0 ? '' : held >= 0 ? `hold step ${held + 1}` : `repeat from step ${steps[settled] + 1}`;
+  const labelLane = kind === WAVE ? 'Wave' : kind === PULSE ? 'Width' : 'Cutoff';
 
   if (t && kind === WAVE) {
     const values = Array.from(t.freq, semitones).filter(Number.isFinite);
@@ -1049,7 +1208,7 @@ function drawGraph() {
       name: 'Pitch',
       height: 150,
       draw(ctx, y, h) {
-        const yv = (v: number) => y + 24 + ((hi - v) / (hi - lo)) * (h - 30);
+        const yv = (v: number) => y + PLOT_TOP + ((hi - v) / (hi - lo)) * (h - PLOT_TOP - 6);
         ctx.font = '11px system-ui';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
@@ -1065,27 +1224,28 @@ function drawGraph() {
         }
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
-        for (let f = 0; f < frames; f++) {
-          const v = semitones(t.freq[f]);
-          if (!Number.isFinite(v)) continue;
-          const sounding = (t.control[f] & 0xf0) !== 0 && !(t.control[f] & WAVE_TEST);
-          ctx.strokeStyle = c.accent;
+        ctx.strokeStyle = c.accent;
+        // One line per held pitch, with a faint riser where it changes
+        runs(frames, (f) => `${t.freq[f]}|${(t.control[f] & 0xf0) !== 0 && !(t.control[f] & WAVE_TEST)}`, (from, to) => {
+          const v = semitones(t.freq[from]);
+          if (!Number.isFinite(v)) return;
+          const sounding = (t.control[from] & 0xf0) !== 0 && !(t.control[from] & WAVE_TEST);
           ctx.globalAlpha = sounding ? 1 : 0.3;
           ctx.beginPath();
-          ctx.moveTo(x(f) + 1, yv(v));
-          ctx.lineTo(x(f + 1) - 1, yv(v));
+          ctx.moveTo(x(from) + 1, yv(v));
+          ctx.lineTo(x(to) - 1, yv(v));
           ctx.stroke();
-          const prev = f > 0 ? semitones(t.freq[f - 1]) : NaN;
+          const prev = from > 0 ? semitones(t.freq[from - 1]) : NaN;
           if (Number.isFinite(prev) && Math.abs(prev - v) > 0.01) {
             ctx.globalAlpha = 0.35;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(x(f), yv(prev));
-            ctx.lineTo(x(f), yv(v));
+            ctx.moveTo(x(from), yv(prev));
+            ctx.lineTo(x(from), yv(v));
             ctx.stroke();
             ctx.lineWidth = 2.5;
           }
-        }
+        });
         ctx.globalAlpha = 1;
       },
     });
@@ -1093,7 +1253,8 @@ function drawGraph() {
       name: 'Wave',
       height: 34,
       draw(ctx, y, h) {
-        for (let f = 0; f < frames; f++) {
+        // One bar per stretch of unchanged waveform
+        runs(frames, (f) => String(t.control[f]), (f, to) => {
           const w = t.control[f];
           const osc = [
             [WAVE_TRI, c.tri],
@@ -1101,14 +1262,14 @@ function drawGraph() {
             [WAVE_PULSE, c.pulse],
             [WAVE_NOISE, c.noise],
           ].filter(([bit]) => w & (bit as number));
-          if (w & WAVE_TEST || !osc.length) continue;
+          if (w & WAVE_TEST || !osc.length) return;
           ctx.globalAlpha = w & WAVE_GATE ? 1 : 0.35;
           const bh = (h - 8) / osc.length;
           osc.forEach(([, color], i) => {
             ctx.fillStyle = color as string;
-            ctx.fillRect(x(f) + 0.5, y + 4 + i * bh, Math.max(1, fw - 1), bh);
+            ctx.fillRect(x(f) + 0.5, y + 4 + i * bh, Math.max(1, x(to) - x(f) - 1), bh);
           });
-        }
+        });
         ctx.globalAlpha = 1;
       },
     });
@@ -1118,7 +1279,7 @@ function drawGraph() {
       name: 'Width',
       height: 150,
       draw(ctx, y, h) {
-        const yv = (v: number) => y + 24 + (1 - v / 4096) * (h - 30);
+        const yv = (v: number) => y + PLOT_TOP + (1 - v / 4096) * (h - PLOT_TOP - 6);
         ctx.font = '11px system-ui';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
@@ -1137,7 +1298,7 @@ function drawGraph() {
       name: 'Cutoff',
       height: 150,
       draw(ctx, y, h) {
-        const yv = (v: number) => y + 24 + (1 - v / 255) * (h - 30);
+        const yv = (v: number) => y + PLOT_TOP + (1 - v / 255) * (h - PLOT_TOP - 6);
         ctx.font = '11px system-ui';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
@@ -1169,6 +1330,7 @@ function drawGraph() {
       },
     });
   }
+  const vol = volume();
   lanes.push({
     name: 'Step',
     height: 26,
@@ -1177,13 +1339,19 @@ function drawGraph() {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const list = traced?.lists[kind] ?? [];
-      runs(frames, (f) => `${steps[f]}|${t ? t.pos[kind][f] : 0}|${steps[f] >= 0 ? '' : f}`, (from, to) => {
-        const s = steps[from];
-        if (s === -2) {
+      // Frames where the program jumps back to an earlier step; after the
+      // first, it is repeating itself, so those passes are drawn faded
+      const loops: number[] = [];
+      for (let f = 1; f < frames; f++) if (steps[f] >= 0 && steps[f - 1] >= 0 && steps[f] < steps[f - 1]) loops.push(f);
+      const repeating = settled > 0 ? settled : frames;
+      runs(frames, (f) => `${steps[f]}|${t ? t.pos[kind][f] : 0}|${steps[f] >= 0 || steps[f] === -2 ? '' : f}`, (from, to) => {
+        let s = steps[from];
+        if (s === -2 && held >= 0 && from >= settled) s = held;
+        else if (s === -2) {
           if (from === 0 || steps[from - 1] !== -2) {
             ctx.fillStyle = c.muted;
             ctx.textAlign = 'left';
-            clipText(ctx, kind === FILTER ? 'not running' : 'stopped: the sound holds', x(from) + 6, y + h / 2, width - x(from));
+            clipText(ctx, 'not running', x(from) + 6, y + h / 2, width - x(from));
             ctx.textAlign = 'center';
           }
           return;
@@ -1201,7 +1369,7 @@ function drawGraph() {
           return;
         }
         const hue = stepHue(s);
-        const on = hoverStep < 0 || hoverStep === s;
+        const on = hoverStep < 0 ? from < repeating : hoverStep === s;
         ctx.fillStyle = `hsl(${hue} ${c.stepS} ${c.stepL})`;
         ctx.globalAlpha = on ? 1 : 0.35;
         ctx.fillRect(x(from) + 0.5, y + 3, Math.max(1, x(to) - x(from) - 1), h - 6);
@@ -1211,6 +1379,15 @@ function drawGraph() {
           ctx.fillText(String(s + 1), (x(from) + x(to)) / 2, y + h / 2);
         }
       });
+      ctx.fillStyle = c.accent;
+      for (const f of loops) {
+        ctx.fillRect(Math.round(x(f)) - 1, y, 2, h);
+        ctx.beginPath();
+        ctx.moveTo(x(f) - 5, y);
+        ctx.lineTo(x(f) + 5, y);
+        ctx.lineTo(x(f), y + 5);
+        ctx.fill();
+      }
     },
   });
 
@@ -1232,8 +1409,10 @@ function drawGraph() {
   }
 
   let y = 0;
+  let labelTop = -1;
   ctx.font = '600 12px system-ui';
   for (const lane of lanes) {
+    if (lane.name === labelLane) labelTop = y;
     ctx.fillStyle = c.muted;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -1243,6 +1422,76 @@ function drawGraph() {
     y += lane.height;
     ctx.fillStyle = c.border;
     ctx.fillRect(GUTTER, y, width - GUTTER, 1);
+  }
+
+  // Wash out the lanes above the steps once the program settles, and say how
+  if (settled > 0) {
+    // The step lane shows what happens next its own way
+    const below = lanes[lanes.length - 1].height;
+    ctx.fillStyle = c.surface;
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(x(settled), 0, width - x(settled), y - below);
+    ctx.globalAlpha = 1;
+    if (labelTop >= 0) {
+      ctx.font = '600 11px system-ui';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const ty = labelTop + (labelLane === 'Wave' ? 17 : 26);
+      const tw = Math.min(ctx.measureText(settledText).width, width - x(settled) - 16);
+      if (tw > 20) {
+        ctx.fillStyle = c.surface;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.roundRect(x(settled) + 4, ty - 8, tw + 8, 16, 4);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = c.text;
+        clipText(ctx, settledText, x(settled) + 8, ty, tw + 1);
+      }
+    }
+  }
+
+  // The volume envelope, shaded behind the first lane, and never faded:
+  // it keeps changing however the programs settle
+  if (vol && vol.shown > 0 && lanes.length > 1) {
+    const top = PLOT_TOP;
+    const bottom = lanes[0].height - 6;
+    const n = Math.min(vol.level.length, vol.shown * ENV_STEPS + 1);
+    const sx = (i: number) => x(i / ENV_STEPS);
+    const sy = (i: number) => bottom - vol.level[i] * (bottom - top);
+    ctx.beginPath();
+    ctx.moveTo(sx(0), bottom);
+    for (let i = 0; i < n; i++) ctx.lineTo(sx(i), sy(i));
+    ctx.lineTo(sx(n - 1), bottom);
+    ctx.closePath();
+    ctx.fillStyle = c.accent;
+    ctx.globalAlpha = 0.1;
+    ctx.fill();
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = c.accent;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = c.muted;
+    ctx.fillText('& volume', 0, 21);
+    if (vol.keyUp >= 0 && vol.keyUp < Math.min(frames, vol.shown + 1)) {
+      const kx = Math.round(x(vol.keyUp)) + 0.5;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = c.muted;
+      ctx.beginPath();
+      ctx.moveTo(kx, 2);
+      ctx.lineTo(kx, lanes[0].height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '600 11px system-ui';
+      const label = vol.example ? 'key up (example)' : 'key up';
+      const right = kx + 6 + ctx.measureText(label).width < width;
+      ctx.textAlign = right ? 'left' : 'right';
+      ctx.fillText(label, right ? kx + 5 : kx - 5, 6);
+    }
   }
 
   // Time axis
@@ -1315,7 +1564,17 @@ function graphTip(f: number): string {
   const s = steps[f];
   const p = current()!;
   const head = `Frame ${f + 1} · ${(f / FPS).toFixed(2)} s`;
-  const stepText = s >= 0 ? `Step ${s + 1}: ${describeStep(kind, p.steps[s])}` : s === -1 ? 'Running another program' : kind === FILTER ? 'Filter program not running' : 'Program stopped';
+  // Is this frame on a repeat, after the program first looped back?
+  const again = s >= 0 && steps.slice(1, f + 1).some((v, i) => v >= 0 && steps[i] >= 0 && v < steps[i]);
+  const last = s === -2 ? Math.max(-1, ...steps.slice(0, f).filter((v) => v >= 0).slice(-1)) : -1;
+  const stepText =
+    s >= 0
+      ? `Step ${s + 1}${again ? ' (repeating)' : ''}: ${describeStep(kind, p.steps[s])}`
+      : s === -1
+        ? 'Running another program'
+        : last >= 0
+          ? `Stopped: holding step ${last + 1}`
+          : `${kind === FILTER ? 'Filter' : 'Program'} not running`;
   let value = '';
   if (kind === WAVE) {
     const st = semitones(t.freq[f]);
@@ -1327,7 +1586,9 @@ function graphTip(f: number): string {
   } else {
     value = `Cutoff ${t.cutoff[f]} · ${passbandName(t.mode[f] & 0x70)}, resonance ${t.routing[f] >> 4}`;
   }
-  return `<b>${head}</b><br>${escapeHtml(stepText)}<br>${escapeHtml(value)}`;
+  const vol = volume();
+  const level = vol ? `Volume ${Math.round(vol.level[f * ENV_STEPS] * 100)}%${vol.keyUp >= 0 && f >= vol.keyUp ? ' · releasing' : ''}` : '';
+  return `<b>${head}</b><br>${escapeHtml(stepText)}<br>${escapeHtml(value)}${level ? `<br>${level}` : ''}`;
 }
 
 function escapeHtml(s: string) {
@@ -1394,6 +1655,17 @@ player.onStatus = (status: Status) => {
 let held: number | null = null;
 let noteStart = 0;
 let playheadFrame = -1;
+/** The frame the last test note was let go, for the volume graph */
+let releasedAt: number | null = null;
+/** The envelope (AD and SR) of the last test note, or null to show an example */
+let playedEnv: number | null = null;
+
+/** The graph frame the test note has reached, negative before it sounds. */
+function liveFrame(): number {
+  const elapsed = (performance.now() - noteStart) / 1000 - player.latency;
+  // The note sounds after the gate timer and a frame of setup
+  return Math.floor(elapsed * FPS) - ((test.like ? test.like.gateTimer & 0x3f : TEST_GATE_TIMER) + 1);
+}
 
 async function noteOn(note: number) {
   // Held from now: a quick click can be released while audio is starting
@@ -1417,10 +1689,32 @@ async function noteOn(note: number) {
     schedulePreview();
   }
   player.noteOn(0, note, TEST_INSTRUMENT);
-  // Released already: still play it, briefly
-  if (held !== note) player.noteOff(0);
   noteStart = performance.now();
+  releasedAt = null;
+  playedEnv = traced ? (traced.instrument.ad << 8) | traced.instrument.sr : null;
+  // Released already: still play it, briefly
+  if (held !== note) {
+    player.noteOff(0);
+    releasedAt = 1;
+  }
   animate();
+}
+
+let blipPending = false;
+let blipTimer = 0;
+
+/** Plays the last note briefly once the change has reached the player, so a choice can be heard. */
+function blip() {
+  blipPending = true;
+  schedulePreview();
+}
+
+function playBlip() {
+  if (held !== null) return;
+  const note = test.note;
+  void noteOn(note);
+  clearTimeout(blipTimer);
+  blipTimer = window.setTimeout(() => noteOff(note), 450);
 }
 
 /** Cuts the sound at once, whatever the release time. */
@@ -1433,8 +1727,11 @@ function silence() {
 function noteOff(note?: number) {
   if (held === null || (note !== undefined && note !== held)) return;
   held = null;
+  // A release before the note starts waits for it: it still sounds a frame
+  releasedAt = Math.max(1, liveFrame());
   if (player.started) player.noteOff(0);
   renderKeyboard();
+  drawGraph();
 }
 
 let animating = false;
@@ -1442,11 +1739,11 @@ function animate() {
   if (animating) return;
   animating = true;
   const step = () => {
-    const elapsed = (performance.now() - noteStart) / 1000 - player.latency;
-    // The note sounds after the gate timer and a frame of setup
-    const f = Math.floor(elapsed * FPS) - ((test.like ? test.like.gateTimer & 0x3f : TEST_GATE_TIMER) + 1);
+    const f = liveFrame();
     const was = playheadFrame;
-    playheadFrame = held === null && f >= test.frames[state.kind] ? -1 : f;
+    // Once let go, the playhead stops where the sound has faded away
+    const end = held === null ? (volume()?.end ?? test.frames[state.kind]) : test.frames[state.kind];
+    playheadFrame = held === null && f >= end ? -1 : f;
     if (playheadFrame !== was) drawGraph();
     if (playheadFrame >= 0 && playheadFrame < test.frames[state.kind]) requestAnimationFrame(step);
     else if (held !== null && f < 0) requestAnimationFrame(step);
@@ -1574,17 +1871,16 @@ $('octave-up').addEventListener('click', () => {
   renderKeyboard();
 });
 
-for (const key of ['a', 'd', 's', 'r'] as const) {
-  const input = $<HTMLInputElement>(`env-${key}`);
-  input.type = 'text';
-  input.maxLength = 1;
-  input.addEventListener('input', () => {
-    if (!/^[0-9a-f]$/i.test(input.value)) return;
-    test.env[key] = parseInt(input.value, 16);
+// Dragging the envelope reshapes the graph as it goes; letting go plays it
+const drawAdsr = adsrEditor(
+  $('adsr'),
+  () => test.env,
+  (key, v) => {
+    test.env[key] = v;
     schedulePreview();
-  });
-  input.addEventListener('change', () => (input.value = test.env[key].toString(16).toUpperCase()));
-}
+  },
+  () => blip(),
+);
 
 // The chip is a setting for the whole app, shared with the song player
 {

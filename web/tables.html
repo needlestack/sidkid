@@ -107,14 +107,9 @@
           <label class="field" id="test-wave-field"><span>Wave</span><select id="test-wave"></select></label>
           <label class="field" id="test-pulse-field"><span>Pulse</span><select id="test-pulse"></select></label>
           <label class="field" id="test-filter-field"><span>Filter</span><select id="test-filter"></select></label>
-          <div class="field adsr-field" id="env-field" title="Envelope of the test note: attack, decay, sustain, release (0-F)">
+          <div class="field adsr-field" id="env-field">
             <span>Envelope</span>
-            <div class="adsr-inputs">
-              <input id="env-a" type="number" min="0" max="15" aria-label="Attack" />
-              <input id="env-d" type="number" min="0" max="15" aria-label="Decay" />
-              <input id="env-s" type="number" min="0" max="15" aria-label="Sustain" />
-              <input id="env-r" type="number" min="0" max="15" aria-label="Release" />
-            </div>
+            <div id="adsr"></div>
           </div>
         </div>
       </div>
