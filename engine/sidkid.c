@@ -25,6 +25,9 @@ static unsigned char lastsongptr[MAX_CHN];
 static int takenloop[MAX_CHN];
 static int looped[MAX_CHN];
 
+// Test notes released before they have started sounding
+static int pendingrelease[MAX_CHN];
+
 static void settempo(void)
 {
   // Same tempo as gsound.c: BME calls the player every
@@ -183,6 +186,12 @@ static int advance(void)
   {
     CHN *cptr = &chn[c];
 
+    if ((pendingrelease[c]) && (!cptr->newnote))
+    {
+      releasenote(c);
+      pendingrelease[c] = 0;
+    }
+
     // The pattern pointer moves on when a row is read; it is reset to 0
     // when a new pattern is set up, before its first row is read. A
     // one-row pattern ends where it started, so then look for the order
@@ -278,6 +287,7 @@ void sk_reset(void)
     playroutine();
   }
   resetplayer();
+  memset(pendingrelease, 0, sizeof pendingrelease);
 }
 
 void sk_set_table(int table, const unsigned char *left, const unsigned char *right, int length)
@@ -323,13 +333,17 @@ void sk_note_on(int voice, int note, int num)
   // start, which would skip every few frames; put it mid-pattern, as during
   // most of a song.
   chn[voice].pattptr = 0x7fffffff;
+  pendingrelease[voice] = 0;
   playtestnote(note + FIRSTNOTE, num, voice);
 }
 
 void sk_note_off(int voice)
 {
   if ((voice < 0) || (voice >= MAX_CHN)) return;
-  releasenote(voice);
+  // A note starts a few frames after sk_note_on, setting the gate; a
+  // release before then has to wait, or it would be lost
+  if (chn[voice].newnote) pendingrelease[voice] = 1;
+  else releasenote(voice);
 }
 
 void sk_tick(void)

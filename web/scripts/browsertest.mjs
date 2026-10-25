@@ -265,6 +265,29 @@ try {
     .then(() => report(true, 'tables test note runs the program'), () => report(false, 'tables test note runs the program'));
   await tm.keyboard.up('q');
 
+  // A quick tap, released before the note starts sounding, still fades out
+  await tm.keyboard.down('w');
+  await tm.keyboard.up('w');
+  await tm.waitForFunction(() => {
+    const s = window.tableMaker.status();
+    return s && !(s.regs[4] & 1) && s.envelopes[0] === 0;
+  }, { timeout: 3000 })
+    .then(() => report(true, 'tables quick tap is released'), () => report(false, 'tables quick tap is released'));
+
+  // Dragging across the keyboard plays each key passed over
+  const first = await (await tm.$('.key[data-offset="0"]')).boundingBox();
+  const last = await (await tm.$('.key[data-offset="11"]')).boundingBox();
+  await tm.mouse.move(first.x + first.width / 2, first.y + first.height - 10);
+  await tm.mouse.down();
+  const played = new Set();
+  for (let i = 0; i <= 10; i++) {
+    await tm.mouse.move(first.x + first.width / 2 + ((last.x - first.x) * i) / 10, first.y + first.height - 10);
+    played.add(await tm.$eval('.key.down', (k) => k.dataset.offset).catch(() => null));
+  }
+  await tm.mouse.up();
+  const released = await tm.$('.key.down');
+  report(played.size >= 5 && !released, 'tables drag across the keys', `${played.size} notes`);
+
   await tm.select('#examples', 'cabrinigreen.sng');
   await tm.waitForFunction(() => window.tableMaker.state().instruments.length > 0, { timeout: 5000 });
   const loaded = await tm.evaluate(() => window.tableMaker.state().programs.map((l) => l.length).join('/'));

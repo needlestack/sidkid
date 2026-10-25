@@ -105,6 +105,10 @@ class SidKidProcessor extends AudioWorkletProcessor {
       case 'noteOff':
         sk._sk_note_off(cmd.voice);
         break;
+      case 'silence':
+        // Clears the SID registers: gates off with the fastest release
+        sk._sk_reset();
+        break;
     }
   }
 

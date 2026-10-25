@@ -83,6 +83,7 @@ void sk_set_instrument(int num, int ad, int sr, int wave, int pulse, int filter,
 // Starts a note on a voice with an instrument, as GoatTracker's jam mode.
 // It sounds after the instrument's gate timer, plus a frame.
 void sk_note_on(int voice, int note, int num);
+// Releases the note; if it hasn't started yet, as soon as it does.
 void sk_note_off(int voice);
 
 // Runs one frame of the playroutine without rendering audio.

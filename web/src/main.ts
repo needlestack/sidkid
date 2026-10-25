@@ -1,7 +1,7 @@
 import './style.css';
 import { Analyzer } from './engine/analyzer';
 import { encodeWav, renderSong } from './engine/export';
-import { MODEL_6581, Player } from './engine/player';
+import { loadModel, Player, saveModel } from './engine/player';
 import { DEFAULT_SETTINGS, type Settings, type SongInfo, type Status } from './engine/protocol';
 import * as sid from './sid';
 import { parseSong, type Song } from './song';
@@ -33,7 +33,7 @@ let cursor = 0;
 let jumpedTo = -1;
 let muted = [false, false, false];
 let settings: Settings = DEFAULT_SETTINGS;
-let model = MODEL_6581;
+let model = loadModel();
 const exampleList = new Map<string, Example>();
 
 // --- voices -----------------------------------------------------------------
@@ -276,11 +276,14 @@ function stepSection(delta: number) {
   if (!status?.playing) sectionView.pin(next);
 }
 
+player.setModel(model);
+for (const b of $('model').querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('on', Number(b.dataset.model) === model);
 $('model').addEventListener('click', (e) => {
   const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-model]');
   if (!button) return;
   model = Number(button.dataset.model);
   player.setModel(model);
+  saveModel(model);
   for (const b of $('model').querySelectorAll('button')) b.classList.toggle('on', b === button);
 });
 

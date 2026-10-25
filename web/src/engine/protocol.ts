@@ -58,7 +58,8 @@ export type Command =
   | { type: 'tables'; tables: TableData[] }
   | { type: 'instrument'; num: number; instrument: Instrument }
   | { type: 'noteOn'; voice: number; note: number; instrument: number }
-  | { type: 'noteOff'; voice: number };
+  | { type: 'noteOff'; voice: number }
+  | { type: 'silence' };
 
 export type Event =
   | { type: 'ready' }

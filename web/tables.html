@@ -10,6 +10,10 @@
     <header class="topbar">
       <div class="brand">SIDKid <span>Table maker</span></div>
       <nav class="files">
+        <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
+          <button data-model="0" class="on" title="The original C64 SID: gritty, with a characterful filter">6581</button>
+          <button data-model="1" title="The later SID revision: cleaner, with a brighter filter">8580</button>
+        </div>
         <a class="button secondary" href="./">Song player</a>
         <select id="examples" aria-label="Load the tables of an example song">
           <option value="">Tables from an example song…</option>
@@ -112,16 +116,9 @@
               <input id="env-r" type="number" min="0" max="15" aria-label="Release" />
             </div>
           </div>
-          <div class="field">
-            <span>Chip</span>
-            <div class="segmented small" id="model">
-              <button data-model="0" class="on">6581</button>
-              <button data-model="1">8580</button>
-            </div>
-          </div>
         </div>
       </div>
-      <p class="keys">Play with the mouse or keys Z S X D C V… (lower octave) and Q 2 W 3 E R… (upper). Hold to sustain, let go to release.</p>
+      <p class="keys">Play with the mouse or keys Z S X D C V… (lower octave) and Q 2 W 3 E R… (upper). Hold to sustain, let go to release. Esc silences everything.</p>
     </footer>
 
     <div class="toast" id="toast" role="status"></div>

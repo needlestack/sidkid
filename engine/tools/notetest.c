@@ -102,6 +102,23 @@ static void pulsesweep(void)
   check(sk_table_pos(0, PTBL) == 0, "pulse program has ended");
 }
 
+static void quickrelease(void)
+{
+  static const unsigned char left[] = {0x21, 0xff};
+  static const unsigned char right[] = {0x00, 0x00};
+  int f;
+
+  // Released on the next frame, before the note has started sounding
+  sk_reset();
+  sk_set_table(WTBL, left, right, sizeof left);
+  sk_set_instrument(1, 0x00, 0xf0, 1, 0, 0, 0, 0, 2, 0x09);
+  sk_note_on(0, NOTE, 1);
+  sk_tick();
+  sk_note_off(0);
+  for (f = 0; f < 10; f++) sk_tick();
+  check(sk_sidregs()[4] == 0x20, "a note released before it starts still gets released");
+}
+
 static void stopsplaying(const char *song)
 {
   if (!song || !sk_load_song(song)) return;
@@ -116,6 +133,7 @@ int main(int argc, char **argv)
   sk_init(44100, SK_MODEL_6581, 0, 0);
   arpeggio();
   pulsesweep();
+  quickrelease();
   stopsplaying(argc > 1 ? argv[1] : 0);
   return errors ? 1 : 0;
 }

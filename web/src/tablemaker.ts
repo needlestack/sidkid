@@ -5,7 +5,7 @@ import './style.css';
 import './tablemaker.css';
 import { Analyzer, type Trace } from './engine/analyzer';
 import type { TableData } from './engine/configure';
-import { Player } from './engine/player';
+import { loadModel, Player, saveModel } from './engine/player';
 import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
 import { noteName, parseSong, type Instrument } from './song';
 import {
@@ -1386,16 +1386,25 @@ function graphFrame(e: PointerEvent): number {
 
 const player = new Player();
 player.onError = (m) => toast(m);
-player.onStatus = (status: Status) => showLive(status);
+let lastStatus: Status | null = null;
+player.onStatus = (status: Status) => {
+  lastStatus = status;
+  showLive(status);
+};
 let held: number | null = null;
 let noteStart = 0;
 let playheadFrame = -1;
 
 async function noteOn(note: number) {
+  // Held from now: a quick click can be released while audio is starting
+  held = note;
+  renderKeyboard();
   if (!player.started) {
     try {
       await player.start();
     } catch (err) {
+      held = null;
+      renderKeyboard();
       toast(`Audio failed to start: ${err}`);
       return;
     }
@@ -1407,11 +1416,18 @@ async function noteOn(note: number) {
     test.note = note;
     schedulePreview();
   }
-  held = note;
   player.noteOn(0, note, TEST_INSTRUMENT);
+  // Released already: still play it, briefly
+  if (held !== note) player.noteOff(0);
   noteStart = performance.now();
-  renderKeyboard();
   animate();
+}
+
+/** Cuts the sound at once, whatever the release time. */
+function silence() {
+  held = null;
+  if (player.started) player.silence();
+  renderKeyboard();
 }
 
 function noteOff(note?: number) {
@@ -1475,16 +1491,32 @@ function renderKeyboard() {
       key.style.setProperty('--x', String(black ? white - 0.3 : white));
       if (!black) white++;
       key.tabIndex = -1;
-      key.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        key.setPointerCapture(e.pointerId);
-        void noteOn(test.octave * 12 + Number(key.dataset.offset));
-      });
-      key.addEventListener('pointerup', () => noteOff());
-      key.addEventListener('pointercancel', () => noteOff());
       board.append(key);
     }
     board.style.setProperty('--whites', String(white));
+    // Dragging across the keys plays each one it passes over
+    const keyAt = (e: PointerEvent) => document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('#keyboard .key');
+    let dragging = false;
+    board.addEventListener('pointerdown', (e) => {
+      const key = keyAt(e);
+      if (!key) return;
+      e.preventDefault();
+      board.setPointerCapture(e.pointerId);
+      dragging = true;
+      void noteOn(test.octave * 12 + Number(key.dataset.offset));
+    });
+    board.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const key = keyAt(e);
+      const note = key ? test.octave * 12 + Number(key.dataset.offset) : null;
+      if (note !== null && note !== held) void noteOn(note);
+    });
+    const end = () => {
+      dragging = false;
+      noteOff();
+    };
+    board.addEventListener('pointerup', end);
+    board.addEventListener('pointercancel', end);
   }
   for (const key of board.querySelectorAll<HTMLElement>('.key')) {
     const n = base + Number(key.dataset.offset);
@@ -1506,6 +1538,10 @@ window.addEventListener('keydown', (e) => {
     undo(e.shiftKey);
     return;
   }
+  if (e.key === 'Escape') {
+    silence();
+    return;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey || typing(e) || e.repeat) return;
   const offset = KEYS[e.key.toLowerCase()];
   if (offset === undefined) return;
@@ -1517,6 +1553,7 @@ window.addEventListener('keyup', (e) => {
   if (offset !== undefined) noteOff(Math.min(94, test.octave * 12 + offset));
 });
 window.addEventListener('blur', () => noteOff());
+document.addEventListener('visibilitychange', () => document.hidden && silence());
 
 $('octave-down').addEventListener('click', () => {
   test.octave = Math.max(0, test.octave - 1);
@@ -1539,11 +1576,18 @@ for (const key of ['a', 'd', 's', 'r'] as const) {
   input.addEventListener('change', () => (input.value = test.env[key].toString(16).toUpperCase()));
 }
 
-for (const b of $('model').querySelectorAll<HTMLButtonElement>('button')) {
-  b.addEventListener('click', () => {
-    player.setModel(Number(b.dataset.model));
-    for (const o of $('model').querySelectorAll('button')) o.classList.toggle('on', o === b);
-  });
+// The chip is a setting for the whole app, shared with the song player
+{
+  const model = loadModel();
+  player.setModel(model);
+  for (const b of $('model').querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', Number(b.dataset.model) === model);
+    b.addEventListener('click', () => {
+      player.setModel(Number(b.dataset.model));
+      saveModel(Number(b.dataset.model));
+      for (const o of $('model').querySelectorAll('button')) o.classList.toggle('on', o === b);
+    });
+  }
 }
 
 // --- Page controls --------------------------------------------------------
@@ -1701,5 +1745,6 @@ Object.assign(window, {
     frameSteps,
     ready: () => analyzer !== null && trace !== null,
     idle: () => !previewPending,
+    status: () => lastStatus,
   },
 });

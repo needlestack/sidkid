@@ -11,6 +11,25 @@ export const SAMPLE_RATE = 48000;
 export const MODEL_6581 = 0;
 export const MODEL_8580 = 1;
 
+const MODEL_KEY = 'sidkid.model';
+
+/** The chip chosen last, on either page. */
+export function loadModel(): number {
+  try {
+    return localStorage.getItem(MODEL_KEY) === '1' ? MODEL_8580 : MODEL_6581;
+  } catch {
+    return MODEL_6581;
+  }
+}
+
+export function saveModel(model: number) {
+  try {
+    localStorage.setItem(MODEL_KEY, String(model));
+  } catch {
+    // Storage can be unavailable; the choice just isn't remembered
+  }
+}
+
 export class Player {
   onStatus: (status: Status) => void = () => {};
   onError: (message: string) => void = () => {};
@@ -144,6 +163,11 @@ export class Player {
 
   noteOff(voice: number) {
     this.send({ type: 'noteOff', voice });
+  }
+
+  /** Stops everything at once, including notes still fading out. */
+  silence() {
+    this.send({ type: 'silence' });
   }
 
   setModel(model: number) {
