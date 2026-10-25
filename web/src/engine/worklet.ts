@@ -4,7 +4,7 @@
 // not affect the output.
 
 import createSidKid, { type SidKidModule } from '@engine/sidkid.js';
-import { configure } from './configure';
+import { configure, writeInstrument, writeTables } from './configure';
 import type { Command, Event, ProcessorOptions } from './protocol';
 
 // AudioWorkletGlobalScope is not in TypeScript's DOM lib
@@ -93,6 +93,18 @@ class SidKidProcessor extends AudioWorkletProcessor {
       case 'ping':
         this.send({ type: 'pong', id: cmd.id });
         break;
+      case 'tables':
+        writeTables(sk, cmd.tables);
+        break;
+      case 'instrument':
+        writeInstrument(sk, cmd.num, cmd.instrument);
+        break;
+      case 'noteOn':
+        sk._sk_note_on(cmd.voice, cmd.note, cmd.instrument);
+        break;
+      case 'noteOff':
+        sk._sk_note_off(cmd.voice);
+        break;
     }
   }
 
@@ -129,6 +141,7 @@ class SidKidProcessor extends AudioWorkletProcessor {
           muted: [0, 1, 2].map((c) => sk._sk_is_muted(c) !== 0),
           regs: sk.HEAPU8.slice(regs, regs + 25),
           envelopes: sk.HEAPU8.slice(this.envelopes, this.envelopes + 3),
+          tablePos: [0, 1, 2].map((t) => sk._sk_table_pos(0, t)),
         },
       });
     }

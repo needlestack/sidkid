@@ -6,6 +6,7 @@ import { MODEL_6581, Player, SAMPLE_RATE } from './engine/player';
 import { Analyzer } from './engine/analyzer';
 import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
 import { orderSteps, parseSong } from './song';
+import { layOut, splitTable } from './tables';
 import { buildTimeline } from './timeline';
 
 function base64(samples: Int16Array) {
@@ -71,4 +72,29 @@ async function analyzeSong(url: string, settings?: Partial<Settings>) {
   return { length: t.length, loopStart: t.loopStart, sections: t.sections.map((s) => s.letter).join(''), problems: problems.slice(0, 5) };
 }
 
-Object.assign(window, { renderOffline, exportSong, analyzeSong });
+/**
+ * Splits a song's wave, pulse and filter tables into programs and lays them
+ * out again: unchanged programs must give back the same bytes.
+ */
+async function tableRoundTrip(url: string) {
+  const analyzer = await Analyzer.create();
+  const canonical = analyzer.load(await (await fetch(url)).arrayBuffer());
+  if (!canonical) return null;
+  const song = parseSong(canonical);
+  const problems: string[] = [];
+  const counts = [0, 1, 2].map((k) => {
+    const table = song.tables[k];
+    const { programs } = splitTable(table, k);
+    const out = layOut(programs).table;
+    const same = out.left.length === table.left.length && out.left.every((b, i) => b === table.left[i] && out.right[i] === table.right[i]);
+    if (!same) {
+      const row = table.left.findIndex((b, i) => b !== out.left[i] || table.right[i] !== out.right[i]);
+      const hex = (t: { left: Uint8Array; right: Uint8Array }) => `${t.left[row]?.toString(16)} ${t.right[row]?.toString(16)}`;
+      problems.push(`${['wave', 'pulse', 'filter'][k]} table row ${row + 1}: ${hex(table)} became ${hex(out)}`);
+    }
+    return programs.length;
+  });
+  return { counts, problems };
+}
+
+Object.assign(window, { renderOffline, exportSong, analyzeSong, tableRoundTrip });

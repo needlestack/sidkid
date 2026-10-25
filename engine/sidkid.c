@@ -104,24 +104,29 @@ int sk_num_subsongs(void)
   return count;
 }
 
-void sk_play(int subsong)
+// GoatTracker carries some player state (filter, pulse, vibrato...) over
+// from the previous run, so a song can start slightly differently each
+// time. Resets it to how it is after loading, keeping the mutes.
+static void resetplayer(void)
 {
   int c;
-
   unsigned char mute[MAX_CHN];
 
-  if ((subsong < 0) || (subsong >= MAX_SONGS)) return;
-
-  // GoatTracker carries some player state (filter, pulse, vibrato...) over
-  // from the previous run, so a song can start slightly differently each
-  // time. Reset it to how it is after loading, keeping the mutes.
   for (c = 0; c < MAX_CHN; c++) mute[c] = chn[c].mute;
   initchannels();
   for (c = 0; c < MAX_CHN; c++) chn[c].mute = mute[c];
   filterctrl = filtertype = filtercutoff = filtertime = filterptr = 0;
   masterfader = 0x0f;
   memset(sidreg, 0, sizeof sidreg);
+}
 
+void sk_play(int subsong)
+{
+  int c;
+
+  if ((subsong < 0) || (subsong >= MAX_SONGS)) return;
+
+  resetplayer();
   initsong(subsong, PLAY_BEGINNING);
   for (c = 0; c < MAX_CHN; c++)
   {
@@ -262,6 +267,82 @@ void sk_render(short *out, int n)
   }
   // Only reachable if reSID produced nothing; pad with silence
   if (n > 0) memset(out, 0, n * sizeof(short));
+}
+
+void sk_reset(void)
+{
+  // A stop only takes effect on the next playroutine call
+  if (isplaying())
+  {
+    stopsong();
+    playroutine();
+  }
+  resetplayer();
+}
+
+void sk_set_table(int table, const unsigned char *left, const unsigned char *right, int length)
+{
+  if ((table < 0) || (table >= MAX_TABLES)) return;
+  if (length < 0) length = 0;
+  if (length > MAX_TABLELEN) length = MAX_TABLELEN;
+  memset(ltable[table], 0, MAX_TABLELEN);
+  memset(rtable[table], 0, MAX_TABLELEN);
+  memcpy(ltable[table], left, length);
+  memcpy(rtable[table], right, length);
+}
+
+void sk_set_instrument(int num, int ad, int sr, int wave, int pulse, int filter, int speed, int vibdelay, int gatetimer, int firstwave)
+{
+  INSTR *iptr;
+
+  if ((num < 1) || (num >= MAX_INSTR)) return;
+  iptr = &instr[num];
+  iptr->ad = ad;
+  iptr->sr = sr;
+  iptr->ptr[WTBL] = wave;
+  iptr->ptr[PTBL] = pulse;
+  iptr->ptr[FTBL] = filter;
+  iptr->ptr[STBL] = speed;
+  iptr->vibdelay = vibdelay;
+  iptr->gatetimer = gatetimer;
+  iptr->firstwave = firstwave;
+}
+
+void sk_note_on(int voice, int note, int num)
+{
+  if ((voice < 0) || (voice >= MAX_CHN) || (note < 0) || (note > LASTNOTE - FIRSTNOTE)) return;
+  if ((num < 1) || (num >= MAX_INSTR)) return;
+  // Notes only play this way while the song is stopped
+  if (isplaying())
+  {
+    stopsong();
+    playroutine();
+  }
+  // With pulse optimization the playroutine skips pulse steps on frames
+  // where a pattern starts. In jam mode the pattern pointer sits at the
+  // start, which would skip every few frames; put it mid-pattern, as during
+  // most of a song.
+  chn[voice].pattptr = 0x7fffffff;
+  playtestnote(note + FIRSTNOTE, num, voice);
+}
+
+void sk_note_off(int voice)
+{
+  if ((voice < 0) || (voice >= MAX_CHN)) return;
+  releasenote(voice);
+}
+
+void sk_tick(void)
+{
+  advance();
+}
+
+int sk_table_pos(int voice, int table)
+{
+  if ((voice < 0) || (voice >= MAX_CHN)) return 0;
+  if (table == FTBL) return filterptr;
+  if ((table == WTBL) || (table == PTBL)) return chn[voice].ptr[table];
+  return 0;
 }
 
 const unsigned char *sk_sidregs(void)

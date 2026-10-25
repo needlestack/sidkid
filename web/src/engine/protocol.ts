@@ -2,6 +2,9 @@
 // the engine. The worklet is the only place the song exists, so every change
 // goes through here.
 
+import type { Instrument } from '../song';
+import type { TableData } from './configure';
+
 export interface SongInfo {
   title: string;
   author: string;
@@ -40,6 +43,8 @@ export interface Status {
   regs: Uint8Array;
   /** Envelope level 0-255 of each voice. */
   envelopes: Uint8Array;
+  /** Voice 1's wave and pulse table positions and the filter's (1-based, 0 = not running). */
+  tablePos: number[];
 }
 
 export type Command =
@@ -49,7 +54,11 @@ export type Command =
   | { type: 'mute'; channel: number; muted: boolean }
   | { type: 'model'; model: number }
   | { type: 'settings'; settings: Settings }
-  | { type: 'ping'; id: number };
+  | { type: 'ping'; id: number }
+  | { type: 'tables'; tables: TableData[] }
+  | { type: 'instrument'; num: number; instrument: Instrument }
+  | { type: 'noteOn'; voice: number; note: number; instrument: number }
+  | { type: 'noteOff'; voice: number };
 
 export type Event =
   | { type: 'ready' }

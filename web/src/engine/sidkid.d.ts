@@ -17,6 +17,13 @@ declare module '@engine/sidkid.js' {
     _sk_stop(): void;
     _sk_seek(subsong: number, frame: number): void;
     _sk_scan(subsong: number, maxframes: number, out: number, maxevents: number): number;
+    _sk_reset(): void;
+    _sk_set_table(table: number, left: number, right: number, length: number): void;
+    _sk_set_instrument(num: number, ad: number, sr: number, wave: number, pulse: number, filter: number, speed: number, vibdelay: number, gatetimer: number, firstwave: number): void;
+    _sk_note_on(voice: number, note: number, num: number): void;
+    _sk_note_off(voice: number): void;
+    _sk_tick(): void;
+    _sk_table_pos(voice: number, table: number): number;
     _sk_is_playing(): number;
     _sk_song_looped(): number;
     _sk_toggle_mute(channel: number): void;

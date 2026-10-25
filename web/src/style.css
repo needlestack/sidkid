@@ -115,6 +115,12 @@ select {
   max-width: 280px;
 }
 
+a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .button {
   background: var(--accent);
   border-color: var(--accent);

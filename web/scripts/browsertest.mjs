@@ -154,6 +154,16 @@ try {
           (result.problems.length ? `; ${result.problems.join('; ')}` : ''),
     );
   }
+  // --- tables: splitting into programs and laying out again is lossless ----
+  for (const { file } of EXAMPLE_INDEX) {
+    const name = file.replace(/\.sng$/, '');
+    const result = await page.evaluate((url) => window.tableRoundTrip(url), `examples/${file}`);
+    report(
+      result && result.problems.length === 0,
+      `tables  ${name.padEnd(16)}`,
+      !result ? 'did not load' : `${result.counts.join('/')} programs` + (result.problems.length ? `; ${result.problems.join('; ')}` : ''),
+    );
+  }
   await page.close();
 
   // --- 2. UI -----------------------------------------------------------------
@@ -213,6 +223,59 @@ try {
   await ui.screenshot({ path: `${OUT}/${BROWSER}-settings.png`, fullPage: true });
 
   report(errors.length === 0, 'ui without errors', errors.join(' | '));
+
+  // --- 3. Table maker -------------------------------------------------------
+  const tm = await browser.newPage();
+  const tmErrors = [];
+  tm.on('pageerror', (err) => tmErrors.push(err.message));
+  tm.on('console', (msg) => msg.type() === 'error' && tmErrors.push(msg.text()));
+  await tm.setViewport({ width: 1180, height: 900, deviceScaleFactor: 2 });
+  await tm.goto(`${base}tables.html`);
+  await tm.evaluate(() => localStorage.clear());
+  await tm.reload();
+  await tm.waitForFunction(() => window.tableMaker?.ready(), { timeout: 5000 });
+  report(true, 'tables page loads and traces a note');
+
+  // The Major arpeggio preset: steps 1-5, then loops back to step 2
+  await tm.click('#program-list li:nth-child(3) button');
+  await tm.waitForFunction(() => window.tableMaker.idle());
+  const order = await tm.evaluate(() => window.tableMaker.frameSteps().slice(0, 10).join(','));
+  report(order === '0,1,2,3,4,1,2,3,4,1', 'tables graph follows the program loop', order);
+
+  // Editing step 2 from +4 to +3 semitones changes the traced pitch
+  const pitch = () => tm.evaluate(() => {
+    const t = window.tableMaker.trace();
+    return Math.round(12 * Math.log2(t.freq[1] / t.freq[0]));
+  });
+  const before = await pitch();
+  await tm.$eval('.step[data-step="1"] input[type=number]', (input) => {
+    input.value = '3';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await tm.waitForFunction(() => {
+    const t = window.tableMaker.trace();
+    return Math.round(12 * Math.log2(t.freq[1] / t.freq[0])) === 3;
+  }, { timeout: 2000 }).catch(() => {});
+  const after = await pitch();
+  report(before === 4 && after === 3, 'tables edit changes the trace', `+${before} → +${after} semitones`);
+
+  // Playing a key runs the program in the worklet: its steps light up
+  await tm.keyboard.down('q');
+  await tm.waitForSelector('.step.live', { timeout: 3000 })
+    .then(() => report(true, 'tables test note runs the program'), () => report(false, 'tables test note runs the program'));
+  await tm.keyboard.up('q');
+
+  await tm.select('#examples', 'cabrinigreen.sng');
+  await tm.waitForFunction(() => window.tableMaker.state().instruments.length > 0, { timeout: 5000 });
+  const loaded = await tm.evaluate(() => window.tableMaker.state().programs.map((l) => l.length).join('/'));
+  report(true, 'tables loads a song', `${loaded} programs`);
+  await colorScheme(tm, 'dark');
+  await tm.screenshot({ path: `${OUT}/${BROWSER}-tables-dark.png` });
+  await colorScheme(tm, 'light');
+  await tm.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+  const overflow = await tm.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  report(overflow <= 0, 'tables fits a phone screen', overflow > 0 ? `${overflow}px too wide` : '');
+  report(tmErrors.length === 0, 'tables without errors', tmErrors.join(' | '));
 } finally {
   await browser.close();
   server.httpServer.close();

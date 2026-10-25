@@ -67,6 +67,31 @@ int sk_scan(int subsong, int maxframes, unsigned *out, int maxevents);
 // Fills out with exactly n samples, running frames as needed.
 void sk_render(short *out, int n);
 
+// Playing single notes, for trying out sounds. These work while no song is
+// playing (a playing song is stopped). Notes are 0 (C-0) to 94 (A#7).
+
+// Stops any song and resets the player, leaving the loaded song as it is.
+void sk_reset(void);
+
+// Replaces table (0 wave, 1 pulse, 2 filter, 3 speed) with length rows.
+void sk_set_table(int table, const unsigned char *left, const unsigned char *right, int length);
+
+// Sets instrument num (1-63). wave, pulse, filter and speed are 1-based
+// table positions, 0 for none.
+void sk_set_instrument(int num, int ad, int sr, int wave, int pulse, int filter, int speed, int vibdelay, int gatetimer, int firstwave);
+
+// Starts a note on a voice with an instrument, as GoatTracker's jam mode.
+// It sounds after the instrument's gate timer, plus a frame.
+void sk_note_on(int voice, int note, int num);
+void sk_note_off(int voice);
+
+// Runs one frame of the playroutine without rendering audio.
+void sk_tick(void);
+
+// The 1-based table position a voice is at (0 = not running). The filter
+// is shared, so its position is the same for every voice.
+int sk_table_pos(int voice, int table);
+
 // The 25 SID register values written by the last frame.
 const unsigned char *sk_sidregs(void);
 

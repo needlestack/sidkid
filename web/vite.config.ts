@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       // test.html is the hook for scripts/browsertest.mjs (npm test)
-      input: mode === 'test' ? ['index.html', 'test.html'] : ['index.html'],
+      input: mode === 'test' ? ['index.html', 'tables.html', 'test.html'] : ['index.html', 'tables.html'],
     },
   },
   resolve: {

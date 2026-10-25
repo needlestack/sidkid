@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIDKid Table Maker</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237c6cf2'/><path d='M4 11V5l4 3 4-3v6' stroke='white' stroke-width='1.6' fill='none'/></svg>" />
+  </head>
+  <body class="tablemaker">
+    <header class="topbar">
+      <div class="brand">SIDKid <span>Table maker</span></div>
+      <nav class="files">
+        <a class="button secondary" href="./">Song player</a>
+        <select id="examples" aria-label="Load the tables of an example song">
+          <option value="">Tables from an example song…</option>
+        </select>
+        <button id="open" class="button">Open .sng…</button>
+        <input id="file" type="file" accept=".sng" hidden />
+      </nav>
+    </header>
+
+    <main>
+      <p class="intro">
+        Tables are tiny programs the SID player runs 50 times a second while a note plays. Each step changes the sound a little: a
+        <b>wave</b> program picks the waveform and pitch, a <b>pulse</b> program shapes the pulse width, and a <b>filter</b> program moves
+        the filter. Instruments, which come next, point at these programs.
+      </p>
+
+      <div class="kinds segmented" id="kinds" role="tablist">
+        <button data-kind="0" class="on" role="tab">Wave <span class="count"></span></button>
+        <button data-kind="1" role="tab">Pulse <span class="count"></span></button>
+        <button data-kind="2" role="tab">Filter <span class="count"></span></button>
+      </div>
+
+      <div class="tm-grid">
+        <aside class="card programs">
+          <header class="card-head">
+            <h2>Programs</h2>
+            <span class="hint" id="rows-used"></span>
+          </header>
+          <ul id="program-list"></ul>
+          <div class="new-program">
+            <select id="new-program" aria-label="New program">
+              <option value="">+ New program…</option>
+            </select>
+          </div>
+          <p class="hint" id="source"></p>
+        </aside>
+
+        <section class="editor" id="editor">
+          <div class="card">
+            <header class="card-head program-head">
+              <input id="program-name" class="name-input" aria-label="Program name" spellcheck="false" />
+              <div class="tools">
+                <button id="duplicate" class="button secondary">Duplicate</button>
+                <button id="delete" class="button secondary danger">Delete</button>
+              </div>
+            </header>
+            <p class="uses" id="uses" hidden></p>
+            <div class="graph-head">
+              <span class="hint" id="graph-hint">What the player does, frame by frame, when a note is held</span>
+              <div class="segmented small" id="span">
+                <button data-frames="50">1 s</button>
+                <button data-frames="100" class="on">2 s</button>
+                <button data-frames="200">4 s</button>
+              </div>
+            </div>
+            <div class="graph">
+              <canvas id="graph"></canvas>
+              <div class="tip" id="graph-tip" hidden></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <header class="card-head">
+              <h2>Steps <span class="hint">each runs for one frame (1/50 s) unless it says otherwise</span></h2>
+            </header>
+            <ol class="step-list" id="steps"></ol>
+            <div class="step-end">
+              <button id="add-step" class="button secondary">+ Add step</button>
+              <label class="field inline">
+                <span>Then</span>
+                <select id="next"></select>
+              </label>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="tryit" id="tryit">
+      <div class="tryit-inner">
+        <div class="keyboard-wrap">
+          <div class="octave">
+            <button id="octave-down" aria-label="Octave down" title="Octave down">−</button>
+            <span id="octave-label">C-3</span>
+            <button id="octave-up" aria-label="Octave up" title="Octave up">+</button>
+          </div>
+          <div class="keyboard" id="keyboard" aria-label="Test keyboard"></div>
+        </div>
+        <div class="test-sound">
+          <label class="field" id="test-like-field" title="Hear this program the way the song's instrument plays it, with its envelope and other programs"><span>Sound</span><select id="test-like"></select></label>
+          <label class="field" id="test-wave-field"><span>Wave</span><select id="test-wave"></select></label>
+          <label class="field" id="test-pulse-field"><span>Pulse</span><select id="test-pulse"></select></label>
+          <label class="field" id="test-filter-field"><span>Filter</span><select id="test-filter"></select></label>
+          <div class="field adsr-field" id="env-field" title="Envelope of the test note: attack, decay, sustain, release (0-F)">
+            <span>Envelope</span>
+            <div class="adsr-inputs">
+              <input id="env-a" type="number" min="0" max="15" aria-label="Attack" />
+              <input id="env-d" type="number" min="0" max="15" aria-label="Decay" />
+              <input id="env-s" type="number" min="0" max="15" aria-label="Sustain" />
+              <input id="env-r" type="number" min="0" max="15" aria-label="Release" />
+            </div>
+          </div>
+          <div class="field">
+            <span>Chip</span>
+            <div class="segmented small" id="model">
+              <button data-model="0" class="on">6581</button>
+              <button data-model="1">8580</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="keys">Play with the mouse or keys Z S X D C V… (lower octave) and Q 2 W 3 E R… (upper). Hold to sustain, let go to release.</p>
+    </footer>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script type="module" src="/src/tablemaker.ts"></script>
+  </body>
+</html>

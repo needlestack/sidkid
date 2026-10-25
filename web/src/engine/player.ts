@@ -2,6 +2,8 @@
 
 import workletUrl from './worklet.ts?worker&url';
 import { wasmBytes } from './wasm';
+import type { Instrument } from '../song';
+import type { TableData } from './configure';
 import { DEFAULT_SETTINGS, type Command, type Event, type ProcessorOptions, type Settings, type SongInfo, type Status } from './protocol';
 
 export const SAMPLE_RATE = 48000;
@@ -124,6 +126,24 @@ export class Player {
       this.pendingPings.set(id, resolve);
       this.send({ type: 'ping', id });
     });
+  }
+
+  /** Replaces the wave, pulse, filter and speed tables of the loaded song. */
+  setTables(tables: TableData[]) {
+    this.send({ type: 'tables', tables });
+  }
+
+  setInstrument(num: number, instrument: Instrument) {
+    this.send({ type: 'instrument', num, instrument });
+  }
+
+  /** Plays a note (0 = C-0) on a voice while no song is playing. */
+  noteOn(voice: number, note: number, instrument: number) {
+    this.send({ type: 'noteOn', voice, note, instrument });
+  }
+
+  noteOff(voice: number) {
+    this.send({ type: 'noteOff', voice });
   }
 
   setModel(model: number) {
