@@ -834,9 +834,12 @@ function routingText(voices: number): string {
 }
 
 function warning(kind: number, p: Program, i: number): string {
-  if (kind === WAVE && i === 0) {
-    const t = waveAction(p.steps[0]).type;
-    if (t === 'keep' || t === 'wait') return ' — as a first step this can make notes go missing; start with Set waveform';
+  if (kind === WAVE) {
+    // Until a Set waveform step runs, a note has the instrument's first
+    // waveform, which is normally the silent test bit (a clean restart)
+    const firstWave = p.steps.findIndex((st) => waveAction(st).type === 'wave');
+    if (firstWave < 0 && i === 0) return ' — this program never sets a waveform, so its notes are silent: add a Set waveform step';
+    if (firstWave > 0 && i === 0) return ' — silent until step ' + (unitOf(firstWave) + 1) + ' sets a waveform: a note starts on the instrument’s first waveform, which is normally silent';
   }
   if (kind === FILTER && filterAction(p.steps[i]).type !== 'setup' && !setupBefore(p, i)) {
     return ' — no filter set-up before this step: on its own it only moves the cutoff of whatever filter setting is already playing (none at the start of a song, so you won’t hear it)';
