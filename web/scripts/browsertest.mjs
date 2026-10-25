@@ -60,7 +60,12 @@ const browser = await puppeteer.launch(
         headless: true,
         extraPrefsFirefox: { 'media.autoplay.default': 0, 'media.autoplay.blocking_policy': 0 },
       }
-    : { executablePath: CHROME, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] },
+    : {
+        executablePath: CHROME,
+        headless: true,
+        // CI containers can't use Chrome's sandbox
+        args: ['--autoplay-policy=no-user-gesture-required', ...(process.env.CI ? ['--no-sandbox'] : [])],
+      },
 );
 console.log(`  ${BROWSER} ${await browser.version()}`);
 

@@ -35,6 +35,12 @@ npm run dev   # http://localhost:5173 (run `make wasm` in engine/ first)
 npm test      # headless Chrome: worklet output vs. native engine, plus UI checks
 ```
 
+## Deployment
+
+`.github/workflows/deploy.yml` builds the engine with Emscripten, runs the
+engine and browser tests, and publishes `web/dist` to GitHub Pages on every
+push to `main`.
+
 ## License
 
-GPL v2, as GoatTracker (see `vendor/gt2/copying`).
+GPL v2, as GoatTracker (see `LICENSE`).
