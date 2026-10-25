@@ -265,6 +265,13 @@ try {
     .then(() => report(true, 'tables test note runs the program'), () => report(false, 'tables test note runs the program'));
   await tm.keyboard.up('q');
 
+  // Note keys still play after using a dropdown, which keeps focus
+  await tm.focus('#next');
+  await tm.keyboard.down('e');
+  const playedFromSelect = await tm.$('.key.down');
+  await tm.keyboard.up('e');
+  report(!!playedFromSelect && (await tm.$eval('#next', (el) => el.value)) !== '', 'tables note keys work with a dropdown focused');
+
   // A quick tap, released before the note starts sounding, still fades out
   await tm.keyboard.down('w');
   await tm.keyboard.up('w');

@@ -1527,9 +1527,13 @@ function renderKeyboard() {
   $('octave-label').textContent = `${noteName(base).replace('-', '')}–${noteName(base + 24).replace('-', '')}`;
 }
 
+/**
+ * Only fields you type into keep the keys; on everything else (dropdowns,
+ * buttons, sliders) the keys play notes.
+ */
 function typing(e: KeyboardEvent) {
   const t = e.target as HTMLElement;
-  return t.matches('input:not([type=range]), select, textarea') || t.isContentEditable;
+  return t.matches('input:not([type=range]):not([type=checkbox]):not([type=radio]), textarea') || t.isContentEditable;
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1540,6 +1544,12 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     silence();
+    if (typing(e)) (e.target as HTMLElement).blur();
+    return;
+  }
+  // Enter finishes typing a value and hands the keys back to the keyboard
+  if (e.key === 'Enter' && typing(e)) {
+    (e.target as HTMLElement).blur();
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || typing(e) || e.repeat) return;
