@@ -9,6 +9,7 @@ import type { TableData } from './engine/configure';
 import { loadModel, Player, saveModel } from './engine/player';
 import { adsrEditor, type Env } from './adsr';
 import { envelope } from './envelope';
+import { filterCurve, modeIcon } from './filtercurve';
 import { waveIcon, waveTone } from './waveicon';
 import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
 import { noteName, parseSong, type Instrument } from './song';
@@ -267,36 +268,69 @@ function remap(kind: number, program: Program, map: (step: number) => number) {
   }
 }
 
+function insertSteps(at: number, steps: Step[]) {
+  const p = current()!;
+  before();
+  p.steps.splice(at, 0, ...steps);
+  remap(state.kind, p, (i) => (i >= at ? i + steps.length : i));
+  changed(true);
+}
+
 function insertStep(at: number, step: Step) {
+  insertSteps(at, [step]);
+}
+
+function removeSteps(at: number, count: number) {
   const p = current()!;
   before();
-  p.steps.splice(at, 0, step);
-  remap(state.kind, p, (i) => (i >= at ? i + 1 : i));
+  p.steps.splice(at, count);
+  // References to removed steps move on to the one after them
+  remap(state.kind, p, (i) => (i >= at + count ? i - count : i >= at ? at : i));
   changed(true);
 }
 
-function removeStep(at: number) {
+/** Swaps the shown step u with the one before (by -1) or after (by 1), with all their rows. */
+function moveUnit(u: number, by: -1 | 1) {
   const p = current()!;
+  const units = unitsOf(p);
+  const other = u + by;
+  if (other < 0 || other >= units.length) return;
   before();
-  p.steps.splice(at, 1);
-  // References to the removed step move on to the one after it
-  remap(state.kind, p, (i) => (i > at ? i - 1 : i));
+  const order = units.flatMap((_, i) => units[i === u ? other : i === other ? u : i]);
+  const where = new Map(order.map((old, i) => [old, i]));
+  p.steps = order.map((old) => p.steps[old]);
+  remap(state.kind, p, (i) => where.get(i) ?? i);
   changed(true);
 }
 
-function moveStep(from: number, to: number) {
-  const p = current()!;
-  if (to < 0 || to >= p.steps.length) return;
-  before();
-  const [s] = p.steps.splice(from, 1);
-  p.steps.splice(to, 0, s);
-  remap(state.kind, p, (i) => {
-    if (i === from) return to;
-    if (from < to && i > from && i <= to) return i - 1;
-    if (from > to && i >= to && i < from) return i + 1;
-    return i;
-  });
-  changed(true);
+/**
+ * The steps as shown: rows, except that a filter's set-up row and the cutoff
+ * row after it run in the same frame, so they show as one step (unless
+ * something jumps straight to the cutoff row).
+ */
+function unitsOf(p: Program, kind = state.kind): number[][] {
+  const out: number[][] = [];
+  const targeted = (row: number) => (p.next?.program === p && p.next.step === row) || state.instruments.some((i) => i.targets[kind]?.program === p && i.targets[kind]!.step === row);
+  for (let i = 0; i < p.steps.length; i++) {
+    const pair = kind === FILTER && i + 1 < p.steps.length && filterAction(p.steps[i]).type === 'setup' && filterAction(p.steps[i + 1]).type === 'cutoff' && !targeted(i + 1);
+    out.push(pair ? [i, ++i] : [i]);
+  }
+  return out;
+}
+
+/** The shown step a row of the edited program belongs to. */
+function unitOf(row: number): number {
+  const p = current();
+  if (!p) return row;
+  const u = unitsOf(p).findIndex((rows) => rows.includes(row));
+  return u < 0 ? row : u;
+}
+
+/** The first row of the shown step a row belongs to. */
+function unitStart(row: number): number {
+  const p = current();
+  if (!p) return row;
+  return unitsOf(p).find((rows) => rows.includes(row))?.[0] ?? row;
 }
 
 /** Points the instrument being edited at a program (or none) for the tab's kind. */
@@ -540,7 +574,7 @@ function renderEditor() {
   const others = usersOf(p).filter((i) => i !== ins);
   const uses = $('uses');
   const parts: string[] = [];
-  if (t.step) parts.push(`${insName(ins!)} starts at step ${t.step + 1}.`);
+  if (t.step) parts.push(`${insName(ins!)} starts at step ${unitOf(t.step) + 1}.`);
   if (others.length) parts.push(`Also used by ${others.map(insName).join(', ')}: changes here change ${others.length === 1 ? 'it' : 'them'} too. Duplicate it to change it just for ${insName(ins!)}.`);
   uses.hidden = !parts.length;
   uses.textContent = parts.join(' ');
@@ -575,7 +609,7 @@ function renderNext() {
   if (!p) return;
   const select = $<HTMLSelectElement>('next');
   select.replaceChildren(new Option('Stop, keeping the sound as it is', 'stop'));
-  p.steps.forEach((_, i) => select.append(new Option(i === 0 ? 'Loop back to the start' : `Loop back to step ${i + 1}`, `loop:${i}`)));
+  unitsOf(p).forEach(([i], u) => select.append(new Option(u === 0 ? 'Loop back to the start' : `Loop back to step ${u + 1}`, `loop:${i}`)));
   if (p.next?.program === p && p.next.step === p.steps.length) {
     select.append(new Option('Jump onto its own end row (a GoatTracker quirk)', `loop:${p.steps.length}`));
   }
@@ -603,7 +637,7 @@ let liveStep = -1;
 function renderSteps() {
   const p = current()!;
   const list = $('steps');
-  list.replaceChildren(...p.steps.map((s, i) => stepRow(p, s, i)));
+  list.replaceChildren(...unitsOf(p).map((rows, u) => stepRow(p, rows, u)));
   if (!p.steps.length) {
     const empty = document.createElement('li');
     empty.className = 'empty';
@@ -658,19 +692,21 @@ function convertStep(kind: number, s: Step, type: string): Step {
   return filterStep({ type: 'sweep', frames: 32, speed: 2 });
 }
 
-function stepRow(p: Program, s: Step, i: number): HTMLLIElement {
+function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
   const kind = state.kind;
+  const i = rows[0];
+  const s = p.steps[i];
   const li = document.createElement('li');
   li.className = 'step';
   li.dataset.step = String(i);
-  li.style.setProperty('--hue', String(stepHue(i)));
+  li.style.setProperty('--hue', String(stepHue(u)));
   li.classList.toggle('live', i === liveStep);
 
   const lead = document.createElement('span');
   lead.className = 'step-lead';
   const num = document.createElement('span');
   num.className = 'step-num';
-  num.textContent = String(i + 1);
+  num.textContent = String(u + 1);
   lead.append(num);
   const loopsHere = p.next?.program === p && p.next.step === i;
   if (loopsHere) {
@@ -680,12 +716,21 @@ function stepRow(p: Program, s: Step, i: number): HTMLLIElement {
 
   const type = document.createElement('select');
   type.className = 'step-type';
-  type.setAttribute('aria-label', `Step ${i + 1} type`);
+  type.setAttribute('aria-label', `Step ${u + 1} type`);
   for (const [value, label] of STEP_TYPES[kind]) type.append(new Option(label, value));
   type.value = stepType(kind, s);
   type.addEventListener('change', () => {
     before();
-    p.steps[i] = convertStep(kind, s, type.value);
+    const next = convertStep(kind, s, type.value);
+    p.steps[i] = next;
+    // A filter set-up shows with its cutoff: add one, or drop it for other types
+    if (kind === FILTER && rows.length === 2 && type.value !== 'setup') {
+      p.steps.splice(i + 1, 1);
+      remap(kind, p, (r) => (r > i + 1 ? r - 1 : r > i ? i : r));
+    } else if (kind === FILTER && rows.length === 1 && type.value === 'setup') {
+      p.steps.splice(i + 1, 0, filterStep({ type: 'cutoff', cutoff: 0x80 }));
+      remap(kind, p, (r) => (r > i ? r + 1 : r));
+    }
     changed(true);
   });
 
@@ -696,29 +741,31 @@ function stepRow(p: Program, s: Step, i: number): HTMLLIElement {
   text.className = 'step-text';
   const raw = document.createElement('code');
   raw.className = 'step-raw';
-  raw.title = 'The GoatTracker table row: left and right bytes';
+  raw.title = 'The GoatTracker table rows: left and right bytes';
   const refresh = () => {
-    const st = p.steps[i];
-    text.textContent = describeStep(kind, st) + warning(kind, p, i);
-    raw.textContent = `${hex(st.left)} ${hex(st.right)}`;
+    text.textContent = describeUnit(kind, p, rows) + warning(kind, p, i);
+    raw.textContent = rows.map((r) => `${hex(p.steps[r].left)} ${hex(p.steps[r].right)}`).join(' · ');
   };
   // Field edits change the step in place, so a slider being dragged stays put
-  const update = (next: Step) => {
+  const update = (next: Step, row = i) => {
     before();
-    p.steps[i] = next;
+    p.steps[row] = next;
     refresh();
     changed(false);
   };
-  stepFields(kind, s, fields, update, () => p.steps[i]);
+  if (kind === FILTER) filterFields(p, rows, fields, update);
+  else stepFields(kind, s, fields, update, () => p.steps[i]);
   refresh();
 
+  const n = rows.length;
+  const units = unitsOf(p);
   const tools = document.createElement('div');
   tools.className = 'step-tools';
   tools.append(
-    toolButton('↑', 'Move up', () => moveStep(i, i - 1), i === 0),
-    toolButton('↓', 'Move down', () => moveStep(i, i + 1), i === p.steps.length - 1),
-    toolButton('⧉', 'Duplicate step', () => insertStep(i + 1, { ...p.steps[i] })),
-    toolButton('×', 'Delete step', () => removeStep(i)),
+    toolButton('↑', 'Move up', () => moveUnit(u, -1), u === 0),
+    toolButton('↓', 'Move down', () => moveUnit(u, 1), u === units.length - 1),
+    toolButton('⧉', 'Duplicate step', () => insertSteps(i + n, rows.map((r) => ({ ...p.steps[r] })))),
+    toolButton('×', 'Delete step', () => removeSteps(i, n)),
   );
 
   const typeField = document.createElement('label');
@@ -737,6 +784,22 @@ function stepRow(p: Program, s: Step, i: number): HTMLLIElement {
   li.addEventListener('pointerenter', () => setHoverStep(i));
   li.addEventListener('pointerleave', () => setHoverStep(-1));
   return li;
+}
+
+/** Describes a shown step, which may be a filter set-up with its cutoff. */
+function describeUnit(kind: number, p: Program, rows: number[]): string {
+  if (rows.length === 2) {
+    const setup = filterAction(p.steps[rows[0]]) as { type: 'setup'; passband: number; resonance: number; voices: number };
+    const cutoff = filterAction(p.steps[rows[1]]) as { type: 'cutoff'; cutoff: number };
+    return `${passbandName(setup.passband)}, cutoff ${cutoff.cutoff}, resonance ${setup.resonance}${routingText(setup.voices)}`;
+  }
+  return describeStep(kind, p.steps[rows[0]]);
+}
+
+function routingText(voices: number): string {
+  if (voices === 1) return '';
+  if (!voices) return ' · no voice filtered';
+  return ` · filters voice${voices & (voices - 1) ? 's' : ''} ${[1, 2, 3].filter((v) => voices & (1 << (v - 1))).join(', ')}`;
 }
 
 function warning(kind: number, p: Program, i: number): string {
@@ -785,8 +848,7 @@ type Update = (s: Step) => void;
 
 function stepFields(kind: number, s: Step, box: HTMLElement, update: Update, get: () => Step) {
   if (kind === WAVE) waveFields(s, box, update, get);
-  else if (kind === PULSE) pulseFields(s, box, update, get);
-  else filterFields(s, box, update, get);
+  else pulseFields(s, box, update, get);
 }
 
 function waveFields(s: Step, box: HTMLElement, update: Update, get: () => Step) {
@@ -901,43 +963,151 @@ function pulseFields(s: Step, box: HTMLElement, update: Update, get: () => Step)
   }
 }
 
-function filterFields(s: Step, box: HTMLElement, update: Update, get: () => Step) {
-  const a = filterAction(s);
-  type Setup = { type: 'setup'; passband: number; resonance: number; voices: number };
-  const setup = () => filterAction(get()) as Setup;
+type FilterSetup = { type: 'setup'; passband: number; resonance: number; voices: number };
+
+// Filter modes: one filter, whose low, band and high pass outputs can be mixed
+const BASIC_MODES: [number, string, string][] = [
+  [FILTER_LOW, 'Low', 'Low pass: lets the bass through, muffles the highs'],
+  [FILTER_BAND, 'Band', 'Band pass: keeps a band around the cutoff, nasal and thin'],
+  [FILTER_HIGH, 'High', 'High pass: cuts the bass, keeps the fizz'],
+  [FILTER_LOW | FILTER_HIGH, 'Notch', 'Low and high pass together: everything but a dip at the cutoff'],
+];
+const MIXED_MODES: [number, string][] = [
+  [FILTER_LOW | FILTER_BAND, 'Low + Band: low pass with a bump at the cutoff'],
+  [FILTER_BAND | FILTER_HIGH, 'Band + High: high pass with a bump at the cutoff'],
+  [FILTER_LOW | FILTER_BAND | FILTER_HIGH, 'All three: nearly unfiltered, with resonance'],
+  [0, 'None: filtered voices go silent'],
+];
+
+/** The most recent filter set-up before a row, which a cutoff step works with. */
+function setupBefore(p: Program, row: number): FilterSetup | null {
+  for (let r = row - 1; r >= 0; r--) {
+    const a = filterAction(p.steps[r]);
+    if (a.type === 'setup') return a;
+  }
+  return null;
+}
+
+function filterFields(p: Program, rows: number[], box: HTMLElement, update: (s: Step, row?: number) => void) {
+  const i = rows[0];
+  const a = filterAction(p.steps[i]);
   if (a.type === 'setup') {
-    box.append(
-      toggles(
-        [
-          [FILTER_LOW, 'Low', 'Low pass: lets the bass through, muffles the highs', ''],
-          [FILTER_BAND, 'Band', 'Band pass: keeps a band around the cutoff, nasal and thin', ''],
-          [FILTER_HIGH, 'High', 'High pass: cuts the bass, keeps the fizz', ''],
-        ],
-        a.passband,
-        (bits) => (update(filterStep({ ...setup(), passband: bits })), true),
-        0x70,
-      ),
-      slider(a.resonance, 0, 15, (n) => `res ${n}`, (n) => update(filterStep({ ...setup(), resonance: n })), 'Resonance: how much the filter rings around the cutoff', 'short'),
-      toggles(
-        [
-          [1, 'V1', 'Voice 1 goes through the filter (the test note plays on voice 1)', ''],
-          [2, 'V2', 'Voice 2 goes through the filter', ''],
-          [4, 'V3', 'Voice 3 goes through the filter', ''],
-        ],
-        a.voices,
-        (bits) => (update(filterStep({ ...setup(), voices: bits })), true),
-        0x07,
-      ),
-    );
+    const setup = () => filterAction(p.steps[i]) as FilterSetup;
+    const cutoffRow = rows[1];
+    const curve = filterCurve({
+      get: () => ({ ...setup(), cutoff: cutoffRow !== undefined ? filterAction(p.steps[cutoffRow]).type === 'cutoff' ? p.steps[cutoffRow].right : null : null }),
+      change: ({ cutoff, resonance }) => {
+        if (resonance !== undefined) update(filterStep({ ...setup(), resonance }), i);
+        if (cutoff === undefined) return;
+        if (cutoffRow !== undefined) update(filterStep({ type: 'cutoff', cutoff }), cutoffRow);
+        // A set-up without its own cutoff gets one
+        else insertStep(i + 1, filterStep({ type: 'cutoff', cutoff }));
+      },
+      done: () => blip(),
+      resonance: true,
+    });
+    const modes = modePicker(a.passband, (bits) => {
+      update(filterStep({ ...setup(), passband: bits }), i);
+      renderSteps();
+      blip();
+    });
+    const controls = document.createElement('div');
+    controls.className = 'filter-controls';
+    controls.append(modes, routingField(a.voices, (voices) => {
+      update(filterStep({ ...setup(), voices }), i);
+      renderSteps();
+      blip();
+    }));
+    box.append(curve, controls);
   } else if (a.type === 'cutoff') {
-    box.append(slider(a.cutoff, 0, 255, (n) => String(n), (n) => update(filterStep({ type: 'cutoff', cutoff: n })), 'Cutoff: low values are dark and muffled, high values bright'));
+    const shape = setupBefore(p, i);
+    box.append(
+      filterCurve({
+        get: () => ({ passband: shape?.passband ?? FILTER_LOW, resonance: shape?.resonance ?? 0, cutoff: p.steps[i].right }),
+        change: ({ cutoff }) => cutoff !== undefined && update(filterStep({ type: 'cutoff', cutoff }), i),
+        done: () => blip(),
+        resonance: false,
+        borrowed: true,
+      }),
+    );
   } else {
     type Sweep = { type: 'sweep'; frames: number; speed: number };
+    const get = () => filterAction(p.steps[i]) as Sweep;
     box.append(
-      numberField('for', a.frames, 1, 127, 'frames', (n) => update(filterStep({ ...(filterAction(get()) as Sweep), frames: n })), 'How long the sweep lasts'),
-      numberField('by', a.speed, -128, 127, 'a frame', (n) => update(filterStep({ ...(filterAction(get()) as Sweep), speed: n })), 'Change in cutoff each frame, out of 255. Negative closes the filter.'),
+      numberField('for', a.frames, 1, 127, 'frames', (n) => update(filterStep({ ...get(), frames: n })), 'How long the sweep lasts'),
+      numberField('by', a.speed, -128, 127, 'a frame', (n) => update(filterStep({ ...get(), speed: n })), 'Change in cutoff each frame, out of 255. Negative closes the filter (darker), positive opens it (brighter).'),
     );
   }
+}
+
+/** Filter mode buttons with pictures of their curves, and a list of the other mixes. */
+function modePicker(passband: number, change: (bits: number) => void): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'wave-picker';
+  const buttons = document.createElement('span');
+  buttons.className = 'toggles';
+  for (const [bits, name, title] of BASIC_MODES) {
+    const b = document.createElement('button');
+    b.className = 'toggle wave-choice';
+    b.title = title;
+    b.setAttribute('aria-pressed', String(passband === bits));
+    b.append(modeIcon(bits), name);
+    b.addEventListener('click', () => change(bits));
+    buttons.append(b);
+  }
+  const more = document.createElement('select');
+  more.className = 'mixes';
+  more.setAttribute('aria-label', 'Other filter modes');
+  more.append(new Option('More…', ''));
+  for (const [bits, name] of MIXED_MODES) more.append(new Option(name, String(bits)));
+  const basic = BASIC_MODES.some(([bits]) => bits === passband);
+  more.value = basic ? '' : String(passband);
+  more.classList.toggle('on', !basic);
+  more.addEventListener('change', () => {
+    if (more.value !== '') change(Number(more.value));
+  });
+  wrap.append(buttons, more);
+  return wrap;
+}
+
+/**
+ * Which voices go through the filter. The test note plays on voice 1, so
+ * "this voice" is voice 1 here; the other voices are behind a button.
+ */
+function routingField(voices: number, change: (voices: number) => void): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'routing';
+  const own = segmented(
+    [
+      [1, 'Filter this voice', 'The note this instrument plays goes through the filter'],
+      [0, 'Off', 'This instrument’s voice skips the filter'],
+    ],
+    voices & 1,
+    (bit) => change((voices & ~1) | bit),
+  );
+  const others = toggles(
+    [
+      [2, 'V2', 'Also filter voice 2 (another instrument’s note)', ''],
+      [4, 'V3', 'Also filter voice 3 (another instrument’s note)', ''],
+    ],
+    voices,
+    (bits) => (change((voices & 1) | bits), true),
+    0x06,
+  );
+  others.classList.add('minor');
+  others.hidden = !(voices & 6);
+  const reveal = document.createElement('button');
+  reveal.className = 'reveal';
+  reveal.textContent = '⋯';
+  reveal.title = 'Other voices: the filter is shared, so it can filter other instruments’ notes too';
+  reveal.setAttribute('aria-label', reveal.title);
+  reveal.hidden = !others.hidden;
+  reveal.addEventListener('click', () => {
+    others.hidden = false;
+    reveal.hidden = true;
+  });
+  wrap.append(own, reveal, others);
+  return wrap;
 }
 
 const BASIC_WAVES: [number, string, string][] = [
@@ -1261,7 +1431,7 @@ function drawGraph() {
   const settled = ran < 0 ? -1 : steps.findIndex((v, f) => f > ran && (v === -2 || (v >= 0 && steps[f - 1] >= 0 && v < steps[f - 1])));
   // A program that stops holds its last step (a filter's setup and cutoff steps run in one frame)
   const held = settled > 0 && steps[settled] === -2 ? Math.max(steps[settled - 1], (current()?.steps.length ?? 0) - 1) : -1;
-  const settledText = settled < 0 ? '' : held >= 0 ? `hold step ${held + 1}` : `repeat from step ${steps[settled] + 1}`;
+  const settledText = settled < 0 ? '' : held >= 0 ? `hold step ${unitOf(held) + 1}` : `repeat from step ${unitOf(steps[settled]) + 1}`;
   const labelLane = kind === WAVE ? 'Wave' : kind === PULSE ? 'Width' : 'Cutoff';
 
   if (t && kind === WAVE) {
@@ -1437,7 +1607,7 @@ function drawGraph() {
           }
           return;
         }
-        const hue = stepHue(s);
+        const hue = stepHue(unitOf(s));
         const on = hoverStep < 0 ? from < repeating : hoverStep === s;
         ctx.fillStyle = `hsl(${hue} ${c.stepS} ${c.stepL})`;
         ctx.globalAlpha = on ? 1 : 0.35;
@@ -1445,7 +1615,7 @@ function drawGraph() {
         ctx.globalAlpha = 1;
         if (x(to) - x(from) >= 12) {
           ctx.fillStyle = c.text;
-          ctx.fillText(String(s + 1), (x(from) + x(to)) / 2, y + h / 2);
+          ctx.fillText(String(unitOf(s) + 1), (x(from) + x(to)) / 2, y + h / 2);
         }
       });
       ctx.fillStyle = c.accent;
@@ -1638,11 +1808,11 @@ function graphTip(f: number): string {
   const last = s === -2 ? Math.max(-1, ...steps.slice(0, f).filter((v) => v >= 0).slice(-1)) : -1;
   const stepText =
     s >= 0
-      ? `Step ${s + 1}${again ? ' (repeating)' : ''}: ${describeStep(kind, p.steps[s])}`
+      ? `Step ${unitOf(s) + 1}${again ? ' (repeating)' : ''}: ${describeUnit(kind, p, unitsOf(p)[unitOf(s)])}`
       : s === -1
         ? 'Running another program'
         : last >= 0
-          ? `Stopped: holding step ${last + 1}`
+          ? `Stopped: holding step ${unitOf(last) + 1}`
           : `${kind === FILTER ? 'Filter' : 'Program'} not running`;
   let value = '';
   if (kind === WAVE) {
@@ -1680,7 +1850,7 @@ function graphFrame(e: PointerEvent): number {
     if (f !== graphHover) {
       graphHover = f;
       const s = f >= 0 ? frameSteps()[f] : -1;
-      hoverStep = s >= 0 ? s : -1;
+      hoverStep = s >= 0 ? unitStart(s) : -1;
       for (const row of $('steps').querySelectorAll<HTMLElement>('.step')) row.classList.toggle('hover', Number(row.dataset.step) === hoverStep);
       drawGraph();
     }
@@ -1702,7 +1872,7 @@ function graphFrame(e: PointerEvent): number {
   canvas.addEventListener('click', (e) => {
     const f = graphFrame(e);
     const s = f >= 0 ? frameSteps()[f] : -1;
-    const row = $('steps').querySelector<HTMLElement>(`.step[data-step="${s}"]`);
+    const row = $('steps').querySelector<HTMLElement>(`.step[data-step="${unitStart(s)}"]`);
     if (!row) return;
     row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     row.classList.remove('flash');
@@ -1831,7 +2001,7 @@ function showLive(status: Status) {
     const kind = state.kind;
     const pos = status.tablePos[kind];
     const at = pos ? locate(traced.lists[kind], traced.layouts[kind], pos) : null;
-    if (at && traced.lists[kind][at.program] === current()) step = at.step;
+    if (at && traced.lists[kind][at.program] === current()) step = unitStart(at.step);
   }
   if (step === liveStep) return;
   liveStep = step;
@@ -1843,6 +2013,9 @@ const KEYS: Record<string, number> = {};
 'zsxdcvgbhnjm'.split('').forEach((k, i) => (KEYS[k] = i));
 ',l.;/'.split('').forEach((k, i) => (KEYS[k] = 12 + i));
 'q2w3er5t6y7ui9o0p'.split('').forEach((k, i) => (KEYS[k] = 12 + i));
+
+/** The computer key for each of the 25 keys shown: Z row, then Q row. */
+const KEY_LETTERS = [...'ZSXDCVGBHNJM', ...'Q2W3ER5T6Y7UI'];
 
 function renderKeyboard() {
   const board = $('keyboard');
@@ -1884,13 +2057,22 @@ function renderKeyboard() {
     board.addEventListener('pointerup', end);
     board.addEventListener('pointercancel', end);
   }
+  const labels = $('key-labels');
+  labels.replaceChildren();
   for (const key of board.querySelectorAll<HTMLElement>('.key')) {
-    const n = base + Number(key.dataset.offset);
+    const offset = Number(key.dataset.offset);
+    const n = base + offset;
     key.classList.toggle('down', n === held);
-    key.textContent = n % 12 === 0 ? noteName(n).replace('-', '') : '';
+    // The computer key that plays it
+    key.textContent = KEY_LETTERS[offset] ?? '';
     key.setAttribute('aria-label', noteName(n));
+    if (n % 12 === 0) {
+      const label = document.createElement('span');
+      label.textContent = noteName(n).replace('-', '');
+      label.style.setProperty('--x', key.style.getPropertyValue('--x'));
+      labels.append(label);
+    }
   }
-  $('octave-label').textContent = `${noteName(base).replace('-', '')}–${noteName(base + 24).replace('-', '')}`;
 }
 
 /**
@@ -2001,7 +2183,11 @@ $<HTMLSelectElement>('new-program').addEventListener('change', (e) => {
   const value = select.value;
   select.value = '';
   if (!value) return;
-  if (value === 'empty') addProgram({ name: `${KIND_NAMES[state.kind]} ${programs().length + 1}`, steps: [defaultStep(state.kind)], next: null });
+  if (value === 'empty') {
+    // A filter program starts by setting the filter up, with its cutoff
+    const steps = state.kind === FILTER ? [filterStep({ type: 'setup', passband: FILTER_LOW, resonance: 8, voices: 1 }), filterStep({ type: 'cutoff', cutoff: 0x80 })] : [defaultStep(state.kind)];
+    addProgram({ name: `${KIND_NAMES[state.kind]} ${programs().length + 1}`, steps, next: null });
+  }
   else addProgram(programFromPreset(PRESETS[state.kind][Number(value)]));
   blip();
 });
