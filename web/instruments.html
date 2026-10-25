@@ -79,6 +79,10 @@
           <div class="card" id="steps-card">
             <header class="card-head">
               <h2>Steps <span class="hint">each runs for one frame (1/50 s) unless it says otherwise</span></h2>
+              <label class="field inline" id="start-field" title="Where this instrument starts the program. Starting later skips an intro, such as a drum hit, so one program can serve several instruments.">
+                <span>Instrument starts at</span>
+                <select id="start-at"></select>
+              </label>
             </header>
             <ol class="step-list" id="steps"></ol>
             <div class="step-end">

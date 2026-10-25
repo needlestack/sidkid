@@ -570,7 +570,7 @@ function renderPrograms() {
       const meta = document.createElement('span');
       meta.className = 'program-meta';
       const users = usersOf(p);
-      meta.textContent = [`${p.steps.length} step${p.steps.length === 1 ? '' : 's'}`, p.next ? (p.next.program === p ? 'loops' : 'jumps') : '', users.length ? `in ${users.map(insName).join(', ')}` : 'unused']
+      meta.textContent = [`${p.steps.length} step${p.steps.length === 1 ? '' : 's'}`, p.next ? (p.next.program === p ? 'loops' : `then ${p.next.program.name || 'Untitled'}`) : '', users.length ? `in ${users.map(insName).join(', ')}` : 'unused']
         .filter(Boolean)
         .join(' · ');
       button.append(name, meta);
@@ -614,7 +614,6 @@ function renderEditor() {
   if (others.length) {
     badges.push([`shared with ${others.length === 1 ? insName(others[0]) : `${others.length} others`}`, `Also used by ${others.map(insName).join(', ')}: changes here change them too. Duplicate it to change it just for ${insName(ins!)}.`]);
   }
-  if (t.step) badges.push([`starts at step ${unitOf(t.step) + 1}`, `${insName(ins!)} starts this program partway through`]);
   if (state.kind === PULSE && ins && !usesPulse(ins)) badges.push(['not heard', `${insName(ins)}’s wave program never uses the Pulse waveform, so the width doesn’t change its sound`]);
   $('badges').replaceChildren(
     ...badges.map(([text, title]) => {
@@ -638,11 +637,37 @@ function renderNext() {
   if (p.next?.program === p && p.next.step === p.steps.length) {
     select.append(new Option('Jump onto its own end row (a GoatTracker quirk)', `loop:${p.steps.length}`));
   }
-  if (p.next && p.next.program !== p) {
-    const end = p.next.step === p.next.program.steps.length;
-    select.append(new Option(`Go on to “${p.next.program.name}”, ${end ? 'its end row' : `step ${p.next.step + 1}`}`, 'other'));
+  // Going on into another program: an intro (a drum hit, say) in front of a
+  // body that other instruments share
+  const others = programs().filter((o) => o !== p);
+  if (others.length) {
+    const group = document.createElement('optgroup');
+    group.label = 'Continue with another program';
+    others.forEach((o) => group.append(new Option(`Continue with “${o.name || 'Untitled'}”`, `go:${programs().indexOf(o)}`)));
+    select.append(group);
   }
-  select.value = !p.next ? 'stop' : p.next.program === p ? `loop:${p.next.step}` : 'other';
+  let value = !p.next ? 'stop' : p.next.program === p ? `loop:${p.next.step}` : `go:${programs().indexOf(p.next.program)}`;
+  // Songs can go on into the middle of another program
+  if (p.next && p.next.program !== p && p.next.step !== 0) {
+    const end = p.next.step === p.next.program.steps.length;
+    select.append(new Option(`Continue with “${p.next.program.name}” from ${end ? 'its end' : `step ${p.next.step + 1}`}`, 'other'));
+    value = 'other';
+  }
+  select.value = value;
+  renderStart();
+}
+
+/** Where the instrument starts the program: later starts skip an intro. */
+function renderStart() {
+  const p = current();
+  const t = target();
+  const field = $('start-field');
+  const units = p ? unitsOf(p) : [];
+  field.hidden = !p || !t || units.length < 2;
+  if (field.hidden) return;
+  const select = $<HTMLSelectElement>('start-at');
+  select.replaceChildren(...units.map(([row], u) => new Option(u === 0 ? 'step 1 (the start)' : `step ${u + 1}`, String(row))));
+  select.value = String(unitStart(t!.step));
 }
 
 // --- Rendering: the instrument --------------------------------------------
@@ -727,6 +752,11 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
   li.dataset.step = String(i);
   li.style.setProperty('--hue', String(stepHue(u)));
   li.classList.toggle('live', i === liveStep);
+  const start = target()?.program === p ? target()!.step : 0;
+  if (i < start) {
+    li.classList.add('skipped');
+    li.title = `${insName(instrument()!)} starts later, so it skips this step`;
+  }
 
   const lead = document.createElement('span');
   lead.className = 'step-lead';
@@ -1620,7 +1650,9 @@ function drawGraph() {
       const loops: number[] = [];
       for (let f = 1; f < frames; f++) if (steps[f] >= 0 && steps[f - 1] >= 0 && steps[f] < steps[f - 1]) loops.push(f);
       const repeating = settled > 0 ? settled : frames;
-      runs(frames, (f) => `${steps[f]}|${t ? t.pos[kind][f] : 0}|${steps[f] >= 0 || steps[f] === -2 ? '' : f}`, (from, to) => {
+      // Another program's frames run together as one block, named once
+      const otherProgram = (f: number) => (t && traced ? (locate(list, traced.layouts[kind], t.pos[kind][f])?.program ?? -1) : -1);
+      runs(frames, (f) => (steps[f] === -1 ? `other|${otherProgram(f)}` : `${steps[f]}|${t ? t.pos[kind][f] : 0}`), (from, to) => {
         let s = steps[from];
         if (s === -2 && held >= 0 && from >= settled) s = held;
         else if (s === -2) {
@@ -2294,7 +2326,17 @@ $<HTMLSelectElement>('next').addEventListener('change', (e) => {
   const value = (e.target as HTMLSelectElement).value;
   if (!p || value === 'other') return;
   before();
-  p.next = value === 'stop' ? null : { program: p, step: Number(value.split(':')[1]) };
+  const [what, n] = value.split(':');
+  p.next = what === 'stop' ? null : what === 'go' ? { program: programs()[Number(n)], step: 0 } : { program: p, step: Number(n) };
+  changed(true);
+});
+
+$<HTMLSelectElement>('start-at').addEventListener('change', (e) => {
+  const ins = instrument();
+  const t = target();
+  if (!ins || !t) return;
+  before();
+  ins.targets[state.kind] = { program: t.program, step: Number((e.target as HTMLSelectElement).value) };
   changed(true);
 });
 
