@@ -44,7 +44,7 @@ export interface Status {
 
 export type Command =
   | { type: 'load'; id: number; bytes: ArrayBuffer }
-  | { type: 'play'; subsong: number }
+  | { type: 'play'; subsong: number; frame: number }
   | { type: 'stop' }
   | { type: 'mute'; channel: number; muted: boolean }
   | { type: 'model'; model: number }

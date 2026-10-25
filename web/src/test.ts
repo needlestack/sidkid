@@ -3,7 +3,10 @@
 
 import { renderSong } from './engine/export';
 import { MODEL_6581, Player, SAMPLE_RATE } from './engine/player';
+import { Analyzer } from './engine/analyzer';
 import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
+import { orderSteps, parseSong } from './song';
+import { buildTimeline } from './timeline';
 
 function base64(samples: Int16Array) {
   let binary = '';
@@ -45,4 +48,27 @@ async function exportSong(url: string, settings?: Partial<Settings>, fadeSeconds
   return { looped: rendered.looped, sampleRate: rendered.sampleRate, samples: base64(rendered.samples) };
 }
 
-Object.assign(window, { renderOffline, exportSong });
+/** Lays out a song and checks the layout against the song data. */
+async function analyzeSong(url: string, settings?: Partial<Settings>) {
+  const analyzer = await Analyzer.create();
+  const canonical = analyzer.load(await (await fetch(url)).arrayBuffer());
+  if (!canonical) return null;
+  const song = parseSong(canonical);
+  const t = buildTimeline(song, 0, analyzer.scan(0, { ...DEFAULT_SETTINGS, ...settings }));
+  const problems: string[] = [];
+  t.clips.forEach((lane, v) => {
+    // The order list, walked by the sequencer's rules, must name the
+    // patterns the engine actually played
+    const steps = orderSteps(song.subsongs[0][v]);
+    lane.forEach((clip, i) => {
+      const step = steps.next().value;
+      if (!step || step.pattern !== clip.pattern) problems.push(`voice ${v + 1} clip ${i}: pattern ${clip.pattern}, order list says ${step?.pattern}`);
+      // Every clip but the last plays all its rows
+      const rows = song.patterns[clip.pattern].length;
+      if (i < lane.length - 1 && clip.rowFrames.length !== rows) problems.push(`voice ${v + 1} clip ${i}: ${clip.rowFrames.length} of ${rows} rows`);
+    });
+  });
+  return { length: t.length, loopStart: t.loopStart, sections: t.sections.map((s) => s.letter).join(''), problems: problems.slice(0, 5) };
+}
+
+Object.assign(window, { renderOffline, exportSong, analyzeSong });

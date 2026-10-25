@@ -75,7 +75,8 @@ class SidKidProcessor extends AudioWorkletProcessor {
         break;
       }
       case 'play':
-        sk._sk_play(cmd.subsong);
+        if (cmd.frame > 0) sk._sk_seek(cmd.subsong, cmd.frame);
+        else sk._sk_play(cmd.subsong);
         break;
       case 'stop':
         sk._sk_stop();

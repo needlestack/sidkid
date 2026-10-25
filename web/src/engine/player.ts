@@ -39,6 +39,12 @@ export class Player {
     return this.node !== null;
   }
 
+  /** Seconds between the worklet rendering a sample and it being heard. */
+  get latency(): number {
+    if (!(this.context instanceof AudioContext)) return 0;
+    return (this.context.baseLatency || 0) + (this.context.outputLatency || 0);
+  }
+
   /** False while the browser is holding audio back until a user gesture. */
   get running(): boolean {
     return !(this.context instanceof AudioContext) || this.context.state === 'running';
@@ -98,8 +104,9 @@ export class Player {
     });
   }
 
-  play(subsong = 0) {
-    this.send({ type: 'play', subsong });
+  /** Starts a subsong, optionally from a number of frames in. */
+  play(subsong = 0, frame = 0) {
+    this.send({ type: 'play', subsong, frame });
   }
 
   stop() {

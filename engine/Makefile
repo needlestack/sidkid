@@ -36,9 +36,12 @@ API := sidkid.o sidkid_sid.o
 NATIVE := $(BUILD)/native
 NATIVE_OBJS := $(addprefix $(NATIVE)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(NATIVE)/,$(API))
 
-all: $(NATIVE)/sngrender
+all: $(NATIVE)/sngrender $(NATIVE)/scantest
 
 $(NATIVE)/sngrender: $(NATIVE_OBJS) $(NATIVE)/tools/sngrender.o
+	$(CXX) -o $@ $^
+
+$(NATIVE)/scantest: $(NATIVE_OBJS) $(NATIVE)/tools/scantest.o
 	$(CXX) -o $@ $^
 
 $(NATIVE)/core/%.o: core/%.c core/*.h
@@ -102,7 +105,8 @@ $(REF)/obj/tools/sngrender.o: tools/sngrender.c sidkid.h
 
 # --- test -----------------------------------------------------------------
 
-test: $(NATIVE)/sngrender $(REF)/sngrender wasm
+test: $(NATIVE)/sngrender $(NATIVE)/scantest $(REF)/sngrender wasm
+	$(NATIVE)/scantest $(EXAMPLES)/*.sng
 	./tools/compare.sh $(NATIVE)/sngrender $(REF)/sngrender $(EXAMPLES) $(BUILD)/test
 	$(NODE) tools/wasmcompare.mjs $(BUILD)/wasm/sidkid.js $(EXAMPLES) $(BUILD)/test
 
@@ -112,7 +116,7 @@ WASM := $(BUILD)/wasm
 EMCC ?= emcc
 EMXX ?= em++
 WASM_OBJS := $(addprefix $(WASM)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(WASM)/,$(API))
-WASM_FUNCS := sk_init sk_configure sk_set_model sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop \
+WASM_FUNCS := sk_init sk_configure sk_set_model sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop sk_seek sk_scan \
 	sk_is_playing sk_song_looped sk_toggle_mute sk_is_muted sk_render sk_render_frame sk_sidregs sk_envelopes sk_frames \
 	sk_song_name sk_author_name sk_copyright_name malloc free
 comma := ,

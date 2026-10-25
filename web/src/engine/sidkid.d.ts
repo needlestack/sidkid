@@ -2,7 +2,7 @@
 
 declare module '@engine/sidkid.js' {
   export interface SidKidModule {
-    FS: { writeFile(path: string, data: Uint8Array): void };
+    FS: { writeFile(path: string, data: Uint8Array): void; readFile(path: string): Uint8Array };
     HEAP16: Int16Array;
     HEAPU8: Uint8Array;
     _malloc(size: number): number;
@@ -11,9 +11,12 @@ declare module '@engine/sidkid.js' {
     _sk_configure(multiplier: number, ntsc: number, adparam: number, optimizepulse: number, optimizerealtime: number): void;
     _sk_set_model(model: number, interpolate: number): void;
     _sk_load_song(path: number): number;
+    _sk_save_song(path: number): number;
     _sk_num_subsongs(): number;
     _sk_play(subsong: number): void;
     _sk_stop(): void;
+    _sk_seek(subsong: number, frame: number): void;
+    _sk_scan(subsong: number, maxframes: number, out: number, maxevents: number): number;
     _sk_is_playing(): number;
     _sk_song_looped(): number;
     _sk_toggle_mute(channel: number): void;

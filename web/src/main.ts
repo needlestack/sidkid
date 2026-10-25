@@ -1,8 +1,12 @@
 import './style.css';
+import { Analyzer } from './engine/analyzer';
 import { encodeWav, renderSong } from './engine/export';
 import { MODEL_6581, Player } from './engine/player';
 import { DEFAULT_SETTINGS, type Settings, type SongInfo, type Status } from './engine/protocol';
 import * as sid from './sid';
+import { parseSong, type Song } from './song';
+import { ArrangementView, formatTime, SectionView } from './songview';
+import { buildTimeline, timelineFrame, type Timeline } from './timeline';
 
 interface Example {
   file: string;
@@ -15,9 +19,18 @@ interface Example {
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const player = new Player();
+const analyzer = Analyzer.create();
 let song: SongInfo | null = null;
 let songBytes: ArrayBuffer | null = null;
+let doc: Song | null = null;
+let timeline: Timeline | null = null;
 let status: Status | null = null;
+// When the latest status arrived, for moving the playhead smoothly between them
+let statusAt = 0;
+// Where playback starts from, as a timeline frame
+let cursor = 0;
+// After a jump, hold the playhead there until the sound catches up
+let jumpedTo = -1;
 let muted = [false, false, false];
 let settings: Settings = DEFAULT_SETTINGS;
 let model = MODEL_6581;
@@ -62,6 +75,8 @@ function toggleSolo(v: number) {
 }
 
 function renderMutes() {
+  arrangement.setMuted(muted);
+  sectionView.setMuted(muted);
   const soloed = muted.filter((m) => !m).length === 1;
   voices.forEach((ui, c) => {
     ui.el.classList.toggle('muted', muted[c]);
@@ -98,12 +113,19 @@ async function loadSong(audio: Promise<boolean>, bytes: ArrayBuffer, name: strin
   if (!(await audio)) return;
   const copy = bytes.slice(0); // load() transfers bytes to the worklet
   const info = await player.load(bytes);
-  if (!info) {
+  const canonical = info && (await analyzer).load(copy.slice(0));
+  if (!info || !canonical) {
     toast(`${name} is not a GoatTracker song`);
     return;
   }
   song = info;
   songBytes = copy;
+  try {
+    doc = parseSong(canonical);
+  } catch (err) {
+    doc = null;
+    toast(`Could not read the song's patterns: ${err instanceof Error ? err.message : err}`);
+  }
   muted.forEach((m, c) => player.setMuted(c, m));
   applySettings(savedSettings() ?? { ...DEFAULT_SETTINGS, ...preset }, false);
   $('title').textContent = info.title || name;
@@ -114,9 +136,36 @@ async function loadSong(audio: Promise<boolean>, bytes: ArrayBuffer, name: strin
   );
   subsong.disabled = info.subsongs < 2;
   $<HTMLButtonElement>('play').disabled = false;
+  $<HTMLButtonElement>('rewind').disabled = false;
   $<HTMLButtonElement>('export').disabled = false;
-  player.play(0);
+  await rescan();
+  playFrom(0);
   if (!player.running) toast('Press Play to start the sound');
+}
+
+function subsongNumber(): number {
+  return Number($<HTMLSelectElement>('subsong').value) || 0;
+}
+
+/** Works out when everything plays, for the current subsong and settings. */
+async function rescan() {
+  if (!doc) {
+    timeline = null;
+    $('arrangement').hidden = $('section-view').hidden = true;
+    return;
+  }
+  const subsong = subsongNumber();
+  timeline = buildTimeline(doc, subsong, (await analyzer).scan(subsong, settings));
+  cursor = 0;
+  const fps = framesPerSecond();
+  $('arrangement').hidden = $('section-view').hidden = false;
+  arrangement.show(doc, timeline, fps);
+  sectionView.show(doc, timeline, fps);
+  $('length').textContent = formatTime(timeline.length / fps);
+}
+
+function framesPerSecond(): number {
+  return (settings.ntsc ? 60 : 50) * (settings.multiplier || 0.5);
 }
 
 $('open').addEventListener('click', () => {
@@ -169,17 +218,63 @@ window.addEventListener('drop', async (e) => {
 
 // --- transport ----------------------------------------------------------------
 
+function playFrom(frame: number) {
+  cursor = frame;
+  jumpedTo = frame;
+  player.play(subsongNumber(), frame);
+  // Show the new position straight away rather than at the next status
+  status = status && { ...status, playing: true, frames: frame };
+  statusAt = performance.now();
+}
+
 function togglePlay() {
   if (!song) return;
   void startAudio();
-  if (status?.playing) player.stop();
-  else player.play(Number($<HTMLSelectElement>('subsong').value) || 0);
+  if (status?.playing) {
+    cursor = displayFrame();
+    player.stop();
+    if (status) status = { ...status, playing: false };
+  } else {
+    playFrom(timeline && cursor >= timeline.length ? 0 : cursor);
+  }
+}
+
+/** Moves the start position; keeps playing from there if playing. */
+function moveTo(frame: number) {
+  if (status?.playing) playFrom(frame);
+  else cursor = frame;
 }
 
 $('play').addEventListener('click', togglePlay);
-$<HTMLSelectElement>('subsong').addEventListener('change', (e) => {
-  player.play(Number((e.target as HTMLSelectElement).value));
+$('rewind').addEventListener('click', () => moveTo(0));
+$<HTMLSelectElement>('subsong').addEventListener('change', async () => {
+  await rescan();
+  playFrom(0);
 });
+
+const arrangement = new ArrangementView($('arrangement'));
+const sectionView = new SectionView($('section-view'));
+arrangement.onSeek = (frame) => {
+  void startAudio();
+  playFrom(frame);
+};
+sectionView.onSeek = arrangement.onSeek;
+sectionView.onSection = (section, chosen) => {
+  if (chosen) moveTo(section.start);
+};
+
+function stepSection(delta: number) {
+  if (!timeline) return;
+  const frame = displayFrame();
+  const sections = timeline.sections;
+  let i = sections.findIndex((s) => frame >= s.start && frame < s.end);
+  if (i < 0) i = 0;
+  // Back goes to the start of the current section first, like a CD player
+  if (delta < 0 && frame - sections[i].start > framesPerSecond()) delta = 0;
+  const next = sections[Math.max(0, Math.min(sections.length - 1, i + delta))];
+  moveTo(next.start);
+  if (!status?.playing) sectionView.pin(next);
+}
 
 $('model').addEventListener('click', (e) => {
   const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-model]');
@@ -194,6 +289,12 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
     togglePlay();
+  } else if (e.code === 'Home') {
+    e.preventDefault();
+    moveTo(0);
+  } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+    e.preventDefault();
+    stepSection(e.code === 'ArrowLeft' ? -1 : 1);
   } else if (/^Digit[123]$/.test(e.code)) {
     const v = Number(e.code.slice(5)) - 1;
     if (e.shiftKey) toggleSolo(v);
@@ -220,10 +321,11 @@ function savedSettings(): Settings | null {
 
 /** Applies settings; when they change during playback, restarts the song so speed and timing take effect. */
 function applySettings(next: Settings, save = true) {
-  const restart = status?.playing && (next.multiplier !== settings.multiplier || next.ntsc !== settings.ntsc);
+  const timing = next.multiplier !== settings.multiplier || next.ntsc !== settings.ntsc;
+  const restart = status?.playing && timing;
   settings = next;
   player.setSettings(settings);
-  if (restart) player.play(Number($<HTMLSelectElement>('subsong').value) || 0);
+  if (timing && doc) void rescan().then(() => restart && playFrom(0));
   const key = settingsKey();
   if (save && key) {
     try {
@@ -268,11 +370,6 @@ $<HTMLInputElement>('realtimeopt').addEventListener('change', (e) => {
 
 // --- WAV export -------------------------------------------------------------------
 
-function formatTime(seconds: number) {
-  const s = Math.floor(seconds);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
-
 $('export').addEventListener('click', async () => {
   if (!song || !songBytes) return;
   const button = $<HTMLButtonElement>('export');
@@ -283,7 +380,7 @@ $('export').addEventListener('click', async () => {
       song: songBytes.slice(0),
       settings,
       model,
-      subsong: Number($<HTMLSelectElement>('subsong').value) || 0,
+      subsong: subsongNumber(),
       muted,
       onProgress: (seconds) => (button.textContent = `Exporting ${formatTime(seconds)}…`),
     });
@@ -307,7 +404,25 @@ $('export').addEventListener('click', async () => {
 
 player.onStatus = (s) => {
   status = s;
+  statusAt = performance.now();
 };
+
+// Rows are read a couple of frames before their notes sound
+const ROW_LEAD_FRAMES = 2;
+
+/** The timeline frame being heard right now. */
+function displayFrame(): number {
+  if (!timeline) return 0;
+  if (!status?.playing) return cursor;
+  const fps = framesPerSecond();
+  const elapsed = Math.min(0.15, (performance.now() - statusAt) / 1000);
+  // The status reports the frame just rendered; it is heard after the
+  // output latency, plus most of a frame still waiting in the buffer
+  const frames = status.frames + (elapsed - player.latency) * fps - 1 - ROW_LEAD_FRAMES;
+  if (frames < jumpedTo) return jumpedTo;
+  jumpedTo = -1;
+  return timelineFrame(timeline, Math.max(0, frames));
+}
 
 function hex(n: number) {
   return n.toString(16).toUpperCase();
@@ -320,8 +435,10 @@ function render() {
 
   $('play').classList.toggle('playing', playing);
   $('play').setAttribute('aria-label', playing ? 'Stop' : 'Play');
-  const framesPerSecond = (settings.ntsc ? 60 : 50) * (settings.multiplier || 0.5);
-  $('time').textContent = formatTime(frames / framesPerSecond);
+  const frame = displayFrame();
+  $('time').textContent = formatTime((timeline ? frame : frames) / framesPerSecond());
+  arrangement.setFrame(frame, playing);
+  sectionView.setFrame(frame, playing);
 
   voices.forEach((ui, v) => {
     const st = sid.voice(regs, v, settings.ntsc ? sid.NTSC_CLOCK : sid.PAL_CLOCK);

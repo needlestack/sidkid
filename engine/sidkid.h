@@ -40,8 +40,8 @@ void sk_play(int subsong);
 void sk_stop(void);
 int sk_is_playing(void);
 
-// True once every voice has wrapped around to its loop point since
-// sk_play(), i.e. the song has played through once.
+// True once every voice has taken its loop and read the first row after it
+// since sk_play(), i.e. the song has played through once.
 int sk_song_looped(void);
 
 void sk_toggle_mute(int channel);
@@ -50,6 +50,19 @@ int sk_is_muted(int channel);
 // Runs one frame of the playroutine and renders its samples into out
 // (at least SK_MAX_FRAME_SAMPLES long). Returns the number of samples.
 int sk_render_frame(short *out);
+
+// Starts the song and fast-forwards it by the given number of frames
+// without rendering audio. Envelopes pick up from wherever reSID was.
+void sk_seek(int subsong, int frame);
+
+// Plays the song silently from the start, without rendering audio, and
+// records every pattern row each voice reads, as pairs of words:
+//   frame (as sk_frames() would report it after that frame)
+//   voice | row << 8 | pattern << 16
+// Stops once the song has looped (see sk_song_looped), or ends, or after
+// maxframes. Returns the number of rows recorded.
+// Leaves the song stopped.
+int sk_scan(int subsong, int maxframes, unsigned *out, int maxevents);
 
 // Fills out with exactly n samples, running frames as needed.
 void sk_render(short *out, int n);

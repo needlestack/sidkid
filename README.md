@@ -10,11 +10,16 @@ GoatTracker 2 engine by Lasse Öörni (Cadaver).
   `gplay.c`, `gsid.cpp` and `resid*/` are unmodified copies; `goattrk2.h` and
   `gglue.c` stand in for the editor, and `gtables.c` is the data-only part of
   `gtable.c`
-- `engine/sidkid.[ch]` – the engine API (load, play, render frames)
+- `engine/sidkid.[ch]` – the engine API (load, play, seek, render frames, and
+  a silent scan of when every pattern row plays)
 - `engine/tools/sngrender.c` – renders a `.sng` to WAV and a SID register log
+- `engine/tools/scantest.c` – checks the scan and seeking against playback
 - `web/` – the browser app (Vite + TypeScript). The engine runs inside an
   AudioWorklet (`web/src/engine/worklet.ts`); the page talks to it through
-  `Player` (`web/src/engine/player.ts`)
+  `Player` (`web/src/engine/player.ts`). A second engine instance on the page
+  (`web/src/engine/analyzer.ts`) reads songs and scans them; `song.ts` parses
+  the song data and `timeline.ts` lays it out as clips and sections for the
+  views in `songview.ts`
 
 ## Building
 
@@ -26,13 +31,15 @@ make test     # native vs. untouched vendor sources vs. wasm, all example songs
 ```
 
 `make test` requires the native, reference and wasm builds to produce
-identical SID registers for every frame and identical audio samples.
+identical SID registers for every frame and identical audio samples, and
+checks that every row the scan reports is the one playback reads.
 
 ```sh
 cd web
 npm install
 npm run dev   # http://localhost:5173 (run `make wasm` in engine/ first)
-npm test      # headless Chrome: worklet output vs. native engine, plus UI checks
+npm test      # headless Chrome: worklet output vs. native engine, song layout
+              # vs. order lists and loop points, plus UI checks
 ```
 
 ## Deployment

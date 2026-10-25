@@ -137,6 +137,23 @@ try {
         (first >= 0 ? `, differs from sample ${first}` : ''),
     );
   }
+  // --- timeline: the song layout agrees with the order lists, and its
+  // length with the loop point sngrender finds -------------------------------
+  for (const { file, settings } of EXAMPLE_INDEX) {
+    const name = file.replace(/\.sng$/, '');
+    const log = spawnSync(SNGRENDER, [`${EXAMPLES}/${file}`, '-s', '1200', ...renderFlags(settings)], { encoding: 'utf8' }).stderr;
+    const loopFrames = Number(/loops after (\d+) frames/.exec(log)?.[1] ?? -1);
+    const result = await page.evaluate((url, s) => window.analyzeSong(url, s), `examples/${file}`, settings);
+    const lengthOk = result && result.length === loopFrames;
+    report(
+      result && lengthOk && result.problems.length === 0,
+      `layout  ${name.padEnd(16)}`,
+      !result ? 'did not load'
+        : `${result.length} frames, loop from ${result.loopStart}, sections ${result.sections.length > 24 ? result.sections.slice(0, 24) + '…' : result.sections}` +
+          (lengthOk ? '' : `; sngrender loops at ${loopFrames}`) +
+          (result.problems.length ? `; ${result.problems.join('; ')}` : ''),
+    );
+  }
   await page.close();
 
   // --- 2. UI -----------------------------------------------------------------
@@ -155,6 +172,23 @@ try {
     .then(() => report(true, 'ui plays (clock advancing)'), () => report(false, 'ui plays (clock advancing)'));
   const notes = await ui.$$eval('.note', (els) => els.map((e) => e.textContent));
   report(notes.some((n) => n !== '—'), 'ui shows notes', notes.join(' '));
+
+  // Clicking a section plays from its start
+  const target = await ui.$eval('.section-block:nth-child(3)', (el) => {
+    el.click();
+    return Number(el.dataset.start);
+  });
+  const expected = Math.floor(target / 50);
+  await ui.waitForFunction((s) => {
+    const [m, sec] = document.getElementById('time').textContent.split(':').map(Number);
+    return m * 60 + sec >= s && m * 60 + sec <= s + 2;
+  }, { timeout: 3000 }, expected)
+    .then(() => report(true, 'ui plays from a clicked section', `${expected} s`), async () =>
+      report(false, 'ui plays from a clicked section', `expected ${expected} s, clock shows ${await ui.$eval('#time', (e) => e.textContent)}`));
+  const shown = await ui.$eval('.section-letter', (el) => el.textContent);
+  const clicked = await ui.$eval('.section-block:nth-child(3)', (el) => el.textContent);
+  report(shown === clicked, 'ui shows the playing section', `${shown}`);
+  await ui.keyboard.press('Home');
 
   await ui.keyboard.press('Digit2');
   const muted = await ui.$eval('.voice:nth-child(2)', (el) => el.classList.contains('muted'));

@@ -6,6 +6,8 @@
 #include "sidkid.h"
 
 extern int timeframes;
+extern int psnum;
+extern unsigned char filterctrl, filtertype, filtercutoff, filtertime, filterptr;
 
 static int samplerate = 44100;
 static int frametempo = 125;
@@ -16,9 +18,11 @@ static short framebuf[SK_MAX_FRAME_SAMPLES];
 static int framepos = 0;
 static int framelen = 0;
 
-// Order list position of each voice after the previous frame, and whether
-// it has since jumped backwards (the song looped)
+// Order list position of each voice after the previous frame; whether it
+// has taken its loop; and whether it has since read the first row there
+// (the song has looped)
 static unsigned char lastsongptr[MAX_CHN];
+static int takenloop[MAX_CHN];
 static int looped[MAX_CHN];
 
 static void settempo(void)
@@ -104,11 +108,25 @@ void sk_play(int subsong)
 {
   int c;
 
+  unsigned char mute[MAX_CHN];
+
   if ((subsong < 0) || (subsong >= MAX_SONGS)) return;
+
+  // GoatTracker carries some player state (filter, pulse, vibrato...) over
+  // from the previous run, so a song can start slightly differently each
+  // time. Reset it to how it is after loading, keeping the mutes.
+  for (c = 0; c < MAX_CHN; c++) mute[c] = chn[c].mute;
+  initchannels();
+  for (c = 0; c < MAX_CHN; c++) chn[c].mute = mute[c];
+  filterctrl = filtertype = filtercutoff = filtertime = filterptr = 0;
+  masterfader = 0x0f;
+  memset(sidreg, 0, sizeof sidreg);
+
   initsong(subsong, PLAY_BEGINNING);
   for (c = 0; c < MAX_CHN; c++)
   {
     lastsongptr[c] = 0;
+    takenloop[c] = 0;
     looped[c] = 0;
   }
 }
@@ -140,20 +158,87 @@ int sk_is_muted(int channel)
   return chn[channel].mute;
 }
 
+// One playroutine call, keeping track of whether the song has looped.
+// Returns a bit per voice that read a pattern row.
+static int advance(void)
+{
+  int c;
+  int rows = 0;
+  int atloop[MAX_CHN];
+  CHN old[MAX_CHN];
+
+  // A voice whose pattern has ended with the order list on its loop
+  // command will take the loop as soon as it moves on. Jumping back is not
+  // enough to tell: a loop to the voice's last position goes nowhere.
+  memcpy(old, chn, sizeof old);
+  for (c = 0; c < MAX_CHN; c++)
+    atloop[c] = (chn[c].pattptr == 0x7fffffff) && (songorder[psnum][c][chn[c].songptr] == LOOPSONG);
+  playroutine();
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    CHN *cptr = &chn[c];
+
+    // The pattern pointer moves on when a row is read; it is reset to 0
+    // when a new pattern is set up, before its first row is read. A
+    // one-row pattern ends where it started, so then look for the order
+    // list having moved instead.
+    if (((cptr->pattptr != old[c].pattptr) && (cptr->pattptr != 0)) ||
+        ((cptr->pattptr == 0x7fffffff) && (old[c].pattptr == 0x7fffffff) &&
+         ((cptr->songptr != old[c].songptr) || (cptr->repeat != old[c].repeat) || (cptr->pattnum != old[c].pattnum))))
+      rows |= 1 << c;
+    if ((cptr->songptr < lastsongptr[c]) || (atloop[c] && (cptr->pattptr != 0x7fffffff))) takenloop[c] = 1;
+    // The loop is taken as the last row before it starts to sound; the
+    // song has looped once the first row after it is read
+    if (takenloop[c] && (rows & (1 << c))) looped[c] = 1;
+    lastsongptr[c] = cptr->songptr;
+  }
+  return rows;
+}
+
 int sk_render_frame(short *out)
 {
   int samples = ((samplerate * 5) >> 1) / frametempo;
 
-  int c;
-
   if (samples > SK_MAX_FRAME_SAMPLES) samples = SK_MAX_FRAME_SAMPLES;
-  playroutine();
-  for (c = 0; c < MAX_CHN; c++)
-  {
-    if (chn[c].songptr < lastsongptr[c]) looped[c] = 1;
-    lastsongptr[c] = chn[c].songptr;
-  }
+  advance();
   return sid_fillbuffer(out, samples);
+}
+
+void sk_seek(int subsong, int frame)
+{
+  sk_play(subsong);
+  while ((frame-- > 0) && (isplaying())) advance();
+  framepos = 0;
+  framelen = 0;
+}
+
+int sk_scan(int subsong, int maxframes, unsigned *out, int maxevents)
+{
+  int c;
+  int count = 0;
+
+  sk_play(subsong);
+  while ((timeframes < maxframes) && (count + MAX_CHN <= maxevents))
+  {
+    int rows = advance();
+    if (!isplaying()) break;
+
+    for (c = 0; c < MAX_CHN; c++)
+    {
+      unsigned ptr = chn[c].pattptr;
+      int row;
+
+      if (!(rows & (1 << c))) continue;
+      row = (ptr == 0x7fffffff) ? pattlen[chn[c].pattnum] - 1 : (int)(ptr / 4) - 1;
+      out[count * 2] = timeframes;
+      out[count * 2 + 1] = c | (row << 8) | (chn[c].pattnum << 16);
+      count++;
+    }
+    if (sk_song_looped()) break;
+  }
+  sk_stop();
+  advance();
+  return count;
 }
 
 void sk_render(short *out, int n)
