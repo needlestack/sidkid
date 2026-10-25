@@ -512,6 +512,10 @@ function renderKinds() {
     b.classList.toggle('on', k === state.kind);
     b.setAttribute('aria-selected', String(k === state.kind));
     b.querySelector('.count')!.textContent = String(state.programs[k].length);
+    const ins = instrument();
+    const unheard = k === PULSE && !!ins && !usesPulse(ins);
+    b.classList.toggle('unheard', unheard);
+    b.title = unheard ? `${insName(ins!)}’s wave never uses the Pulse waveform, so its pulse program isn’t heard` : '';
   }
   const select = $<HTMLSelectElement>('new-program');
   select.replaceChildren(new Option('+ New program…', ''), new Option('Empty program', 'empty'));
@@ -536,7 +540,9 @@ function noneItem(): HTMLLIElement {
   name.textContent = `No ${KIND_NAMES[state.kind].toLowerCase()} program`;
   const meta = document.createElement('span');
   meta.className = 'program-meta';
-  meta.textContent = state.kind === WAVE ? 'just the first waveform' : state.kind === PULSE ? 'the width stays put' : 'leaves the filter alone';
+  const ins = instrument();
+  meta.textContent =
+    state.kind === WAVE ? 'just the first waveform' : state.kind === PULSE ? (ins && usesPulse(ins) ? 'keeps the width the voice had' : 'the width stays put') : 'leaves the filter alone';
   button.append(name, meta);
   button.addEventListener('click', () => {
     if (current()) {
@@ -597,42 +603,30 @@ function renderEditor() {
   empty.hidden = !!p;
   if (!p) {
     const kind = KIND_NAMES[state.kind].toLowerCase();
-    empty.textContent = ins
-      ? state.kind === PULSE && silentPulse(ins)
-        ? `${insName(ins)} has no pulse program, but it plays the Pulse waveform: without a program the width stays at 0%, which is silent. Pick one on the left (Square is 50%), or make a new one.`
-        : `${insName(ins)} has no ${kind} program${state.kind === PULSE ? ', so its pulse width stays put' : state.kind === FILTER ? ', so it leaves the filter alone' : ''}. Pick one on the left to use it, or make a new one.`
-      : 'Make an instrument below to start.';
+    empty.textContent = ins ? `${insName(ins)} has no ${kind} program. Pick one on the left, or make a new one.` : 'Make an instrument below to start.';
     return;
   }
   const name = $<HTMLInputElement>('program-name');
   if (document.activeElement !== name) name.value = p.name;
   const t = target()!;
   const others = usersOf(p).filter((i) => i !== ins);
-  const uses = $('uses');
-  const parts: string[] = [];
-  if (t.step) parts.push(`${insName(ins!)} starts at step ${unitOf(t.step) + 1}.`);
-  if (others.length) parts.push(`Also used by ${others.map(insName).join(', ')}: changes here change ${others.length === 1 ? 'it' : 'them'} too. Duplicate it to change it just for ${insName(ins!)}.`);
-  uses.hidden = !parts.length;
-  uses.textContent = parts.join(' ');
-  renderNote();
+  const badges: [string, string][] = [];
+  if (others.length) {
+    badges.push([`shared with ${others.length === 1 ? insName(others[0]) : `${others.length} others`}`, `Also used by ${others.map(insName).join(', ')}: changes here change them too. Duplicate it to change it just for ${insName(ins!)}.`]);
+  }
+  if (t.step) badges.push([`starts at step ${unitOf(t.step) + 1}`, `${insName(ins!)} starts this program partway through`]);
+  if (state.kind === PULSE && ins && !usesPulse(ins)) badges.push(['not heard', `${insName(ins)}’s wave program never uses the Pulse waveform, so the width doesn’t change its sound`]);
+  $('badges').replaceChildren(
+    ...badges.map(([text, title]) => {
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = text;
+      b.title = title;
+      return b;
+    }),
+  );
   renderSteps();
   renderNext();
-}
-
-/** Explains how this tab's program depends on the rest of the instrument. */
-function renderNote() {
-  const note = $('kind-note');
-  const ins = instrument();
-  let text = '';
-  if (state.kind === WAVE && ins && silentPulse(ins)) {
-    text = `${insName(ins)} plays the Pulse waveform but has no pulse program, so its pulse width stays at 0% and the pulse parts are silent. Give it a pulse program on the Pulse tab.`;
-  } else if (state.kind === PULSE && ins) {
-    if (!usesPulse(ins)) text = `${insName(ins)}’s wave program never picks the Pulse waveform, so the pulse width has no effect on how it sounds.`;
-  } else if (state.kind === FILTER) {
-    text = 'The SID has one filter, shared by all three voices. While this instrument plays, its filter program takes over that filter for every voice routed through it.';
-  }
-  note.textContent = text;
-  note.hidden = !text;
 }
 
 function renderNext() {
@@ -681,21 +675,22 @@ function stepHue(i: number) {
   return (i * 67 + 250) % 360;
 }
 
+// What each step can do
 const STEP_TYPES: Record<number, [string, string][]> = {
   [WAVE]: [
-    ['wave', 'Set waveform'],
+    ['wave', 'Change waveform'],
     ['keep', 'Change pitch'],
-    ['wait', 'Wait'],
-    ['command', 'Run command'],
+    ['wait', 'Hold'],
+    ['command', 'Effect (command)'],
   ],
   [PULSE]: [
-    ['width', 'Set width'],
+    ['width', 'Change width'],
     ['sweep', 'Sweep width'],
     ['hold', 'Hold'],
   ],
   [FILTER]: [
-    ['setup', 'Set filter'],
-    ['cutoff', 'Set cutoff'],
+    ['setup', 'Change filter'],
+    ['cutoff', 'Move cutoff'],
     ['sweep', 'Sweep cutoff'],
   ],
 };
@@ -748,7 +743,8 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
   const type = document.createElement('select');
   type.className = 'step-type';
   type.setAttribute('aria-label', `Step ${u + 1} type`);
-  for (const [value, label] of STEP_TYPES[kind]) type.append(new Option(label, value));
+  // Effects only show where a song already uses one
+  for (const [value, label] of STEP_TYPES[kind]) if (value !== 'command' || stepType(kind, s) === 'command') type.append(new Option(label, value));
   type.value = stepType(kind, s);
   type.addEventListener('change', () => {
     before();
@@ -774,7 +770,7 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
   raw.className = 'step-raw';
   raw.title = 'The GoatTracker table rows: left and right bytes';
   const refresh = () => {
-    text.textContent = describeUnit(kind, p, rows) + warning(kind, p, i);
+    text.textContent = describeUnit(kind, p, rows);
     raw.textContent = rows.map((r) => `${hex(p.steps[r].left)} ${hex(p.steps[r].right)}`).join(' · ');
   };
   // Field edits change the step in place, so a slider being dragged stays put
@@ -831,20 +827,6 @@ function routingText(voices: number): string {
   if (voices === 1) return '';
   if (!voices) return ' · no voice filtered';
   return ` · filters voice${voices & (voices - 1) ? 's' : ''} ${[1, 2, 3].filter((v) => voices & (1 << (v - 1))).join(', ')}`;
-}
-
-function warning(kind: number, p: Program, i: number): string {
-  if (kind === WAVE) {
-    // Until a Set waveform step runs, a note has the instrument's first
-    // waveform, which is normally the silent test bit (a clean restart)
-    const firstWave = p.steps.findIndex((st) => waveAction(st).type === 'wave');
-    if (firstWave < 0 && i === 0) return ' — this program never sets a waveform, so its notes are silent: add a Set waveform step';
-    if (firstWave > 0 && i === 0) return ' — silent until step ' + (unitOf(firstWave) + 1) + ' sets a waveform: a note starts on the instrument’s first waveform, which is normally silent';
-  }
-  if (kind === FILTER && filterAction(p.steps[i]).type !== 'setup' && !setupBefore(p, i)) {
-    return ' — no filter set-up before this step: on its own it only moves the cutoff of whatever filter setting is already playing (none at the start of a song, so you won’t hear it)';
-  }
-  return '';
 }
 
 function toolButton(label: string, title: string, action: () => void, disabled = false): HTMLButtonElement {

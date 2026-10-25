@@ -169,6 +169,28 @@
   color: var(--muted);
 }
 
+.badges {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-right: auto;
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: help;
+  white-space: nowrap;
+}
+
+.kinds.segmented button.unheard {
+  opacity: 0.5;
+}
+
 .callout {
   margin: 0 0 10px;
   padding: 8px 12px;
