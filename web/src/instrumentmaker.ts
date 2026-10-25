@@ -7,10 +7,11 @@ import './instrumentmaker.css';
 import { Analyzer, type Trace } from './engine/analyzer';
 import type { TableData } from './engine/configure';
 import { loadModel, Player, saveModel } from './engine/player';
-import { adsrEditor, type Env } from './adsr';
+import { adsrEditor, describe as describeEnv, type Env } from './adsr';
 import { envelope } from './envelope';
 import { filterCurve, modeIcon } from './filtercurve';
 import { pulseIcon, waveIcon, waveTone } from './waveicon';
+import { semitoneText, slideSemitones, vibratoCurve, vibratoIcon, vibratoSize, wobbleOf, wobbleRow, type Wobble } from './vibrato';
 import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
 import { noteName, parseSong, type Instrument } from './song';
 import {
@@ -75,7 +76,7 @@ interface InstrumentDef {
   vibratoDelay: number;
   gateTimer: number;
   firstWave: number;
-  /** Speed table position (that table isn't edited here). */
+  /** Speed table row (1-based) for its vibrato, which runs when vibratoDelay isn't 0. */
   speed: number;
   /** Where its wave, pulse and filter programs start. */
   targets: (Target | null)[];
@@ -83,8 +84,10 @@ interface InstrumentDef {
 
 interface State {
   programs: Program[][];
-  /** The speed table isn't edited here, but wave programs' commands use it. */
+  /** Vibrato and slide speeds, used by instruments, wave steps and the song's patterns. */
   speed: Table;
+  /** Rows from the song, which its patterns may use: never changed here. */
+  speedFixed: number;
   instruments: InstrumentDef[];
   source: string;
   /** The program tab being edited */
@@ -131,6 +134,7 @@ function initialState(): State {
       [low],
     ],
     speed: { left: new Uint8Array(0), right: new Uint8Array(0) },
+    speedFixed: 0,
     instruments: [
       newInstrument(1, 'Sweep lead', 0x09, 0xc8, [pulseWave, sweep, null]),
       newInstrument(2, 'Chord', 0x05, 0xa8, [chord, square, null]),
@@ -153,6 +157,7 @@ const current = (): Program | undefined => target()?.program;
 interface Saved {
   programs: { name: string; steps: [number, number][]; next: [number, number] | null }[][];
   speed: [number[], number[]];
+  speedFixed?: number;
   instruments: (Omit<InstrumentDef, 'targets'> & { targets: ([number, number] | null)[] })[];
   source: string;
   kind: number;
@@ -170,6 +175,7 @@ function save(s: State): Saved {
       })),
     ),
     speed: [Array.from(s.speed.left), Array.from(s.speed.right)],
+    speedFixed: s.speedFixed,
     instruments: s.instruments.map((i) => ({
       ...i,
       targets: i.targets.map((t, k): [number, number] | null => (t && s.programs[k].includes(t.program) ? [s.programs[k].indexOf(t.program), t.step] : null)),
@@ -195,6 +201,7 @@ function restore(d: Saved): State {
   return {
     programs: lists,
     speed: { left: Uint8Array.from(d.speed[0]), right: Uint8Array.from(d.speed[1]) },
+    speedFixed: d.speedFixed ?? d.speed[0].length,
     instruments,
     source: d.source,
     kind: d.kind,
@@ -456,8 +463,62 @@ function deleteInstrument() {
   changed(true);
 }
 
+// --- The speed table ------------------------------------------------------
+
+// Vibrato and slides read their speeds from rows of the speed table, which
+// the song's patterns use too. Each setting is treated as its instrument's
+// or step's own: changing one that something else also uses gives it a new
+// row, and rows from the song are never changed.
+
+/** The speed table row (1-based) a wave step reads, or 0: slides and vibrato do. */
+function speedRef(s: Step): number {
+  const a = waveAction(s);
+  return a.type === 'command' && a.command >= 1 && a.command <= 4 ? s.right : 0;
+}
+
+/** How many instruments and wave steps use a speed table row. */
+function speedUses(row: number): number {
+  let n = state.instruments.filter((i) => i.speed === row).length;
+  for (const p of state.programs[WAVE]) n += p.steps.filter((s) => speedRef(s) === row).length;
+  return n;
+}
+
+function speedValues(row: number): [number, number] | null {
+  return row > 0 && row <= state.speed.left.length ? [state.speed.left[row - 1], state.speed.right[row - 1]] : null;
+}
+
+/**
+ * A row holding these values for something now using row `own` (or 0):
+ * `own` itself, changed, when nothing else uses it and it isn't the song's;
+ * otherwise a row that already holds them, or a new one.
+ */
+function speedRow(own: number, left: number, right: number): number {
+  const sp = state.speed;
+  const n = sp.left.length;
+  if (own > state.speedFixed && own <= n && speedUses(own) <= 1) {
+    sp.left[own - 1] = left;
+    sp.right[own - 1] = right;
+    return own;
+  }
+  for (let i = 0; i < n; i++) if (sp.left[i] === left && sp.right[i] === right) return i + 1;
+  if (n >= TABLE_LENGTH) {
+    toast('The speed table is full: it holds 255 vibrato and slide settings');
+    return own;
+  }
+  state.speed = { left: Uint8Array.from([...sp.left, left]), right: Uint8Array.from([...sp.right, right]) };
+  return n + 1;
+}
+
+/** Drops rows added here that nothing uses any more, from the end (earlier ones keep their places). */
+function trimSpeed() {
+  let n = state.speed.left.length;
+  while (n > state.speedFixed && !speedUses(n)) n--;
+  if (n < state.speed.left.length) state.speed = { left: state.speed.left.slice(0, n), right: state.speed.right.slice(0, n) };
+}
+
 /** After any change: redraw, save, and give the player the new tables. */
 function changed(structure: boolean) {
+  trimSpeed();
   if (structure) renderAll();
   else {
     renderPrograms();
@@ -765,14 +826,196 @@ function renderNoteStart() {
   panel.replaceChildren(...rows);
 }
 
+// A new vibrato: about five swings a second, a third of a semitone either
+// way on every note, starting after a third of a second
+const DEFAULT_WOBBLE: Wobble = { turn: 3, even: true, depth: 3 };
+const DEFAULT_VIBRATO_DELAY = 16;
+/** Frames of the vibrato picture */
+const VIBRATO_FRAMES = 90;
+
+const vibratoOn = (ins: InstrumentDef) => ins.vibratoDelay > 0 && speedValues(ins.speed) !== null;
+
+/**
+ * Whether the instrument's vibrato gets heard: the player only runs it on
+ * frames where the wave program leaves the pitch alone (it has stopped, or
+ * is holding, or its step keeps the pitch), so an arpeggio that sets the
+ * pitch every frame forever has none.
+ */
+function pitchLeftFree(ins: InstrumentDef): boolean {
+  const t = ins.targets[WAVE];
+  if (!t) return true;
+  const seen = new Set<string>();
+  let p = t.program;
+  let i = t.step;
+  const lists = state.programs[WAVE];
+  for (;;) {
+    const key = `${lists.indexOf(p)}:${i}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (i >= p.steps.length) {
+      if (!p.next) return true;
+      ({ program: p, step: i } = p.next);
+      continue;
+    }
+    const s = p.steps[i];
+    const a = waveAction(s);
+    if (a.type === 'wait' || (a.type !== 'command' && pitchOf(s.right).type === 'keep')) return true;
+    i++;
+  }
+}
+
+/** Speed and depth sliders for a vibrato setting, and a readout of each. */
+function wobbleSliders(get: () => Wobble, set: (w: Wobble) => void): { speed: HTMLElement; depth: HTMLElement } {
+  const w = get();
+  // Fewer frames between turns is faster, so the slider runs the other way
+  const speed = slider(
+    -w.turn,
+    -Math.max(15, w.turn),
+    0,
+    (n) => `${vibratoSize({ ...get(), turn: -n }, test.note).rate.toFixed(1)} a second`,
+    (n) => set({ ...get(), turn: -n }),
+    'How fast the pitch swings up and down',
+  );
+  // Evenly, the depth halves a semitone's step: fewer halvings are deeper
+  const depth = w.even
+    ? slider(-w.depth, -8, 0, (n) => `± ${semitoneText(vibratoSize({ ...get(), depth: -n }, test.note).depth)}`, (n) => set({ ...get(), depth: -n }), 'How far the pitch swings either way')
+    : slider(w.depth, 1, 255, (n) => `± ${semitoneText(vibratoSize({ ...get(), depth: n }, test.note).depth)} on ${noteName(test.note)}`, (n) => set({ ...get(), depth: n }), 'How far the pitch swings either way: a fixed amount, so it is wider on low notes and narrower on high ones');
+  // The depth either way grows with the time between turns, so both readouts follow either slider
+  const depthOut = depth.querySelector('output')!;
+  speed.querySelector('input')!.addEventListener('input', () => {
+    const now = get();
+    depthOut.textContent = `± ${semitoneText(vibratoSize(now, test.note).depth)}${now.even ? '' : ` on ${noteName(test.note)}`}`;
+  });
+  return { speed, depth };
+}
+
+/** Turns a vibrato's depth between the same on every note and a fixed amount, keeping its size on the test note. */
+function convertWobble(w: Wobble, even: boolean): Wobble {
+  if (w.even === even) return w;
+  const size = vibratoSize(w, test.note).depth;
+  let best = { ...w, even, depth: even ? 3 : 32 };
+  const options = even ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : Array.from({ length: 255 }, (_, i) => i + 1);
+  for (const depth of options) {
+    const next = { ...w, even, depth };
+    if (Math.abs(vibratoSize(next, test.note).depth - size) < Math.abs(vibratoSize(best, test.note).depth - size)) best = next;
+  }
+  return best;
+}
+
+/** The instrument's vibrato: on or off, when it starts, how fast and how deep. */
+function renderVibrato() {
+  const panel = $('vibrato-panel');
+  const ins = instrument();
+  if (panel.hidden || !ins) return;
+  const rows: HTMLElement[] = [];
+  const row = (label: string, title: string, ...controls: HTMLElement[]) => {
+    const r = document.createElement('div');
+    r.className = 'popover-row';
+    r.title = title;
+    const l = document.createElement('span');
+    l.className = 'popover-label';
+    l.textContent = label;
+    r.append(l, ...controls);
+    rows.push(r);
+  };
+  const on = vibratoOn(ins);
+  const wobble = (): Wobble => {
+    const v = speedValues(ins.speed);
+    return v ? wobbleOf(...v) : DEFAULT_WOBBLE;
+  };
+  const picture = vibratoIcon();
+  const draw = () => picture.set(vibratoCurve(wobble(), test.note, ins.vibratoDelay, VIBRATO_FRAMES), ins.vibratoDelay);
+  // Slider drags change the setting in place; the panel is only rebuilt for switches
+  const apply = (rebuild: boolean) => {
+    trimSpeed();
+    schedulePreview();
+    persist();
+    $('vibrato').classList.toggle('set', vibratoOn(ins));
+    if (rebuild) renderVibrato();
+    else draw();
+  };
+  const setWobble = (w: Wobble, rebuild = false) => {
+    before();
+    ins.speed = speedRow(ins.speed, ...wobbleRow(w));
+    apply(rebuild);
+  };
+  row(
+    'Vibrato',
+    'Vibrato wobbles the pitch up and down while a note is held, like a singer or violinist',
+    segmented(
+      [
+        [0, 'Off', 'A steady pitch'],
+        [1, 'On', 'The pitch wobbles while the note is held'],
+      ],
+      on ? 1 : 0,
+      (v) => {
+        before();
+        if (v) {
+          if (!speedValues(ins.speed)) ins.speed = speedRow(0, ...wobbleRow(DEFAULT_WOBBLE));
+          ins.vibratoDelay ||= DEFAULT_VIBRATO_DELAY;
+        } else ins.vibratoDelay = 0;
+        apply(true);
+        blip();
+      },
+    ),
+  );
+  if (on) {
+    const pictureRow = document.createElement('div');
+    pictureRow.className = 'popover-picture';
+    pictureRow.title = 'The pitch over the first two seconds of a held note';
+    pictureRow.append(picture.el);
+    rows.push(pictureRow);
+    draw();
+    row(
+      'Starts after',
+      'How long the note holds a steady pitch before the vibrato begins',
+      slider(
+        ins.vibratoDelay,
+        1,
+        Math.max(75, ins.vibratoDelay),
+        (n) => (n <= 1 ? 'at once' : `${((n - 1) / FPS).toFixed(2)} s`),
+        (n) => {
+          before();
+          ins.vibratoDelay = n;
+          apply(false);
+        },
+        'How long the note holds a steady pitch before the vibrato begins',
+      ),
+    );
+    const { speed, depth } = wobbleSliders(wobble, (w) => setWobble(w));
+    row('Speed', 'How fast the pitch swings up and down', speed);
+    row('Depth', 'How far the pitch swings either way', depth);
+    row(
+      'On each note',
+      'Whether the vibrato is just as deep on every note, or a fixed amount, which is wider on low notes',
+      segmented(
+        [
+          [1, 'Same depth', 'Just as deep on every note'],
+          [0, 'Wider on low notes', 'A fixed amount of pitch: wide on low notes, slight on high ones (older songs work this way)'],
+        ],
+        wobble().even ? 1 : 0,
+        (v) => setWobble(convertWobble(wobble(), v === 1), true),
+      ),
+    );
+    if (!pitchLeftFree(ins)) {
+      const note = document.createElement('p');
+      note.className = 'popover-note';
+      note.textContent = `Not heard with “${ins.targets[WAVE]!.program.name}”: it sets the pitch every frame. Vibrato plays once a wave program stops, holds, or keeps the pitch.`;
+      rows.push(note);
+    }
+  }
+  panel.replaceChildren(...rows);
+}
 
 function renderInstrument() {
   const ins = instrument();
   const select = $<HTMLSelectElement>('instrument');
   select.replaceChildren(...state.instruments.map((i, n) => new Option(insName(i), String(n))));
   select.value = String(state.current);
-  for (const id of ['rename-instrument', 'duplicate-instrument', 'delete-instrument', 'note-start']) ($(id) as HTMLButtonElement).disabled = !ins;
+  for (const id of ['rename-instrument', 'duplicate-instrument', 'delete-instrument', 'note-start', 'vibrato']) ($(id) as HTMLButtonElement).disabled = !ins;
+  $('vibrato').classList.toggle('set', !!ins && vibratoOn(ins));
   renderNoteStart();
+  renderVibrato();
   drawAdsr();
 }
 
@@ -801,7 +1044,10 @@ const STEP_TYPES: Record<number, [string, string][]> = {
     ['wave', 'Set waveform'],
     ['keep', 'Change pitch'],
     ['wait', 'Hold'],
-    ['command', 'Effect (command)'],
+    ['env', 'Change envelope'],
+    ['slide', 'Slide pitch'],
+    ['vibrato', 'Vibrato'],
+    ['command', 'Other effect'],
   ],
   [PULSE]: [
     ['width', 'Set width'],
@@ -815,8 +1061,28 @@ const STEP_TYPES: Record<number, [string, string][]> = {
   ],
 };
 
+/** Wave steps that run an effect, which show in their own group of the menu */
+const EFFECT_TYPES = ['env', 'slide', 'vibrato', 'command'];
+/** Effects only offered where a song already uses one */
+const FOUND_TYPES = ['vibrato', 'command'];
+
+// Effects a wave step can run (the pattern commands)
+const CMD_SLIDE_UP = 1;
+const CMD_SLIDE_DOWN = 2;
+const CMD_SLIDE_TO = 3;
+const CMD_VIBRATO = 4;
+const CMD_AD = 5;
+const CMD_SR = 6;
+
 function stepType(kind: number, s: Step): string {
-  if (kind === WAVE) return waveAction(s).type;
+  if (kind === WAVE) {
+    const a = waveAction(s);
+    if (a.type !== 'command') return a.type;
+    if (a.command === CMD_AD || a.command === CMD_SR) return 'env';
+    if (a.command >= CMD_SLIDE_UP && a.command <= CMD_SLIDE_TO) return 'slide';
+    if (a.command === CMD_VIBRATO) return 'vibrato';
+    return 'command';
+  }
   if (kind === PULSE) return pulseAction(s).type;
   return filterAction(s).type;
 }
@@ -824,9 +1090,16 @@ function stepType(kind: number, s: Step): string {
 /** A step of a new type, keeping what it can (the pitch, for wave steps). */
 function convertStep(kind: number, s: Step, type: string): Step {
   if (kind === WAVE) {
-    const actions: Record<string, WaveAction> = { wave: { type: 'wave', wave: 0x41 }, keep: { type: 'keep' }, wait: { type: 'wait', frames: 2 }, command: { type: 'command', command: 4 } };
+    const command = (c: number, right: number) => ({ left: waveLeft({ type: 'command', command: c }), right });
+    // A new envelope change drops to a lower sustain, keeping the release
+    if (type === 'env') return command(CMD_SR, 0x40 | ((instrument()?.sr ?? 0x88) & 15));
+    // A new slide goes down, a quarter of a semitone a frame on any note
+    if (type === 'slide') return command(CMD_SLIDE_DOWN, speedRow(0, 0x80, 2));
+    if (type === 'vibrato') return command(CMD_VIBRATO, speedRow(0, ...wobbleRow(DEFAULT_WOBBLE)));
+    if (type === 'command') return command(7, 0x41);
+    const actions: Record<string, WaveAction> = { wave: { type: 'wave', wave: 0x41 }, keep: { type: 'keep' }, wait: { type: 'wait', frames: 2 } };
     const keepsPitch = waveAction(s).type !== 'command';
-    return { left: waveLeft(actions[type]), right: type === 'command' ? 0 : keepsPitch ? s.right : 0 };
+    return { left: waveLeft(actions[type]), right: keepsPitch ? s.right : 0 };
   }
   if (kind === PULSE) {
     if (type === 'width') return pulseStep({ type: 'width', width: 0x800 });
@@ -868,13 +1141,23 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
   const type = document.createElement('select');
   type.className = 'step-type';
   type.setAttribute('aria-label', `Step ${u + 1} type`);
-  // Effects only show where a song already uses one
-  for (const [value, label] of STEP_TYPES[kind]) if (value !== 'command' || stepType(kind, s) === 'command') type.append(new Option(label, value));
+  const effects = document.createElement('optgroup');
+  effects.label = 'Effects';
+  for (const [value, label] of STEP_TYPES[kind]) {
+    if (FOUND_TYPES.includes(value) && stepType(kind, s) !== value) continue;
+    (EFFECT_TYPES.includes(value) ? effects : type).append(new Option(label, value));
+  }
+  if (effects.childElementCount) type.append(effects);
   type.value = stepType(kind, s);
   type.addEventListener('change', () => {
     before();
     const next = convertStep(kind, s, type.value);
     p.steps[i] = next;
+    // A slide moves the pitch once each time it runs: at the end, loop on it to keep sliding
+    if (type.value === 'slide' && i === p.steps.length - 1 && !p.next) {
+      p.next = { program: p, step: i };
+      toast('A slide moves the pitch a little each time it runs, so the program now loops on it to keep sliding');
+    }
     // A filter set-up shows with its cutoff: add one, or drop it for other types
     if (kind === FILTER && rows.length === 2 && type.value !== 'setup') {
       p.steps.splice(i + 1, 1);
@@ -945,7 +1228,7 @@ function describeUnit(kind: number, p: Program, rows: number[]): string {
     const cutoff = filterAction(p.steps[rows[1]]) as { type: 'cutoff'; cutoff: number };
     return `${passbandName(setup.passband)}, cutoff ${cutoff.cutoff}, resonance ${setup.resonance}${routingText(setup.voices)}`;
   }
-  return describeStep(kind, p.steps[rows[0]]);
+  return (kind === WAVE && describeEffect(p.steps[rows[0]])) || describeStep(kind, p.steps[rows[0]]);
 }
 
 function routingText(voices: number): string {
@@ -1056,14 +1339,123 @@ function waveFields(s: Step, box: HTMLElement, update: Update, get: () => Step) 
       label('then'),
       pitchField(s, update, get),
     );
+  } else if (a.command === CMD_AD || a.command === CMD_SR) {
+    envelopeFields(s, box, update, get);
+  } else if (a.command >= CMD_SLIDE_UP && a.command <= CMD_SLIDE_TO) {
+    slideFields(s, box, update, get);
+  } else if (a.command === CMD_VIBRATO) {
+    const wobble = () => wobbleOf(...(speedValues(get().right) ?? wobbleRow(DEFAULT_WOBBLE)));
+    const { speed, depth } = wobbleSliders(wobble, (w) => update({ ...get(), right: speedRow(get().right, ...wobbleRow(w)) }));
+    box.append(label('speed'), speed, label('depth'), depth);
   } else {
     const cmd = document.createElement('select');
     cmd.setAttribute('aria-label', 'Command');
-    for (const [c, name] of WAVE_COMMANDS) cmd.append(new Option(name, String(c)));
+    // The effects with their own step types aren't listed, unless this is one
+    for (const [c, name] of WAVE_COMMANDS) if (c > CMD_SR || c === a.command) cmd.append(new Option(name, String(c)));
+    if (!WAVE_COMMANDS.some(([c]) => c === a.command)) cmd.append(new Option(`Command ${hex(a.command).slice(1)} (not for wave programs)`, String(a.command)));
     cmd.value = String(a.command);
     cmd.addEventListener('change', () => update({ ...get(), left: waveLeft({ type: 'command', command: Number(cmd.value) }) }));
     box.append(cmd, hexField(s.right, (v) => update({ ...get(), right: v }), 'Command value, as in a pattern (hex). Slides and vibrato point at the speed table.'));
   }
+}
+
+/** A change to half the volume envelope, part way through the note. */
+function envelopeFields(s: Step, box: HTMLElement, update: Update, get: () => Step) {
+  const command = waveAction(s).type === 'command' ? (waveAction(s) as { command: number }).command : CMD_SR;
+  const ins = instrument();
+  const which = segmented(
+    [
+      [CMD_AD, 'Attack & decay', 'Changes how the note rises and falls to its sustain level'],
+      [CMD_SR, 'Sustain & release', 'Changes the level the note holds at, and how it fades after the key goes up'],
+    ],
+    command,
+    (c) => {
+      // Starts from the instrument's own setting for that half
+      update({ left: waveLeft({ type: 'command', command: c }), right: c === CMD_AD ? (ins?.ad ?? 0x09) : (ins?.sr ?? 0x88) });
+      renderSteps();
+      blip();
+    },
+  );
+  const [hi, lo]: ['a' | 's', 'd' | 'r'] = command === CMD_AD ? ['a', 'd'] : ['s', 'r'];
+  const names = { a: 'attack', d: 'decay', s: 'sustain', r: 'release' };
+  const pick = (key: 'a' | 'd' | 's' | 'r', value: number, set: (v: number) => void) => {
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', names[key]);
+    for (let v = 0; v < 16; v++) select.append(new Option(describeEnv(key, v), String(v)));
+    select.value = String(value);
+    select.addEventListener('change', () => {
+      set(Number(select.value));
+      blip();
+    });
+    return select;
+  };
+  box.append(
+    which,
+    label(names[hi]),
+    pick(hi, s.right >> 4, (v) => update({ ...get(), right: (v << 4) | (get().right & 15) })),
+    label(names[lo]),
+    pick(lo, s.right & 15, (v) => update({ ...get(), right: (get().right & 0xf0) | v })),
+  );
+}
+
+/** Moving the pitch up, down, or to the note played, a little each time the step runs. */
+function slideFields(s: Step, box: HTMLElement, update: Update, get: () => Step) {
+  const command = (waveAction(s) as { command: number }).command;
+  const direction = segmented(
+    [
+      [CMD_SLIDE_UP, 'Up', 'Raises the pitch'],
+      [CMD_SLIDE_DOWN, 'Down', 'Lowers the pitch'],
+      [CMD_SLIDE_TO, 'To the note', 'Moves toward the note played and stops there: start a step higher or lower for a scoop into the note'],
+    ],
+    command,
+    (c) => {
+      update({ ...get(), left: waveLeft({ type: 'command', command: c }) });
+      renderSteps();
+      blip();
+    },
+  );
+  box.append(direction);
+  const values = speedValues(s.right);
+  if (!values) {
+    // Sliding to the note with no speed jumps straight there
+    box.append(label(command === CMD_SLIDE_TO ? 'at once' : 'not moving'));
+    return;
+  }
+  const own = () => get().right;
+  const [left, right] = values;
+  const show = (l: number, r: number) => `${semitoneText(slideSemitones(l, r, test.note))} a frame${l & 0x80 ? '' : ` on ${noteName(test.note)}`}`;
+  // The same speed on every note halves a semitone's step: fewer halvings are faster
+  const speed =
+    left & 0x80
+      ? slider(-right, -8, 0, (n) => show(left, -n), (n) => update({ ...get(), right: speedRow(own(), 0x80, -n) }), 'How fast the pitch moves')
+      : slider(
+          (left << 8) | right,
+          1,
+          Math.max(0x400, (left << 8) | right),
+          (n) => show(n >> 8, n & 0xff),
+          (n) => update({ ...get(), right: speedRow(own(), n >> 8, n & 0xff) }),
+          'How fast the pitch moves: a fixed amount, so faster on low notes',
+        );
+  box.append(label('by'), speed);
+}
+
+/** A wave step's effect in plain words, with the speeds it reads. */
+function describeEffect(s: Step): string | null {
+  const a = waveAction(s);
+  if (a.type !== 'command') return null;
+  if (a.command === CMD_AD) return `Envelope: attack ${describeEnv('a', s.right >> 4)}, decay ${describeEnv('d', s.right & 15)}`;
+  if (a.command === CMD_SR) return `Envelope: sustain ${describeEnv('s', s.right >> 4)}, release ${describeEnv('r', s.right & 15)}`;
+  const values = speedValues(s.right);
+  if (a.command >= CMD_SLIDE_UP && a.command <= CMD_SLIDE_TO) {
+    const where = a.command === CMD_SLIDE_UP ? 'up' : a.command === CMD_SLIDE_DOWN ? 'down' : 'to the note played';
+    if (!values) return a.command === CMD_SLIDE_TO ? 'Jump to the note played' : `Slide ${where} (no speed)`;
+    return `Slide ${where}, ${semitoneText(slideSemitones(values[0], values[1], test.note))} a frame`;
+  }
+  if (a.command === CMD_VIBRATO && values) {
+    const size = vibratoSize(wobbleOf(...values), test.note);
+    return `Vibrato: ${size.rate.toFixed(1)} a second, ± ${semitoneText(size.depth)}`;
+  }
+  return null;
 }
 
 function pitchField(s: Step, update: Update, get: () => Step): HTMLElement {
@@ -1564,7 +1956,8 @@ function volume(): Volume | null {
   let keyUp = Math.round(frames / 2);
   if (!example) keyUp = held !== null ? Math.max(frames, liveFrame() + 1) : (releasedAt ?? frames);
   const gate = Array.from({ length: frames }, (_, f) => (trace!.control[f] & WAVE_GATE) !== 0 && f < keyUp);
-  const level = envelope(ad, sr, gate, ENV_STEPS);
+  // As the player sets it each frame: wave programs can change it mid-note
+  const level = envelope(trace.ad, trace.sr, gate, ENV_STEPS);
   let end = frames;
   for (let f = Math.max(keyUp, 1); f < frames; f++) {
     if (level[f * ENV_STEPS] < 0.02) {
@@ -2405,18 +2798,27 @@ $<HTMLSelectElement>('instrument').addEventListener('change', (e) => {
   });
 }
 
-// The note start panel opens above the bar, and closes on a click elsewhere
+// The instrument's panels open above the bar, one at a time, and close on a
+// click elsewhere
 {
-  const panel = $('note-start-panel');
-  const button = $('note-start');
-  const show = (open: boolean) => {
-    panel.hidden = !open;
-    button.setAttribute('aria-expanded', String(open));
-    renderNoteStart();
+  const panels: [string, string, () => void][] = [
+    ['note-start', 'note-start-panel', renderNoteStart],
+    ['vibrato', 'vibrato-panel', renderVibrato],
+  ];
+  const show = (which: string | null) => {
+    for (const [buttonId, panelId, render] of panels) {
+      const open = buttonId === which;
+      $(panelId).hidden = !open;
+      $(buttonId).setAttribute('aria-expanded', String(open));
+      render();
+    }
   };
-  button.addEventListener('click', () => show(panel.hidden === true));
+  for (const [buttonId, panelId] of panels) {
+    $(buttonId).addEventListener('click', () => show($(panelId).hidden ? buttonId : null));
+  }
   document.addEventListener('pointerdown', (e) => {
-    if (!panel.hidden && !panel.contains(e.target as Node) && e.target !== button) show(false);
+    const inside = panels.some(([buttonId, panelId]) => $(panelId).contains(e.target as Node) || $(buttonId).contains(e.target as Node));
+    if (!inside) show(null);
   });
 }
 
@@ -2477,6 +2879,7 @@ async function loadSong(bytes: ArrayBuffer, label: string) {
   state = {
     programs: splits.map((s) => s.programs),
     speed: song.tables[3],
+    speedFixed: song.tables[3].left.length,
     instruments,
     source: `From “${song.title || label}”${song.author ? ` by ${song.author}` : ''}. Changes here don’t touch the song file.`,
     kind: state.kind,

@@ -309,6 +309,34 @@ try {
   });
   report(sharedBefore && !sharedAfter, 'instruments share programs until copied');
 
+  // Turning vibrato on wobbles the traced pitch, once its delay is over (on
+  // Bass, whose saw leaves the pitch free: an arpeggio would set it each frame)
+  await tm.click('#kinds button[data-kind="0"]');
+  await tm.select('#instrument', '2');
+  await tm.click('#vibrato');
+  await tm.click('#vibrato-panel .toggles button:nth-child(2)');
+  const wobbles = await tm.waitForFunction(() => {
+    const t = window.instrumentMaker.trace();
+    const early = new Set(t.freq.slice(0, 10)).size;
+    const late = new Set(t.freq.slice(30, 60)).size;
+    return early === 1 && late > 2;
+  }, { timeout: 2000 }).then(() => true, () => false);
+  report(wobbles, 'instruments vibrato wobbles the pitch after a delay');
+  await tm.click('.intro');
+
+  // A slide step lowers the pitch every frame, looping on itself to keep going
+  await tm.click('#add-step');
+  const lastStep = await tm.evaluate(() => {
+    const s = window.instrumentMaker.state();
+    return s.instruments[s.current].targets[0].program.steps.length - 1;
+  });
+  await tm.select(`.step[data-step="${lastStep}"] .step-type`, 'slide');
+  const slides = await tm.waitForFunction(() => {
+    const t = window.instrumentMaker.trace();
+    return t.freq[3] < t.freq[2] && t.freq[20] < t.freq[10];
+  }, { timeout: 2000 }).then(() => true, () => false);
+  report(slides, 'instruments slide step moves the pitch');
+
   await tm.select('#examples', 'cabrinigreen.sng');
   await tm.waitForFunction(() => window.instrumentMaker.state().source !== '', { timeout: 5000 });
   const loaded = await tm.evaluate(() => {

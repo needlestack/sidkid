@@ -108,9 +108,13 @@
             <button class="mini" id="new-instrument" title="Make a new instrument">New</button>
             <button class="mini" id="duplicate-instrument" title="A new instrument using the same programs">Duplicate</button>
             <button class="mini danger" id="delete-instrument" title="Delete this instrument (its programs stay)">Delete</button>
-            <button class="mini" id="note-start" aria-expanded="false" aria-controls="note-start-panel" title="How each new note starts: restarting the sound, or gliding on">Note start…</button>
+            <span class="settings">
+              <button class="mini" id="note-start" aria-expanded="false" aria-controls="note-start-panel" title="How each new note starts: restarting the sound, or gliding on">Note start…</button>
+              <button class="mini" id="vibrato" aria-expanded="false" aria-controls="vibrato-panel" title="A gentle wobble in pitch while a note is held">Vibrato…</button>
+            </span>
           </div>
           <div class="popover" id="note-start-panel" hidden></div>
+          <div class="popover" id="vibrato-panel" hidden></div>
         </div>
         <div class="keyboard-wrap">
           <button class="octave-button" id="octave-down" aria-label="Octave down" title="Octave down">−</button>

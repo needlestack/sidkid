@@ -20,13 +20,15 @@ function expPeriod(level: number): number {
 /**
  * The envelope level (0-1) through each frame, `perFrame` samples a frame,
  * for an instrument's AD and SR bytes and whether the gate is on in each
- * frame. Starts from silence, as after GoatTracker's hard restart.
+ * frame. Starts from silence, as after GoatTracker's hard restart. AD and
+ * SR can be given for each frame, for programs that change them mid-note.
  */
-export function envelope(ad: number, sr: number, gate: boolean[], perFrame = 4): Float32Array {
-  const attack = RATE_PERIOD[ad >> 4];
-  const decay = RATE_PERIOD[ad & 15];
-  const sustain = (sr >> 4) * 0x11;
-  const release = RATE_PERIOD[sr & 15];
+export function envelope(ad: number | ArrayLike<number>, sr: number | ArrayLike<number>, gate: boolean[], perFrame = 4): Float32Array {
+  const at = (v: number | ArrayLike<number>, f: number) => (typeof v === 'number' ? v : v[f]);
+  let attack = 0;
+  let decay = 0;
+  let sustain = 0;
+  let release = 0;
   const out = new Float32Array(gate.length * perFrame + 1);
   const slice = FRAME_CYCLES / perFrame;
   let level = 0;
@@ -35,6 +37,10 @@ export function envelope(ad: number, sr: number, gate: boolean[], perFrame = 4):
   let exp = 0;
   let cycles = 0;
   for (let f = 0; f < gate.length; f++) {
+    attack = RATE_PERIOD[at(ad, f) >> 4];
+    decay = RATE_PERIOD[at(ad, f) & 15];
+    sustain = (at(sr, f) >> 4) * 0x11;
+    release = RATE_PERIOD[at(sr, f) & 15];
     if (gate[f] && state === 'release') state = 'attack';
     else if (!gate[f]) state = 'release';
     for (let i = 0; i < perFrame; i++) {

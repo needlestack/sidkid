@@ -719,13 +719,20 @@
   gap: 3px;
 }
 
-/* The note start panel, above the bar */
+/* How the instrument plays, on a line of its own */
+.instrument-tools .settings {
+  flex-basis: 100%;
+  display: flex;
+  gap: 3px;
+}
+
+/* The instrument's panels (note start, vibrato), above the bar */
 .popover {
   position: absolute;
   left: 0;
   bottom: calc(100% + 12px);
   z-index: 10;
-  width: 380px;
+  width: 400px;
   max-width: calc(100vw - 32px);
   display: grid;
   gap: 10px;
@@ -745,6 +752,45 @@
   grid-template-columns: 120px 1fr;
   gap: 10px;
   align-items: center;
+}
+
+.popover .slider input {
+  width: 130px;
+}
+
+.popover .slider output {
+  white-space: nowrap;
+}
+
+.popover-picture {
+  padding: 4px 0 2px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  display: flex;
+  justify-content: center;
+}
+
+.vibrato-icon {
+  color: var(--accent);
+  max-width: 100%;
+}
+
+.vibrato-mid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.vibrato-start {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.popover-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
 }
 
 .popover .toggle {
@@ -798,6 +844,23 @@
 .mini.danger:hover {
   color: var(--playhead);
   border-color: var(--playhead);
+}
+
+/* A setting that is on, such as vibrato */
+.mini.set {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.mini.set::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
 }
 
 .mini:disabled {

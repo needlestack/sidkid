@@ -79,6 +79,8 @@ export class Analyzer {
       cutoff: new Uint8Array(frames),
       routing: new Uint8Array(frames),
       mode: new Uint8Array(frames),
+      ad: new Uint8Array(frames),
+      sr: new Uint8Array(frames),
       pos: [new Uint8Array(frames), new Uint8Array(frames), new Uint8Array(frames)],
     };
     // The note starts after the instrument's gate timer: wait for it, so
@@ -95,6 +97,8 @@ export class Analyzer {
       trace.cutoff[f] = r[regs + 0x16];
       trace.routing[f] = r[regs + 0x17];
       trace.mode[f] = r[regs + 0x18];
+      trace.ad[f] = r[regs + 5];
+      trace.sr[f] = r[regs + 6];
     }
     sk._sk_reset();
     return trace;
@@ -117,6 +121,9 @@ export interface Trace {
   routing: Uint8Array;
   /** Passband (high nibble) and volume. */
   mode: Uint8Array;
+  /** Voice 1's envelope settings, which programs can change mid-note. */
+  ad: Uint8Array;
+  sr: Uint8Array;
   /** Wave, pulse and filter table positions each frame ran from (1-based, 0 = not running). */
   pos: Uint8Array[];
 }
