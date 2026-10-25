@@ -111,8 +111,8 @@ WASM := $(BUILD)/wasm
 EMCC ?= emcc
 EMXX ?= em++
 WASM_OBJS := $(addprefix $(WASM)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(WASM)/,$(API))
-WASM_FUNCS := sk_init sk_set_model sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop \
-	sk_is_playing sk_toggle_mute sk_is_muted sk_render sk_render_frame sk_sidregs sk_envelopes sk_frames \
+WASM_FUNCS := sk_init sk_configure sk_set_model sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop \
+	sk_is_playing sk_song_looped sk_toggle_mute sk_is_muted sk_render sk_render_frame sk_sidregs sk_envelopes sk_frames \
 	sk_song_name sk_author_name sk_copyright_name malloc free
 comma := ,
 empty :=

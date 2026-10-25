@@ -30,6 +30,7 @@
             <svg viewBox="0 0 24 24" class="icon-stop"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
           </button>
           <div class="time" id="time">0:00</div>
+          <button id="export" class="button secondary" disabled title="Render one pass of the song, with a fade-out, to a WAV file">Export WAV</button>
           <label class="field">
             <span>Song</span>
             <select id="subsong" disabled></select>
@@ -60,8 +61,51 @@
         </div>
       </section>
 
+      <section class="settings card" id="settings">
+        <h2>Playback <span class="hint">GoatTracker doesn't save these in the song, so SIDKid remembers them for you</span></h2>
+        <div class="settings-row">
+          <div class="field">
+            <span>Speed</span>
+            <div class="segmented" id="speed">
+              <button data-speed="0" title="Player runs every other frame (25 Hz)">½×</button>
+              <button data-speed="1" title="Player runs once per frame: the normal speed">1×</button>
+              <button data-speed="2" title="Player runs twice per frame, for smoother effects">2×</button>
+              <button data-speed="3">3×</button>
+              <button data-speed="4">4×</button>
+            </div>
+          </div>
+          <div class="field">
+            <span>Timing</span>
+            <div class="segmented" id="timing">
+              <button data-ntsc="0" title="European C64: 50 frames per second">PAL</button>
+              <button data-ntsc="1" title="American C64: 60 frames per second, slightly higher pitch">NTSC</button>
+            </div>
+          </div>
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <div class="advanced-body">
+              <label class="field">
+                <span>Hard restart ADSR</span>
+                <input id="hardrestart" maxlength="4" spellcheck="false" title="AD/SR written just before each note so its attack starts cleanly (hex, default 0F00)" />
+              </label>
+              <label class="check" title="Skip pulse updates on some frames to save C64 CPU time. Some songs are written for it off.">
+                <input type="checkbox" id="pulseopt" /> Pulse optimization
+              </label>
+              <label class="check" title="Skip some realtime effect updates to save C64 CPU time">
+                <input type="checkbox" id="realtimeopt" /> Realtime effect optimization
+              </label>
+            </div>
+          </details>
+        </div>
+      </section>
+
       <p class="keys">Space play/stop · 1 2 3 mute voices · Shift+1 2 3 solo</p>
     </main>
+
+    <footer class="credits">
+      SIDKid plays music with the GoatTracker 2 engine by Lasse Öörni (Cadaver) and reSID by Dag Lem.
+      Free software under the GNU GPL v2<span id="source-link"></span>.
+    </footer>
 
     <div class="drop" id="drop">Drop a .sng file to load it</div>
     <div class="toast" id="toast" role="status"></div>

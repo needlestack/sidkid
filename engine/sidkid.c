@@ -16,19 +16,28 @@ static short framebuf[SK_MAX_FRAME_SAMPLES];
 static int framepos = 0;
 static int framelen = 0;
 
-int sk_init(int rate, int model, int usentsc, int interpolate)
-{
-  if (rate < MINMIXRATE) rate = MINMIXRATE;
-  if (rate > MAXMIXRATE) rate = MAXMIXRATE;
-  samplerate = rate;
-  ntsc = usentsc ? 1 : 0;
+// Order list position of each voice after the previous frame, and whether
+// it has since jumped backwards (the song looped)
+static unsigned char lastsongptr[MAX_CHN];
+static int looped[MAX_CHN];
 
+static void settempo(void)
+{
   // Same tempo as gsound.c: BME calls the player every
   // (rate * 5 / 2) / tempo samples, i.e. 50 Hz PAL or 60 Hz NTSC.
   if (multiplier)
     frametempo = (ntsc ? 150 : 125) * multiplier;
   else
     frametempo = (ntsc ? 150 : 125) / 2;
+}
+
+int sk_init(int rate, int model, int usentsc, int interpolate)
+{
+  if (rate < MINMIXRATE) rate = MINMIXRATE;
+  if (rate > MAXMIXRATE) rate = MAXMIXRATE;
+  samplerate = rate;
+  ntsc = usentsc ? 1 : 0;
+  settempo();
 
   initchannels();
   clearsong(1,1,1,1,1);
@@ -37,6 +46,22 @@ int sk_init(int rate, int model, int usentsc, int interpolate)
   framepos = 0;
   framelen = 0;
   return 1;
+}
+
+void sk_configure(int newmultiplier, int newntsc, int newadparam, int newoptimizepulse, int newoptimizerealtime)
+{
+  if ((newmultiplier < 0) || (newmultiplier > 16)) newmultiplier = 1;
+  multiplier = newmultiplier;
+  adparam = newadparam & 0xffff;
+  optimizepulse = newoptimizepulse ? 1 : 0;
+  optimizerealtime = newoptimizerealtime ? 1 : 0;
+  if ((newntsc ? 1 : 0) != ntsc)
+  {
+    // The clock rate changes, so reSID has to be set up again
+    ntsc = newntsc ? 1 : 0;
+    sk_set_model(sidmodel, sidinterpolate);
+  }
+  settempo();
 }
 
 void sk_set_model(int model, int interpolate)
@@ -77,8 +102,20 @@ int sk_num_subsongs(void)
 
 void sk_play(int subsong)
 {
+  int c;
+
   if ((subsong < 0) || (subsong >= MAX_SONGS)) return;
   initsong(subsong, PLAY_BEGINNING);
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    lastsongptr[c] = 0;
+    looped[c] = 0;
+  }
+}
+
+int sk_song_looped(void)
+{
+  return looped[0] && looped[1] && looped[2];
 }
 
 void sk_stop(void)
@@ -107,8 +144,15 @@ int sk_render_frame(short *out)
 {
   int samples = ((samplerate * 5) >> 1) / frametempo;
 
+  int c;
+
   if (samples > SK_MAX_FRAME_SAMPLES) samples = SK_MAX_FRAME_SAMPLES;
   playroutine();
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if (chn[c].songptr < lastsongptr[c]) looped[c] = 1;
+    lastsongptr[c] = chn[c].songptr;
+  }
   return sid_fillbuffer(out, samples);
 }
 

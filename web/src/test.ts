@@ -1,11 +1,21 @@
 // Test hook for scripts/browsertest.mjs: renders a song through the real
 // worklet path with an OfflineAudioContext. Only built with --mode test.
 
-import { Player, SAMPLE_RATE } from './engine/player';
+import { renderSong } from './engine/export';
+import { MODEL_6581, Player, SAMPLE_RATE } from './engine/player';
+import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
 
-async function renderOffline(url: string, seconds: number) {
+function base64(samples: Int16Array) {
+  let binary = '';
+  const bytes = new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+async function renderOffline(url: string, seconds: number, settings?: Partial<Settings>) {
   const context = new OfflineAudioContext(2, SAMPLE_RATE * seconds, SAMPLE_RATE);
   const player = new Player();
+  player.setSettings({ ...DEFAULT_SETTINGS, ...settings });
   await player.start(context);
   const info = await player.load(await (await fetch(url)).arrayBuffer());
   player.play(0);
@@ -20,10 +30,19 @@ async function renderOffline(url: string, seconds: number) {
     if (left[i] !== right[i]) channelsDiffer = true;
   }
   // Base64 keeps the transfer to puppeteer compact
-  let binary = '';
-  const bytes = new Uint8Array(samples.buffer);
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return { info, channelsDiffer, samples: btoa(binary) };
+  return { info, channelsDiffer, samples: base64(samples) };
 }
 
-(window as unknown as { renderOffline: typeof renderOffline }).renderOffline = renderOffline;
+async function exportSong(url: string, settings?: Partial<Settings>, fadeSeconds = 0) {
+  const rendered = await renderSong({
+    song: await (await fetch(url)).arrayBuffer(),
+    settings: { ...DEFAULT_SETTINGS, ...settings },
+    model: MODEL_6581,
+    subsong: 0,
+    muted: [false, false, false],
+    fadeSeconds,
+  });
+  return { looped: rendered.looped, sampleRate: rendered.sampleRate, samples: base64(rendered.samples) };
+}
+
+Object.assign(window, { renderOffline, exportSong });

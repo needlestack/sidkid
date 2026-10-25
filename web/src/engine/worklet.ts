@@ -4,6 +4,7 @@
 // not affect the output.
 
 import createSidKid, { type SidKidModule } from '@engine/sidkid.js';
+import { configure } from './configure';
 import type { Command, Event, ProcessorOptions } from './protocol';
 
 // AudioWorkletGlobalScope is not in TypeScript's DOM lib
@@ -31,10 +32,11 @@ class SidKidProcessor extends AudioWorkletProcessor {
     void this.boot(options.processorOptions);
   }
 
-  private async boot({ wasm, model }: ProcessorOptions) {
+  private async boot({ wasm, model, settings }: ProcessorOptions) {
     try {
       const sk = await createSidKid({ wasmBinary: wasm });
-      sk._sk_init(sampleRate, model, 0, 0);
+      sk._sk_init(sampleRate, model, settings.ntsc ? 1 : 0, 0);
+      configure(sk, settings);
       this.buffer = sk._malloc(BLOCK * 2);
       this.envelopes = sk._malloc(3);
       this.path = sk._malloc(SONG_PATH.length + 1);
@@ -83,6 +85,9 @@ class SidKidProcessor extends AudioWorkletProcessor {
         break;
       case 'model':
         sk._sk_set_model(cmd.model, 0);
+        break;
+      case 'settings':
+        configure(sk, cmd.settings);
         break;
       case 'ping':
         this.send({ type: 'pong', id: cmd.id });

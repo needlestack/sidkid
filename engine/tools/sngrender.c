@@ -9,6 +9,13 @@
 //   -m model      0 = 6581, 1 = 8580 (default 0)
 //   -i mode       reSID interpolation as GoatTracker's -I (default 0)
 //   -t rate       sample rate (default 44100)
+//   -S n          speed multiplier, 0 = half speed (default 1)
+//   -N 0|1        NTSC timing (default 0, PAL)
+//   -A hex        hard restart AD/SR (default 0F00)
+//   -O 0|1        pulse optimization (default 1)
+//   -R 0|1        realtime effect optimization (default 1)
+//
+// Options -S, -N, -A, -O and -R match GoatTracker's.
 //
 
 #include <stdio.h>
@@ -55,6 +62,13 @@ int main(int argc, char **argv)
   int model = 0;
   int interpolate = 0;
   int rate = 44100;
+  int speed = 1;
+  int ntsc = 0;
+  int adparam = 0x0f00;
+  int pulseopt = 1;
+  int realtimeopt = 1;
+  int loopframe = -1;
+  int frames = 0;
   FILE *wav = NULL;
   FILE *reg = NULL;
   unsigned datasize = 0;
@@ -77,6 +91,11 @@ int main(int argc, char **argv)
         case 'm': model = atoi(v); break;
         case 'i': interpolate = atoi(v); break;
         case 't': rate = atoi(v); break;
+        case 'S': speed = atoi(v); break;
+        case 'N': ntsc = atoi(v); break;
+        case 'A': adparam = (int)strtol(v, NULL, 16); break;
+        case 'O': pulseopt = atoi(v); break;
+        case 'R': realtimeopt = atoi(v); break;
         default:
           fprintf(stderr, "Unknown option %s\n", argv[c-1]);
           return 1;
@@ -87,11 +106,13 @@ int main(int argc, char **argv)
 
   if (!songpath)
   {
-    fprintf(stderr, "Usage: sngrender song.sng [-o out.wav] [-r regs.txt] [-s seconds] [-n subsong] [-m model] [-i interp] [-t rate]\n");
+    fprintf(stderr, "Usage: sngrender song.sng [-o out.wav] [-r regs.txt] [-s seconds] [-n subsong] [-m model] [-i interp] [-t rate]\n"
+      "                 [-S speed] [-N ntsc] [-A adsr] [-O pulseopt] [-R realtimeopt]\n");
     return 1;
   }
 
-  sk_init(rate, model, 0, interpolate);
+  sk_init(rate, model, ntsc, interpolate);
+  sk_configure(speed, ntsc, adparam, pulseopt, realtimeopt);
   if (!sk_load_song(songpath))
   {
     fprintf(stderr, "Could not load %s\n", songpath);
@@ -127,6 +148,8 @@ int main(int argc, char **argv)
     int n = sk_render_frame(buf);
 
     if (n <= 0) break;
+    frames++;
+    if ((loopframe < 0) && sk_song_looped()) loopframe = frames;
     if (n > totalsamples - done) n = totalsamples - done;
     if (wav)
     {
@@ -152,5 +175,7 @@ int main(int argc, char **argv)
   }
   if (reg) fclose(reg);
   fprintf(stderr, "Rendered %.1f seconds\n", (double)done / rate);
+  if (loopframe >= 0)
+    fprintf(stderr, "Song loops after %d frames (%.1f seconds)\n", loopframe, (double)loopframe * done / frames / rate);
   return 0;
 }

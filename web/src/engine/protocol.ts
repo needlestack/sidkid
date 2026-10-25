@@ -9,6 +9,28 @@ export interface SongInfo {
   subsongs: number;
 }
 
+/**
+ * Player options GoatTracker keeps in its configuration rather than in the
+ * song file, so a song may need them set to play correctly.
+ */
+export interface Settings {
+  /** Player calls per frame; 0 = half speed (25 Hz on PAL). */
+  multiplier: number;
+  ntsc: boolean;
+  /** AD/SR written before each note for a reliable attack. */
+  hardRestart: number;
+  pulseOptimization: boolean;
+  realtimeOptimization: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  multiplier: 1,
+  ntsc: false,
+  hardRestart: 0x0f00,
+  pulseOptimization: true,
+  realtimeOptimization: true,
+};
+
 export interface Status {
   playing: boolean;
   /** Frames since the song started (50 per second on PAL). */
@@ -26,6 +48,7 @@ export type Command =
   | { type: 'stop' }
   | { type: 'mute'; channel: number; muted: boolean }
   | { type: 'model'; model: number }
+  | { type: 'settings'; settings: Settings }
   | { type: 'ping'; id: number };
 
 export type Event =
@@ -38,4 +61,5 @@ export type Event =
 export interface ProcessorOptions {
   wasm: ArrayBuffer;
   model: number;
+  settings: Settings;
 }

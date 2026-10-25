@@ -1,8 +1,8 @@
 // Main-thread handle on the engine running in the audio worklet.
 
 import workletUrl from './worklet.ts?worker&url';
-import wasmUrl from '@engine/sidkid.wasm?url';
-import type { Command, Event, ProcessorOptions, SongInfo, Status } from './protocol';
+import { wasmBytes } from './wasm';
+import { DEFAULT_SETTINGS, type Command, type Event, type ProcessorOptions, type Settings, type SongInfo, type Status } from './protocol';
 
 export const SAMPLE_RATE = 48000;
 
@@ -20,6 +20,7 @@ export class Player {
   private pendingLoads = new Map<number, (info: SongInfo | null) => void>();
   private pendingPings = new Map<number, () => void>();
   private model = MODEL_6581;
+  private settings: Settings = DEFAULT_SETTINGS;
 
   /**
    * Starts audio. Browsers only allow this from a user gesture, so call it
@@ -45,11 +46,8 @@ export class Player {
 
   private async boot(context: BaseAudioContext): Promise<void> {
     this.context = context;
-    const [wasm] = await Promise.all([
-      fetch(wasmUrl).then((r) => r.arrayBuffer()),
-      context.audioWorklet.addModule(workletUrl),
-    ]);
-    const processorOptions: ProcessorOptions = { wasm, model: this.model };
+    const [wasm] = await Promise.all([wasmBytes(), context.audioWorklet.addModule(workletUrl)]);
+    const processorOptions: ProcessorOptions = { wasm, model: this.model, settings: this.settings };
     const node = new AudioWorkletNode(context, 'sidkid', {
       numberOfInputs: 0,
       outputChannelCount: [2],
@@ -124,5 +122,11 @@ export class Player {
   setModel(model: number) {
     this.model = model;
     if (this.node) this.send({ type: 'model', model });
+  }
+
+  /** Speed and timing changes take full effect from the next play(). */
+  setSettings(settings: Settings) {
+    this.settings = settings;
+    if (this.node) this.send({ type: 'settings', settings });
   }
 }

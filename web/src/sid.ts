@@ -1,6 +1,7 @@
 // Decodes raw SID register values into something people can read.
 
-const PAL_CLOCK = 985248;
+export const PAL_CLOCK = 985248;
+export const NTSC_CLOCK = 1022727;
 const NOTE_NAMES = ['C-', 'C#', 'D-', 'D#', 'E-', 'F-', 'F#', 'G-', 'G#', 'A-', 'A#', 'B-'];
 
 export interface VoiceState {
@@ -42,11 +43,11 @@ export function noteName(hz: number): string {
   return NOTE_NAMES[midi % 12] + octave;
 }
 
-export function voice(regs: Uint8Array, v: number): VoiceState {
+export function voice(regs: Uint8Array, v: number, clock = PAL_CLOCK): VoiceState {
   const base = v * 7;
   const freqReg = regs[base] | (regs[base + 1] << 8);
   const ctrl = regs[base + 4];
-  const frequency = (freqReg * PAL_CLOCK) / 16777216;
+  const frequency = (freqReg * clock) / 16777216;
   const anyWave = (ctrl & 0xf0) !== 0;
   return {
     note: anyWave ? noteName(frequency) : '',

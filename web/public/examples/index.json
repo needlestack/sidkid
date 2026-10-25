@@ -3,7 +3,10 @@
     "file": "2xtest.sng",
     "title": "MW Title Remix, 2x-speed",
     "author": "Cadaver",
-    "copyright": "10/2001"
+    "copyright": "10/2001",
+    "settings": {
+      "multiplier": 2
+    }
   },
   {
     "file": "cabrinigreen.sng",
@@ -63,7 +66,10 @@
     "file": "tempo2test.sng",
     "title": "Tempo2 test (switch POpt off!)",
     "author": "Cadaver",
-    "copyright": "2006 Covert Bitops"
+    "copyright": "2006 Covert Bitops",
+    "settings": {
+      "pulseOptimization": false
+    }
   },
   {
     "file": "transylvanian.sng",

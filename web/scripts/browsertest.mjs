@@ -6,7 +6,7 @@
 // 2. UI: pick an example from the menu, check it loads and plays, and save a
 //    screenshots to build/webtest/.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { preview } from 'vite';
 import puppeteer from 'puppeteer-core';
@@ -18,6 +18,28 @@ const SNGRENDER = `${ROOT}build/native/sngrender`;
 const EXAMPLES = `${ROOT}web/public/examples`;
 const SECONDS = 20;
 const RATE = 48000;
+const EXAMPLE_INDEX = JSON.parse(readFileSync(`${EXAMPLES}/index.json`, 'utf8'));
+
+// sngrender options matching an example's settings in index.json
+function renderFlags(settings = {}) {
+  const flags = [];
+  if (settings.multiplier !== undefined) flags.push('-S', String(settings.multiplier));
+  if (settings.ntsc !== undefined) flags.push('-N', settings.ntsc ? '1' : '0');
+  if (settings.hardRestart !== undefined) flags.push('-A', settings.hardRestart.toString(16));
+  if (settings.pulseOptimization !== undefined) flags.push('-O', settings.pulseOptimization ? '1' : '0');
+  if (settings.realtimeOptimization !== undefined) flags.push('-R', settings.realtimeOptimization ? '1' : '0');
+  return flags;
+}
+
+function readWav(path) {
+  const wav = readFileSync(path).subarray(44);
+  return new Int16Array(wav.buffer, wav.byteOffset, wav.length >> 1);
+}
+
+function decode(base64) {
+  const bytes = Buffer.from(base64, 'base64');
+  return new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length >> 1);
+}
 
 mkdirSync(OUT, { recursive: true });
 
@@ -42,15 +64,13 @@ try {
   await page.goto(`${base}test.html`);
   await page.waitForFunction(() => 'renderOffline' in window);
 
-  for (const file of readdirSync(EXAMPLES).filter((f) => f.endsWith('.sng')).sort()) {
+  for (const { file, settings } of EXAMPLE_INDEX) {
     const name = file.replace(/\.sng$/, '');
-    execFileSync(SNGRENDER, [`${EXAMPLES}/${file}`, '-t', String(RATE), '-s', String(SECONDS), '-o', `${OUT}/${name}.wav`], { stdio: 'ignore' });
-    const wav = readFileSync(`${OUT}/${name}.wav`).subarray(44);
-    const native = new Int16Array(wav.buffer, wav.byteOffset, wav.length >> 1);
+    execFileSync(SNGRENDER, [`${EXAMPLES}/${file}`, '-t', String(RATE), '-s', String(SECONDS), '-o', `${OUT}/${name}.wav`, ...renderFlags(settings)], { stdio: 'ignore' });
+    const native = readWav(`${OUT}/${name}.wav`);
 
-    const result = await page.evaluate((url, seconds) => window.renderOffline(url, seconds), `examples/${file}`, SECONDS);
-    const bytes = Buffer.from(result.samples, 'base64');
-    const browserSamples = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length >> 1);
+    const result = await page.evaluate((url, seconds, s) => window.renderOffline(url, seconds, s), `examples/${file}`, SECONDS, settings);
+    const browserSamples = decode(result.samples);
 
     let first = -1;
     for (let i = 0; i < native.length; i++) {
@@ -67,6 +87,36 @@ try {
         : !lengthOk ? `length ${browserSamples.length} vs ${native.length}`
         : first >= 0 ? `differs from sample ${first} (${(first / RATE).toFixed(3)} s)`
         : result.channelsDiffer ? 'left and right differ' : '',
+    );
+  }
+
+  // --- WAV export: one pass, no fade, must equal the native render up to
+  // the loop point that sngrender reports ---------------------------------
+  for (const file of ['dojo.sng', '2xtest.sng']) {
+    const name = file.replace(/\.sng$/, '');
+    const { settings } = EXAMPLE_INDEX.find((e) => e.file === file);
+    // sngrender reports the loop point on stderr
+    const log = spawnSync(SNGRENDER, [`${EXAMPLES}/${file}`, '-s', '600', '-o', `${OUT}/${name}-export.wav`, ...renderFlags(settings)], { encoding: 'utf8' }).stderr;
+    const loopFrames = Number(/loops after (\d+) frames/.exec(log)?.[1]);
+    const native = readWav(`${OUT}/${name}-export.wav`);
+    const samplesPerFrame = Math.floor(((44100 * 5) >> 1) / (125 * (settings?.multiplier ?? 1)));
+
+    const result = await page.evaluate((url, s) => window.exportSong(url, s), `examples/${file}`, settings);
+    const exported = decode(result.samples);
+    let first = -1;
+    for (let i = 0; i < exported.length; i++) {
+      if (exported[i] !== native[i]) {
+        first = i;
+        break;
+      }
+    }
+    const expectedLength = loopFrames * samplesPerFrame;
+    report(
+      result.looped && exported.length === expectedLength && first < 0,
+      `export  ${name.padEnd(16)}`,
+      `${(exported.length / 44100).toFixed(1)} s` +
+        (exported.length !== expectedLength ? `, expected ${(expectedLength / 44100).toFixed(1)} s` : '') +
+        (first >= 0 ? `, differs from sample ${first}` : ''),
     );
   }
   await page.close();
@@ -101,6 +151,14 @@ try {
   await ui.keyboard.press('Space');
   await ui.waitForFunction(() => !document.getElementById('play').classList.contains('playing'), { timeout: 2000 })
     .then(() => report(true, 'ui stops with space'), () => report(false, 'ui stops with space'));
+
+  await ui.select('#examples', '2xtest.sng');
+  await ui.waitForFunction(() => document.getElementById('title').textContent.includes('2x-speed'), { timeout: 5000 });
+  const speed = await ui.$eval('#speed .on', (el) => el.dataset.speed);
+  report(speed === '2', 'ui applies example speed setting', `speed ${speed}`);
+  await ui.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+  await ui.click('.advanced summary');
+  await ui.screenshot({ path: `${OUT}/ui-settings.png`, fullPage: true });
 
   report(errors.length === 0, 'ui without errors', errors.join(' | '));
 } finally {

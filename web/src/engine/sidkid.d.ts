@@ -8,15 +8,18 @@ declare module '@engine/sidkid.js' {
     _malloc(size: number): number;
     _free(ptr: number): void;
     _sk_init(samplerate: number, model: number, ntsc: number, interpolate: number): number;
+    _sk_configure(multiplier: number, ntsc: number, adparam: number, optimizepulse: number, optimizerealtime: number): void;
     _sk_set_model(model: number, interpolate: number): void;
     _sk_load_song(path: number): number;
     _sk_num_subsongs(): number;
     _sk_play(subsong: number): void;
     _sk_stop(): void;
     _sk_is_playing(): number;
+    _sk_song_looped(): number;
     _sk_toggle_mute(channel: number): void;
     _sk_is_muted(channel: number): number;
     _sk_render(out: number, samples: number): void;
+    _sk_render_frame(out: number): number;
     _sk_sidregs(): number;
     _sk_envelopes(out: number): void;
     _sk_frames(): number;

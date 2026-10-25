@@ -23,6 +23,11 @@ extern "C" {
 // 2 = reSID-fp, 3 = reSID-fp with resampling (as GoatTracker's -I option)
 int sk_init(int samplerate, int model, int ntsc, int interpolate);
 
+// Player options that GoatTracker keeps in its configuration rather than in
+// the song (its -S, -N, -A, -O and -R options). multiplier 0 means half
+// speed; adparam is the hard restart AD/SR (default 0x0f00).
+void sk_configure(int multiplier, int ntsc, int adparam, int optimizepulse, int optimizerealtime);
+
 // Changes the emulated chip without touching the loaded song.
 void sk_set_model(int model, int interpolate);
 
@@ -34,6 +39,11 @@ int sk_num_subsongs(void);
 void sk_play(int subsong);
 void sk_stop(void);
 int sk_is_playing(void);
+
+// True once every voice has wrapped around to its loop point since
+// sk_play(), i.e. the song has played through once.
+int sk_song_looped(void);
+
 void sk_toggle_mute(int channel);
 int sk_is_muted(int channel);
 
