@@ -22,7 +22,9 @@
 #include "gsong.h"
 #include "gplay.h"
 
-#define MAX_FILENAME 60
+// GoatTracker uses 60, which suits its file dialog (names only) but not the
+// full paths SIDKid passes; nothing in the song format depends on it
+#define MAX_FILENAME 1024
 #define MAX_PATHNAME 256
 
 // gtable.h

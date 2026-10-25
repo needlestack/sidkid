@@ -84,7 +84,7 @@ try {
 
   for (const { file, settings } of EXAMPLE_INDEX) {
     const name = file.replace(/\.sng$/, '');
-    execFileSync(SNGRENDER, [`${EXAMPLES}/${file}`, '-t', String(RATE), '-s', String(SECONDS), '-o', `${OUT}/${name}.wav`, ...renderFlags(settings)], { stdio: 'ignore' });
+    execFileSync(SNGRENDER, [`${EXAMPLES}/${file}`, '-t', String(RATE), '-s', String(SECONDS), '-o', `${OUT}/${name}.wav`, ...renderFlags(settings)], { stdio: ['ignore', 'ignore', 'inherit'] });
     const native = readWav(`${OUT}/${name}.wav`);
 
     const result = await page.evaluate((url, seconds, s) => window.renderOffline(url, seconds, s), `examples/${file}`, SECONDS, settings);
