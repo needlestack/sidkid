@@ -807,6 +807,9 @@ function warning(kind: number, p: Program, i: number): string {
     const t = waveAction(p.steps[0]).type;
     if (t === 'keep' || t === 'wait') return ' — as a first step this can make notes go missing; start with Set waveform';
   }
+  if (kind === FILTER && filterAction(p.steps[i]).type !== 'setup' && !setupBefore(p, i)) {
+    return ' — no filter set-up before this step: on its own it only moves the cutoff of whatever filter setting is already playing (none at the start of a song, so you won’t hear it)';
+  }
   return '';
 }
 
@@ -1023,7 +1026,8 @@ function filterFields(p: Program, rows: number[], box: HTMLElement, update: (s: 
     const shape = setupBefore(p, i);
     box.append(
       filterCurve({
-        get: () => ({ passband: shape?.passband ?? FILTER_LOW, resonance: shape?.resonance ?? 0, cutoff: p.steps[i].right }),
+        // With no set-up before it there is no filter shape to show
+        get: () => ({ passband: shape?.passband ?? 0, resonance: shape?.resonance ?? 0, cutoff: p.steps[i].right }),
         change: ({ cutoff }) => cutoff !== undefined && update(filterStep({ type: 'cutoff', cutoff }), i),
         done: () => blip(),
         resonance: false,
