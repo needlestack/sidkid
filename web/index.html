@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIDKid</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237c6cf2'/><path d='M4 11V5l4 3 4-3v6' stroke='white' stroke-width='1.6' fill='none'/></svg>" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">SIDKid <span>C64 music, made friendly</span></div>
+      <div class="files">
+        <select id="examples" aria-label="Example songs">
+          <option value="">Example songs…</option>
+        </select>
+        <button id="open" class="button">Open .sng…</button>
+        <input id="file" type="file" accept=".sng" hidden />
+      </div>
+    </header>
+
+    <main>
+      <section class="song">
+        <div>
+          <h1 id="title">No song loaded</h1>
+          <p id="byline">Open a GoatTracker .sng file, drop one here, or pick an example.</p>
+        </div>
+        <div class="transport">
+          <button id="play" class="play" disabled aria-label="Play">
+            <svg viewBox="0 0 24 24" class="icon-play"><path d="M7 4.5v15l13-7.5z" /></svg>
+            <svg viewBox="0 0 24 24" class="icon-stop"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
+          </button>
+          <div class="time" id="time">0:00</div>
+          <label class="field">
+            <span>Song</span>
+            <select id="subsong" disabled></select>
+          </label>
+          <div class="field">
+            <span>Chip</span>
+            <div class="segmented" id="model">
+              <button data-model="0" class="on" title="The original C64 SID: gritty, with a characterful filter">6581</button>
+              <button data-model="1" title="The later SID revision: cleaner, with a brighter filter">8580</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="voices" id="voices"></section>
+
+      <section class="filter card" id="filter">
+        <h2>Filter <span class="hint">one filter, shared by all three voices</span></h2>
+        <div class="filter-row">
+          <div class="chips">
+            <span class="chip" data-f="lowpass">Low</span>
+            <span class="chip" data-f="bandpass">Band</span>
+            <span class="chip" data-f="highpass">High</span>
+          </div>
+          <div class="meter-field"><span>Cutoff</span><div class="meter"><div id="cutoff"></div></div></div>
+          <div class="meter-field"><span>Resonance</span><div class="meter"><div id="resonance"></div></div></div>
+          <div class="meter-field"><span>Volume</span><div class="meter"><div id="volume"></div></div></div>
+        </div>
+      </section>
+
+      <p class="keys">Space play/stop · 1 2 3 mute voices · Shift+1 2 3 solo</p>
+    </main>
+
+    <div class="drop" id="drop">Drop a .sng file to load it</div>
+    <div class="toast" id="toast" role="status"></div>
+
+    <template id="voice-template">
+      <article class="voice card">
+        <header>
+          <h2></h2>
+          <div class="voice-buttons">
+            <button class="mute" title="Mute">M</button>
+            <button class="solo" title="Solo">S</button>
+          </div>
+        </header>
+        <div class="voice-main">
+          <div class="note">—</div>
+          <div class="gate" title="Gate: on while the note is held"></div>
+        </div>
+        <div class="chips waves">
+          <span class="chip" data-w="triangle" title="Triangle: soft, flute-like">Tri</span>
+          <span class="chip" data-w="sawtooth" title="Sawtooth: bright and buzzy">Saw</span>
+          <span class="chip" data-w="pulse" title="Pulse: hollow to nasal, depending on width">Pulse</span>
+          <span class="chip" data-w="noise" title="Noise: drums and effects">Noise</span>
+        </div>
+        <div class="meter-field"><span>Level</span><div class="meter level"><div class="env"></div></div></div>
+        <div class="meter-field"><span>Pulse width</span><div class="meter"><div class="pw"></div></div></div>
+        <footer>
+          <span class="adsr" title="Attack, Decay, Sustain, Release (0-F)"></span>
+          <span class="flags"></span>
+        </footer>
+      </article>
+    </template>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

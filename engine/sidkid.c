@@ -9,6 +9,8 @@ extern int timeframes;
 
 static int samplerate = 44100;
 static int frametempo = 125;
+static int sidmodel = SK_MODEL_6581;
+static int sidinterpolate = 0;
 
 static short framebuf[SK_MAX_FRAME_SAMPLES];
 static int framepos = 0;
@@ -30,11 +32,18 @@ int sk_init(int rate, int model, int usentsc, int interpolate)
 
   initchannels();
   clearsong(1,1,1,1,1);
-  sid_init(samplerate, model == SK_MODEL_8580, ntsc, interpolate & 1, 0, interpolate >> 1);
+  sk_set_model(model, interpolate);
 
   framepos = 0;
   framelen = 0;
   return 1;
+}
+
+void sk_set_model(int model, int interpolate)
+{
+  sidmodel = model;
+  sidinterpolate = interpolate;
+  sid_init(samplerate, sidmodel == SK_MODEL_8580, ntsc, sidinterpolate & 1, 0, sidinterpolate >> 1);
 }
 
 int sk_load_song(const char *path)

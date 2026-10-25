@@ -23,6 +23,9 @@ extern "C" {
 // 2 = reSID-fp, 3 = reSID-fp with resampling (as GoatTracker's -I option)
 int sk_init(int samplerate, int model, int ntsc, int interpolate);
 
+// Changes the emulated chip without touching the loaded song.
+void sk_set_model(int model, int interpolate);
+
 // Loads a GoatTracker .sng file. Returns 1 on success.
 int sk_load_song(const char *path);
 int sk_save_song(const char *path);
@@ -43,6 +46,9 @@ void sk_render(short *out, int n);
 
 // The 25 SID register values written by the last frame.
 const unsigned char *sk_sidregs(void);
+
+// Current envelope level (0-255) of the three voices, written to out[0..2].
+void sk_envelopes(unsigned char *out);
 
 // Frames played since the song started.
 int sk_frames(void);

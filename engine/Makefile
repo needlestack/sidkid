@@ -28,11 +28,12 @@ RESIDFP := envelopefp extfiltfp filterfp potfp sidfp voicefp wavefp
 
 CORE_C := gsong gplay gtables gglue
 CORE_CXX := gsid $(addprefix resid/,$(RESID)) $(addprefix resid-fp/,$(RESIDFP))
+API := sidkid.o sidkid_sid.o
 
 # --- native ---------------------------------------------------------------
 
 NATIVE := $(BUILD)/native
-NATIVE_OBJS := $(addprefix $(NATIVE)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(NATIVE)/sidkid.o
+NATIVE_OBJS := $(addprefix $(NATIVE)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(NATIVE)/,$(API))
 
 all: $(NATIVE)/sngrender
 
@@ -51,6 +52,10 @@ $(NATIVE)/%.o: %.c sidkid.h core/*.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Icore -I. -c -o $@ $<
 
+$(NATIVE)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -Icore -c -o $@ $<
+
 # --- reference: vendor gsong.c/gplay.c/gsid.cpp/reSID, our shim + glue -----
 #
 # The vendor files are copied next to our shim so their #include "goattrk2.h"
@@ -59,7 +64,7 @@ $(NATIVE)/%.o: %.c sidkid.h core/*.h
 REF := $(BUILD)/ref
 REF_VENDOR := gsong.c gplay.c gsid.cpp gcommon.h gsong.h gplay.h gsid.h gsound.h
 REF_OURS := goattrk2.h gtables.c gglue.c
-REF_OBJS := $(addprefix $(REF)/obj/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(REF)/obj/sidkid.o
+REF_OBJS := $(addprefix $(REF)/obj/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(REF)/obj/,$(API))
 
 ref: $(REF)/sngrender
 
@@ -86,6 +91,10 @@ $(REF)/obj/sidkid.o: sidkid.c sidkid.h $(REF)/src/.stamp
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -I$(REF)/src -I. -c -o $@ $<
 
+$(REF)/obj/sidkid_sid.o: sidkid_sid.cpp $(REF)/src/.stamp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I$(REF)/src -c -o $@ $<
+
 $(REF)/obj/tools/sngrender.o: tools/sngrender.c sidkid.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -I. -c -o $@ $<
@@ -101,9 +110,9 @@ test: $(NATIVE)/sngrender $(REF)/sngrender wasm
 WASM := $(BUILD)/wasm
 EMCC ?= emcc
 EMXX ?= em++
-WASM_OBJS := $(addprefix $(WASM)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(WASM)/sidkid.o
-WASM_FUNCS := sk_init sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop \
-	sk_is_playing sk_toggle_mute sk_is_muted sk_render sk_render_frame sk_sidregs sk_frames \
+WASM_OBJS := $(addprefix $(WASM)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(WASM)/,$(API))
+WASM_FUNCS := sk_init sk_set_model sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop \
+	sk_is_playing sk_toggle_mute sk_is_muted sk_render sk_render_frame sk_sidregs sk_envelopes sk_frames \
 	sk_song_name sk_author_name sk_copyright_name malloc free
 comma := ,
 empty :=
@@ -115,7 +124,8 @@ wasm: $(WASM)/sidkid.js
 $(WASM)/sidkid.js: $(WASM_OBJS)
 	$(EMXX) -O2 -o $@ $^ \
 		-sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=createSidKid \
-		-sENVIRONMENT=web,worker,node -sALLOW_MEMORY_GROWTH \
+		-sENVIRONMENT=web,worker,node,shell -sALLOW_MEMORY_GROWTH \
+		-sINCOMING_MODULE_JS_API=wasmBinary \
 		-sEXPORTED_FUNCTIONS=$(WASM_EXPORTS) \
 		-sEXPORTED_RUNTIME_METHODS=FS,HEAP16,HEAPU8,UTF8ToString
 
@@ -130,6 +140,10 @@ $(WASM)/core/%.o: core/%.cpp
 $(WASM)/%.o: %.c sidkid.h core/*.h
 	@mkdir -p $(dir $@)
 	$(EMCC) $(CFLAGS) -Icore -I. -c -o $@ $<
+
+$(WASM)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(EMXX) $(CXXFLAGS) -Icore -c -o $@ $<
 
 clean:
 	rm -rf $(BUILD)
