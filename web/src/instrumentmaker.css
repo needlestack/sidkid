@@ -64,7 +64,7 @@
   font-weight: 600;
 }
 
-#instrument-list {
+#program-list {
   list-style: none;
   margin: 0 -6px;
   padding: 0;
@@ -169,44 +169,6 @@
   color: var(--muted);
 }
 
-.program-pick {
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.program-pick select {
-  font-weight: 600;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.program-pick .field.inline {
-  min-width: 0;
-  max-width: 100%;
-  flex-wrap: wrap;
-}
-
-@media (max-width: 600px) {
-  /* No room for the program names in the tabs */
-  .kinds .count {
-    display: none;
-  }
-}
-
-.rename {
-  margin-bottom: 4px;
-}
-
-.name-input.small {
-  font-size: 14px;
-  font-weight: 600;
-  margin-left: 0;
-  flex: none;
-  width: 260px;
-  max-width: 100%;
-}
-
 .callout {
   margin: 0 0 10px;
   padding: 8px 12px;
@@ -215,17 +177,16 @@
   font-size: 13px;
 }
 
-.instrument-card .adsr-field {
-  justify-self: start;
+.empty-program {
+  color: var(--muted);
 }
 
-.kinds .count {
-  max-width: 16ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-  display: inline-block;
+.empty-program p {
+  margin: 0;
+}
+
+.program-item .in-use {
+  color: var(--accent);
 }
 
 .graph-head {
@@ -605,8 +566,7 @@
 }
 
 .tryit .keys {
-  margin: 0;
-  flex: 1 1 240px;
+  margin-top: 6px;
   font-size: 12px;
 }
 
@@ -673,6 +633,42 @@
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+/* The instrument: its name and programs on the left, the envelope beside them */
+.test-sound {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas: 'ins env' 'slots env';
+  gap: 6px 18px;
+  align-items: end;
+}
+
+.instrument-field {
+  grid-area: ins;
+}
+
+.slots {
+  grid-area: slots;
+  display: flex;
+  gap: 8px;
+}
+
+.test-sound .adsr-field {
+  grid-area: env;
+}
+
+.test-sound select {
+  height: 30px;
+  max-width: 170px;
+}
+
+.slots select {
+  width: 128px;
+}
+
+.test-sound .segmented.small {
+  height: 32px;
 }
 
 .adsr {
@@ -796,7 +792,7 @@
     position: static;
   }
 
-  #instrument-list {
+  #program-list {
     max-height: 220px;
   }
 
@@ -820,6 +816,15 @@
 
   .instrumentmaker main {
     padding-bottom: 24px;
+  }
+
+  .test-sound {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'ins' 'slots' 'env';
+  }
+
+  .slots {
+    flex-wrap: wrap;
   }
 }
 

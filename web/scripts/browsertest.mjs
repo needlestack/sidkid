@@ -236,8 +236,8 @@ try {
   await tm.waitForFunction(() => window.instrumentMaker?.ready(), { timeout: 5000 });
   report(true, 'instruments page loads and traces a note');
 
-  // The Chord instrument plays the Major arpeggio: steps 1-5, then loops back to step 2
-  await tm.click('#instrument-list li:nth-child(2) button');
+  // Picking the Major arpeggio uses it in the instrument: steps 1-5, then loops back to step 2
+  await tm.click('#program-list li:nth-child(2) button');
   await tm.waitForFunction(() => window.instrumentMaker.idle());
   const order = await tm.evaluate(() => window.instrumentMaker.frameSteps().slice(0, 10).join(','));
   report(order === '0,1,2,3,4,1,2,3,4,1', 'instruments graph follows the program loop', order);
@@ -300,15 +300,14 @@ try {
   await tm.click('#kinds button[data-kind="1"]');
   const sharedBefore = await tm.evaluate(() => {
     const s = window.instrumentMaker.state();
-    return s.instruments[1].targets[1].program === s.instruments[s.current].targets[1].program;
+    return s.instruments[0].targets[1].program === s.instruments[s.current].targets[1].program;
   });
-  const copyShown = await tm.$eval('#copy-program', (b) => !b.hidden);
-  await tm.click('#copy-program');
+  await tm.click('#duplicate');
   const sharedAfter = await tm.evaluate(() => {
     const s = window.instrumentMaker.state();
-    return s.instruments[1].targets[1].program === s.instruments[s.current].targets[1].program;
+    return s.instruments[0].targets[1].program === s.instruments[s.current].targets[1].program;
   });
-  report(sharedBefore && copyShown && !sharedAfter, 'instruments share programs until copied');
+  report(sharedBefore && !sharedAfter, 'instruments share programs until copied');
 
   await tm.select('#examples', 'cabrinigreen.sng');
   await tm.waitForFunction(() => window.instrumentMaker.state().source !== '', { timeout: 5000 });

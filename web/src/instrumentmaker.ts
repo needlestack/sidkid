@@ -335,7 +335,7 @@ function copyProgram() {
   const p = current();
   const t = target();
   if (!p || !t) return;
-  const copy: Program = { name: `${p.name} (${insName(instrument()!)})`, steps: p.steps.map((s) => ({ ...s })), next: null };
+  const copy: Program = { name: `${p.name} copy`, steps: p.steps.map((s) => ({ ...s })), next: null };
   if (p.next) copy.next = p.next.program === p ? { program: copy, step: p.next.step } : { ...p.next };
   before();
   programs().push(copy);
@@ -366,9 +366,7 @@ function addInstrument() {
   state.current = state.instruments.length - 1;
   state.kind = WAVE;
   changed(true);
-  const input = $<HTMLInputElement>('instrument-name');
-  input.focus();
-  input.select();
+  $('rename-instrument').click();
 }
 
 function duplicateInstrument() {
@@ -394,9 +392,7 @@ function deleteInstrument() {
 function changed(structure: boolean) {
   if (structure) renderAll();
   else {
-    renderInstruments();
-    renderKinds();
-    renderPicker();
+    renderPrograms();
     renderNext();
   }
   schedulePreview();
@@ -432,98 +428,101 @@ function audition(): Audition {
   };
 }
 
-// --- Rendering: instruments, tabs, the program picker ----------------------
+// --- Rendering: tabs and program list -------------------------------------
 
 function renderAll() {
   for (const b of $('span').querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('on', Number(b.dataset.frames) === test.frames[state.kind]);
-  renderInstruments();
-  renderInstrument();
   renderKinds();
-  renderPicker();
+  renderPrograms();
   renderEditor();
+  renderInstrument();
 }
 
-function renderInstruments() {
-  const list = $('instrument-list');
+function renderKinds() {
+  for (const b of $('kinds').querySelectorAll<HTMLButtonElement>('button')) {
+    const k = Number(b.dataset.kind);
+    b.classList.toggle('on', k === state.kind);
+    b.setAttribute('aria-selected', String(k === state.kind));
+    b.querySelector('.count')!.textContent = String(state.programs[k].length);
+  }
+  const select = $<HTMLSelectElement>('new-program');
+  select.replaceChildren(new Option('+ New program…', ''), new Option('Empty program', 'empty'));
+  const group = document.createElement('optgroup');
+  group.label = 'Start from';
+  PRESETS[state.kind].forEach((p, i) => {
+    const o = new Option(p.name, String(i));
+    o.title = p.hint;
+    group.append(o);
+  });
+  select.append(group);
+}
+
+function renderPrograms() {
+  const list = $('program-list');
   list.replaceChildren(
-    ...state.instruments.map((ins, i) => {
+    ...programs().map((p) => {
       const li = document.createElement('li');
       const button = document.createElement('button');
       button.className = 'program-item';
-      button.classList.toggle('on', i === state.current);
+      button.classList.toggle('on', p === current());
+      button.title = `Use “${p.name}” in ${instrument() ? insName(instrument()!) : 'the instrument'}`;
       const name = document.createElement('span');
       name.className = 'program-name';
-      name.textContent = insName(ins);
+      name.textContent = p.name || 'Untitled';
       const meta = document.createElement('span');
       meta.className = 'program-meta';
-      meta.textContent = ins.targets.map((t) => t?.program.name).filter(Boolean).join(' · ') || 'No programs';
+      const users = usersOf(p);
+      meta.textContent = [`${p.steps.length} step${p.steps.length === 1 ? '' : 's'}`, p.next ? (p.next.program === p ? 'loops' : 'jumps') : '', users.length ? `in ${users.map(insName).join(', ')}` : 'unused']
+        .filter(Boolean)
+        .join(' · ');
       button.append(name, meta);
       button.addEventListener('click', () => {
-        state.current = i;
-        persist();
-        renderAll();
-        schedulePreview();
+        if (p !== current()) {
+          useProgram(p);
+          blip();
+        }
       });
       li.append(button);
       return li;
     }),
   );
-  const rows = KINDS.map((k) => layOut(state.programs[k]).length);
+  const layout = layOut(programs());
   const used = $('rows-used');
-  used.textContent = `Table rows used: ${rows.map((n, k) => `${KIND_NAMES[k].toLowerCase()} ${n}`).join(', ')} (of ${TABLE_LENGTH} each)`;
-  used.classList.toggle('over', rows.some((n) => n > TABLE_LENGTH));
-  used.title = 'GoatTracker keeps each kind of program in a table of 255 rows, shared by the whole song, counting one end row per program';
+  used.textContent = `${layout.length} of ${TABLE_LENGTH} rows`;
+  used.classList.toggle('over', layout.length > TABLE_LENGTH);
+  used.title = layout.length > TABLE_LENGTH ? 'Too many steps: GoatTracker tables hold 255 rows, counting one end row per program' : 'Table rows used, counting one end row per program';
   $('source').textContent = state.source;
 }
 
-function renderInstrument() {
-  const ins = instrument();
-  $('editor').hidden = !ins;
-  if (!ins) return;
-  const name = $<HTMLInputElement>('instrument-name');
-  if (document.activeElement !== name) name.value = ins.name;
-  drawAdsr();
-}
+// --- Rendering: the program editor ----------------------------------------
 
-function renderKinds() {
-  const ins = instrument();
-  for (const b of $('kinds').querySelectorAll<HTMLButtonElement>('button')) {
-    const k = Number(b.dataset.kind);
-    b.classList.toggle('on', k === state.kind);
-    b.setAttribute('aria-selected', String(k === state.kind));
-    b.querySelector('.count')!.textContent = ins?.targets[k]?.program.name ?? 'none';
-  }
-}
-
-/** The program choice for the tab: none, one of the song's, or a new one. */
-function renderPicker() {
-  const kind = state.kind;
+function renderEditor() {
   const p = current();
-  $('pick-label').textContent = `${KIND_NAMES[kind]} program`;
-  const select = $<HTMLSelectElement>('program-pick');
-  const none = kind === WAVE ? 'None (just the first waveform)' : kind === PULSE ? 'None (the width stays put)' : 'None (leaves the filter alone)';
-  select.replaceChildren(new Option(none, 'none'));
-  const mine = document.createElement('optgroup');
-  mine.label = 'Programs in this song';
-  state.programs[kind].forEach((prog, i) => {
-    const users = usersOf(prog).filter((u) => u !== instrument());
-    const note = users.length ? ` — also in ${users.map(insName).join(', ')}` : prog === p ? '' : usersOf(prog).length ? '' : ' — unused';
-    mine.append(new Option(`${prog.name || 'Untitled'}${note}`, `use:${i}`));
-  });
-  if (mine.childElementCount) select.append(mine);
-  const fresh = document.createElement('optgroup');
-  fresh.label = 'New program';
-  fresh.append(new Option('Empty program', 'empty'));
-  PRESETS[kind].forEach((preset, i) => {
-    const o = new Option(`From “${preset.name}”`, `preset:${i}`);
-    o.title = preset.hint;
-    fresh.append(o);
-  });
-  select.append(fresh);
-  select.value = p ? `use:${state.programs[kind].indexOf(p)}` : 'none';
-  $('copy-program').hidden = !p || usersOf(p).length < 2;
-  $('delete').hidden = !p;
+  const ins = instrument();
+  $('program-card').hidden = !p;
+  $('steps-card').hidden = !p;
+  const empty = $('no-program');
+  empty.hidden = !!p;
+  if (!p) {
+    const kind = KIND_NAMES[state.kind].toLowerCase();
+    empty.textContent = ins
+      ? `${insName(ins)} has no ${kind} program${state.kind === PULSE ? ', so its pulse width stays put' : state.kind === FILTER ? ', so it leaves the filter alone' : ''}. Pick one on the left to use it, or make a new one.`
+      : 'Make an instrument below to start.';
+    return;
+  }
+  const name = $<HTMLInputElement>('program-name');
+  if (document.activeElement !== name) name.value = p.name;
+  const t = target()!;
+  const others = usersOf(p).filter((i) => i !== ins);
+  const uses = $('uses');
+  const parts: string[] = [];
+  if (t.step) parts.push(`${insName(ins!)} starts at step ${t.step + 1}.`);
+  if (others.length) parts.push(`Also used by ${others.map(insName).join(', ')}: changes here change ${others.length === 1 ? 'it' : 'them'} too. Duplicate it to change it just for ${insName(ins!)}.`);
+  uses.hidden = !parts.length;
+  uses.textContent = parts.join(' ');
   renderNote();
+  renderSteps();
+  renderNext();
 }
 
 /** Explains how this tab's program depends on the rest of the instrument. */
@@ -539,34 +538,12 @@ function renderNote() {
           return a.type === 'wave' && a.wave & WAVE_PULSE;
         })
       : (ins.firstWave & WAVE_PULSE) !== 0;
-    if (!usesPulse) text = 'This instrument’s wave program never picks the Pulse waveform, so the pulse width has no effect on how it sounds.';
+    if (!usesPulse) text = `${insName(ins)}’s wave program never picks the Pulse waveform, so the pulse width has no effect on how it sounds.`;
   } else if (state.kind === FILTER) {
-    text =
-      'The SID has one filter, shared by all three voices. While this instrument plays, its filter program takes over that filter for every voice routed through it.';
+    text = 'The SID has one filter, shared by all three voices. While this instrument plays, its filter program takes over that filter for every voice routed through it.';
   }
   note.textContent = text;
   note.hidden = !text;
-}
-
-// --- Rendering: the program editor ----------------------------------------
-
-function renderEditor() {
-  const p = current();
-  $('program-body').hidden = !p;
-  $('steps-card').hidden = !p;
-  if (!p) return;
-  const name = $<HTMLInputElement>('program-name');
-  if (document.activeElement !== name) name.value = p.name;
-  const t = target()!;
-  const others = usersOf(p).filter((i) => i !== instrument());
-  const uses = $('uses');
-  const parts: string[] = [];
-  if (t.step) parts.push(`This instrument starts at step ${t.step + 1}.`);
-  if (others.length) parts.push(`Shared with ${others.map(insName).join(', ')}: changes here change ${others.length === 1 ? 'it' : 'them'} too.`);
-  uses.hidden = !parts.length;
-  uses.textContent = parts.join(' ');
-  renderSteps();
-  renderNext();
 }
 
 function renderNext() {
@@ -583,6 +560,35 @@ function renderNext() {
     select.append(new Option(`Go on to “${p.next.program.name}”, ${end ? 'its end row' : `step ${p.next.step + 1}`}`, 'other'));
   }
   select.value = !p.next ? 'stop' : p.next.program === p ? `loop:${p.next.step}` : 'other';
+}
+
+// --- Rendering: the instrument --------------------------------------------
+
+function renderInstrument() {
+  const ins = instrument();
+  const select = $<HTMLSelectElement>('instrument');
+  select.replaceChildren(...state.instruments.map((i, n) => new Option(insName(i), String(n))));
+  select.value = String(state.current);
+  for (const id of ['rename-instrument', 'duplicate-instrument', 'delete-instrument']) ($(id) as HTMLButtonElement).disabled = !ins;
+  KINDS.forEach((k) => {
+    const field = $(['ins-wave-field', 'ins-pulse-field', 'ins-filter-field'][k]);
+    const slot = $<HTMLSelectElement>(['ins-wave', 'ins-pulse', 'ins-filter'][k]);
+    field.classList.toggle('current', k === state.kind);
+    const none = k === WAVE ? 'None' : k === PULSE ? 'None (width stays put)' : 'None';
+    slot.replaceChildren(new Option(none, ''), ...state.programs[k].map((p, i) => new Option(p.name || 'Untitled', String(i))));
+    const p = ins?.targets[k]?.program;
+    slot.value = p ? String(state.programs[k].indexOf(p)) : '';
+    slot.disabled = !ins;
+    slot.onchange = () => {
+      const kind = state.kind;
+      state.kind = k;
+      useProgram(slot.value === '' ? null : state.programs[k][Number(slot.value)]);
+      state.kind = kind;
+      renderAll();
+      blip();
+    };
+  });
+  drawAdsr();
 }
 
 let hoverStep = -1;
@@ -1172,8 +1178,13 @@ function frameSteps(): number[] {
       continue;
     }
     const at = locate(list, traced.layouts[kind], pos);
-    // On its own end row the program has stopped
-    out.push(at && list[at.program] === p ? (at.step < p!.steps.length ? at.step : -2) : -1);
+    if (!at || list[at.program] !== p) {
+      out.push(-1);
+      continue;
+    }
+    // On its end row the program has stopped, or is jumping back
+    const end = at.step >= p!.steps.length;
+    out.push(!end ? at.step : !p!.next ? -2 : p!.next.program === p ? p!.next.step : -1);
   }
   return out;
 }
@@ -1979,25 +1990,14 @@ for (const b of $('span').querySelectorAll<HTMLButtonElement>('button')) {
   });
 }
 
-$<HTMLSelectElement>('program-pick').addEventListener('change', (e) => {
-  const value = (e.target as HTMLSelectElement).value;
-  const [what, n] = value.split(':');
-  if (what === 'none') useProgram(null);
-  else if (what === 'use') useProgram(programs()[Number(n)]);
-  else if (what === 'empty') addProgram({ name: `${insName(instrument()!)} ${KIND_NAMES[state.kind].toLowerCase()}`, steps: [defaultStep(state.kind)], next: null });
-  else if (what === 'preset') addProgram(programFromPreset(PRESETS[state.kind][Number(n)]));
+$<HTMLSelectElement>('new-program').addEventListener('change', (e) => {
+  const select = e.target as HTMLSelectElement;
+  const value = select.value;
+  select.value = '';
+  if (!value) return;
+  if (value === 'empty') addProgram({ name: `${KIND_NAMES[state.kind]} ${programs().length + 1}`, steps: [defaultStep(state.kind)], next: null });
+  else addProgram(programFromPreset(PRESETS[state.kind][Number(value)]));
   blip();
-});
-
-$<HTMLInputElement>('instrument-name').addEventListener('input', (e) => {
-  const ins = instrument();
-  if (!ins) return;
-  before();
-  ins.name = (e.target as HTMLInputElement).value;
-  renderInstruments();
-  renderPicker();
-  renderEditor();
-  persist();
 });
 
 $<HTMLInputElement>('program-name').addEventListener('input', (e) => {
@@ -2005,19 +2005,56 @@ $<HTMLInputElement>('program-name').addEventListener('input', (e) => {
   if (!p) return;
   before();
   p.name = (e.target as HTMLInputElement).value;
-  renderInstruments();
-  renderKinds();
+  renderPrograms();
   renderNext();
+  renderInstrument();
   persist();
 });
-// The picker lists names, so it catches up once the typing is done
-$<HTMLInputElement>('program-name').addEventListener('change', () => renderPicker());
+
+$('duplicate').addEventListener('click', copyProgram);
+$('delete').addEventListener('click', deleteProgram);
+
+$<HTMLSelectElement>('instrument').addEventListener('change', (e) => {
+  state.current = Number((e.target as HTMLSelectElement).value);
+  persist();
+  renderAll();
+  schedulePreview();
+});
+
+// Renaming swaps the menu for a text field until Enter or leaving it
+{
+  const select = $<HTMLSelectElement>('instrument');
+  const input = $<HTMLInputElement>('instrument-name');
+  const finish = () => {
+    if (input.hidden) return;
+    input.hidden = true;
+    select.hidden = false;
+    const ins = instrument();
+    if (ins && input.value.trim() !== ins.name) {
+      before();
+      ins.name = input.value.trim();
+      changed(true);
+    }
+  };
+  $('rename-instrument').addEventListener('click', () => {
+    const ins = instrument();
+    if (!ins) return;
+    input.value = ins.name;
+    select.hidden = true;
+    input.hidden = false;
+    input.focus();
+    input.select();
+  });
+  input.addEventListener('blur', finish);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') input.value = instrument()?.name ?? '';
+    if (e.key === 'Enter' || e.key === 'Escape') input.blur();
+  });
+}
 
 $('new-instrument').addEventListener('click', addInstrument);
 $('duplicate-instrument').addEventListener('click', duplicateInstrument);
 $('delete-instrument').addEventListener('click', deleteInstrument);
-$('copy-program').addEventListener('click', copyProgram);
-$('delete').addEventListener('click', deleteProgram);
 
 $('add-step').addEventListener('click', () => {
   const p = current();

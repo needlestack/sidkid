@@ -25,69 +25,55 @@
 
     <main>
       <p class="intro">
-        An instrument is how a note sounds: a <b>volume envelope</b>, plus up to three small programs the player runs 50 times a second
-        while the note plays. The <b>wave</b> program picks the waveform and pitch, the <b>pulse</b> program shapes the pulse width, and the
-        <b>filter</b> program moves the filter. Instruments can share programs.
+        An instrument is how a note sounds: a volume envelope, plus up to three small programs the player runs 50 times a second while
+        the note plays. A <b>wave</b> program picks the waveform and pitch, a <b>pulse</b> program shapes the pulse width, and a
+        <b>filter</b> program moves the filter. Pick a program on the left to use it in the instrument below; instruments can share them.
       </p>
+
+      <div class="kinds segmented" id="kinds" role="tablist">
+        <button data-kind="0" class="on" role="tab">Wave <span class="count"></span></button>
+        <button data-kind="1" role="tab">Pulse <span class="count"></span></button>
+        <button data-kind="2" role="tab">Filter <span class="count"></span></button>
+      </div>
 
       <div class="tm-grid">
         <aside class="card programs">
           <header class="card-head">
-            <h2>Instruments</h2>
+            <h2>Programs</h2>
+            <span class="hint" id="rows-used"></span>
           </header>
-          <ul id="instrument-list"></ul>
+          <ul id="program-list"></ul>
           <div class="new-program">
-            <button id="new-instrument" class="button secondary">+ New instrument</button>
+            <select id="new-program" aria-label="New program">
+              <option value="">+ New program…</option>
+            </select>
           </div>
-          <p class="hint" id="rows-used"></p>
           <p class="hint" id="source"></p>
         </aside>
 
         <section class="editor" id="editor">
-          <div class="card instrument-card">
+          <div class="card empty-program" id="no-program" hidden></div>
+          <div class="card" id="program-card">
             <header class="card-head program-head">
-              <input id="instrument-name" class="name-input" aria-label="Instrument name" spellcheck="false" />
+              <input id="program-name" class="name-input" aria-label="Program name" spellcheck="false" />
               <div class="tools">
-                <button id="duplicate-instrument" class="button secondary" title="A new instrument using the same programs">Duplicate</button>
-                <button id="delete-instrument" class="button secondary danger">Delete</button>
+                <button id="duplicate" class="button secondary">Duplicate</button>
+                <button id="delete" class="button secondary danger">Delete</button>
               </div>
             </header>
-            <div class="field adsr-field" id="env-field">
-              <span>Volume envelope</span>
-              <div id="adsr"></div>
-            </div>
-          </div>
-
-          <div class="kinds segmented" id="kinds" role="tablist">
-            <button data-kind="0" class="on" role="tab">Wave <span class="count"></span></button>
-            <button data-kind="1" role="tab">Pulse <span class="count"></span></button>
-            <button data-kind="2" role="tab">Filter <span class="count"></span></button>
-          </div>
-
-          <div class="card">
-            <header class="card-head program-pick">
-              <label class="field inline"><span id="pick-label">Wave program</span><select id="program-pick"></select></label>
-              <div class="tools">
-                <button id="copy-program" class="button secondary" title="Give this instrument its own copy, so changes don’t affect other instruments">Make a copy</button>
-                <button id="delete" class="button secondary danger">Delete program</button>
-              </div>
-            </header>
+            <p class="uses" id="uses" hidden></p>
             <p class="callout" id="kind-note" hidden></p>
-            <div id="program-body">
-              <p class="uses" id="uses" hidden></p>
-              <label class="field inline rename"><span>Name</span><input id="program-name" class="name-input small" aria-label="Program name" spellcheck="false" /></label>
-              <div class="graph-head">
-                <span class="hint" id="graph-hint">What the player does, frame by frame, when a note is held</span>
-                <div class="segmented small" id="span">
-                  <button data-frames="50">1 s</button>
-                  <button data-frames="100" class="on">2 s</button>
-                  <button data-frames="200">4 s</button>
-                </div>
+            <div class="graph-head">
+              <span class="hint" id="graph-hint">What the player does, frame by frame, when a note is held</span>
+              <div class="segmented small" id="span">
+                <button data-frames="50">1 s</button>
+                <button data-frames="100" class="on">2 s</button>
+                <button data-frames="200">4 s</button>
               </div>
-              <div class="graph">
-                <canvas id="graph"></canvas>
-                <div class="tip" id="graph-tip" hidden></div>
-              </div>
+            </div>
+            <div class="graph">
+              <canvas id="graph"></canvas>
+              <div class="tip" id="graph-tip" hidden></div>
             </div>
           </div>
 
@@ -118,8 +104,30 @@
           </div>
           <div class="keyboard" id="keyboard" aria-label="Test keyboard"></div>
         </div>
-        <p class="keys">Play the instrument with the mouse or keys Z S X D C V… (lower octave) and Q 2 W 3 E R… (upper). Hold to sustain, let go to release. Esc silences everything.</p>
+        <div class="test-sound">
+          <div class="field instrument-field">
+            <span>Instrument</span>
+            <div class="instrument-row">
+              <select id="instrument" aria-label="Instrument"></select>
+              <input id="instrument-name" class="instrument-name" aria-label="Instrument name" spellcheck="false" hidden />
+              <button class="mini" id="rename-instrument" title="Rename this instrument" aria-label="Rename this instrument">✎</button>
+              <button class="mini" id="new-instrument" title="New instrument" aria-label="New instrument">＋</button>
+              <button class="mini" id="duplicate-instrument" title="Duplicate: a new instrument using the same programs" aria-label="Duplicate instrument">⧉</button>
+              <button class="mini" id="delete-instrument" title="Delete this instrument (its programs stay)" aria-label="Delete instrument">×</button>
+            </div>
+          </div>
+          <div class="slots">
+            <label class="field" id="ins-wave-field"><span>Wave</span><select id="ins-wave"></select></label>
+            <label class="field" id="ins-pulse-field"><span>Pulse</span><select id="ins-pulse"></select></label>
+            <label class="field" id="ins-filter-field"><span>Filter</span><select id="ins-filter"></select></label>
+          </div>
+          <div class="field adsr-field" id="env-field">
+            <span>Envelope</span>
+            <div id="adsr"></div>
+          </div>
+        </div>
       </div>
+      <p class="keys">Play with the mouse or keys Z S X D C V… (lower octave) and Q 2 W 3 E R… (upper). Hold to sustain, let go to release. Esc silences everything.</p>
     </footer>
 
     <div class="toast" id="toast" role="status"></div>
