@@ -457,9 +457,33 @@ function renderKinds() {
   select.append(group);
 }
 
+/** "None": the instrument goes without a program of this kind. */
+function noneItem(): HTMLLIElement {
+  const li = document.createElement('li');
+  const button = document.createElement('button');
+  button.className = 'program-item none';
+  button.classList.toggle('on', !current());
+  const name = document.createElement('span');
+  name.className = 'program-name';
+  name.textContent = `No ${KIND_NAMES[state.kind].toLowerCase()} program`;
+  const meta = document.createElement('span');
+  meta.className = 'program-meta';
+  meta.textContent = state.kind === WAVE ? 'just the first waveform' : state.kind === PULSE ? 'the width stays put' : 'leaves the filter alone';
+  button.append(name, meta);
+  button.addEventListener('click', () => {
+    if (current()) {
+      useProgram(null);
+      blip();
+    }
+  });
+  li.append(button);
+  return li;
+}
+
 function renderPrograms() {
   const list = $('program-list');
   list.replaceChildren(
+    noneItem(),
     ...programs().map((p) => {
       const li = document.createElement('li');
       const button = document.createElement('button');
@@ -570,24 +594,6 @@ function renderInstrument() {
   select.replaceChildren(...state.instruments.map((i, n) => new Option(insName(i), String(n))));
   select.value = String(state.current);
   for (const id of ['rename-instrument', 'duplicate-instrument', 'delete-instrument']) ($(id) as HTMLButtonElement).disabled = !ins;
-  KINDS.forEach((k) => {
-    const field = $(['ins-wave-field', 'ins-pulse-field', 'ins-filter-field'][k]);
-    const slot = $<HTMLSelectElement>(['ins-wave', 'ins-pulse', 'ins-filter'][k]);
-    field.classList.toggle('current', k === state.kind);
-    const none = k === WAVE ? 'None' : k === PULSE ? 'None (width stays put)' : 'None';
-    slot.replaceChildren(new Option(none, ''), ...state.programs[k].map((p, i) => new Option(p.name || 'Untitled', String(i))));
-    const p = ins?.targets[k]?.program;
-    slot.value = p ? String(state.programs[k].indexOf(p)) : '';
-    slot.disabled = !ins;
-    slot.onchange = () => {
-      const kind = state.kind;
-      state.kind = k;
-      useProgram(slot.value === '' ? null : state.programs[k][Number(slot.value)]);
-      state.kind = kind;
-      renderAll();
-      blip();
-    };
-  });
   drawAdsr();
 }
 

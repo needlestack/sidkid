@@ -185,7 +185,12 @@
   margin: 0;
 }
 
-.program-item .in-use {
+.program-item.none .program-name {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.program-item.none.on .program-name {
   color: var(--accent);
 }
 
@@ -635,23 +640,17 @@
   color: #fff;
 }
 
-/* The instrument: its name and programs on the left, the envelope beside them */
+/* The instrument: its name, and its envelope beside it */
 .test-sound {
   display: grid;
   grid-template-columns: auto auto;
-  grid-template-areas: 'ins env' 'slots env';
+  grid-template-areas: 'ins env';
   gap: 6px 18px;
   align-items: end;
 }
 
 .instrument-field {
   grid-area: ins;
-}
-
-.slots {
-  grid-area: slots;
-  display: flex;
-  gap: 8px;
 }
 
 .test-sound .adsr-field {
@@ -661,10 +660,6 @@
 .test-sound select {
   height: 30px;
   max-width: 170px;
-}
-
-.slots select {
-  width: 128px;
 }
 
 .test-sound .segmented.small {
@@ -820,12 +815,9 @@
 
   .test-sound {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'ins' 'slots' 'env';
+    grid-template-areas: 'ins' 'env';
   }
 
-  .slots {
-    flex-wrap: wrap;
-  }
 }
 
 @media (max-width: 520px) {

@@ -237,7 +237,7 @@ try {
   report(true, 'instruments page loads and traces a note');
 
   // Picking the Major arpeggio uses it in the instrument: steps 1-5, then loops back to step 2
-  await tm.click('#program-list li:nth-child(2) button');
+  await tm.click('#program-list li:nth-child(3) button');
   await tm.waitForFunction(() => window.instrumentMaker.idle());
   const order = await tm.evaluate(() => window.instrumentMaker.frameSteps().slice(0, 10).join(','));
   report(order === '0,1,2,3,4,1,2,3,4,1', 'instruments graph follows the program loop', order);
