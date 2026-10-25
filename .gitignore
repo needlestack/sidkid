@@ -1,0 +1,7 @@
+*.o
+*.wav
+.DS_Store
+/build/
+/vendor/*.zip
+/vendor/gt2/macos/
+node_modules/
