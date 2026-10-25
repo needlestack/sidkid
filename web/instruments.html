@@ -96,6 +96,17 @@
 
     <footer class="tryit" id="tryit">
       <div class="tryit-inner">
+        <div class="field instrument-field">
+          <span>Instrument</span>
+          <select id="instrument" aria-label="Instrument"></select>
+          <input id="instrument-name" class="instrument-name" aria-label="Instrument name" spellcheck="false" hidden />
+          <div class="instrument-tools">
+            <button class="mini" id="rename-instrument" title="Rename this instrument">Rename</button>
+            <button class="mini" id="new-instrument" title="Make a new instrument">New</button>
+            <button class="mini" id="duplicate-instrument" title="A new instrument using the same programs">Duplicate</button>
+            <button class="mini danger" id="delete-instrument" title="Delete this instrument (its programs stay)">Delete</button>
+          </div>
+        </div>
         <div class="keyboard-wrap">
           <div class="octave">
             <button id="octave-down" aria-label="Octave down" title="Octave down">−</button>
@@ -104,22 +115,9 @@
           </div>
           <div class="keyboard" id="keyboard" aria-label="Test keyboard"></div>
         </div>
-        <div class="test-sound">
-          <div class="field instrument-field">
-            <span>Instrument</span>
-            <div class="instrument-row">
-              <select id="instrument" aria-label="Instrument"></select>
-              <input id="instrument-name" class="instrument-name" aria-label="Instrument name" spellcheck="false" hidden />
-              <button class="mini" id="rename-instrument" title="Rename this instrument" aria-label="Rename this instrument">✎</button>
-              <button class="mini" id="new-instrument" title="New instrument" aria-label="New instrument">＋</button>
-              <button class="mini" id="duplicate-instrument" title="Duplicate: a new instrument using the same programs" aria-label="Duplicate instrument">⧉</button>
-              <button class="mini" id="delete-instrument" title="Delete this instrument (its programs stay)" aria-label="Delete instrument">×</button>
-            </div>
-          </div>
-          <div class="field adsr-field" id="env-field">
-            <span>Envelope</span>
-            <div id="adsr"></div>
-          </div>
+        <div class="field adsr-field" id="env-field">
+          <span>Envelope</span>
+          <div id="adsr"></div>
         </div>
       </div>
       <p class="keys">Play with the mouse or keys Z S X D C V… (lower octave) and Q 2 W 3 E R… (upper). Hold to sustain, let go to release. Esc silences everything.</p>

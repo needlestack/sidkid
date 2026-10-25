@@ -640,31 +640,66 @@
   color: #fff;
 }
 
-/* The instrument: its name, and its envelope beside it */
-.test-sound {
-  display: grid;
-  grid-template-columns: auto auto;
-  grid-template-areas: 'ins env';
-  gap: 6px 18px;
-  align-items: end;
-}
-
+/* The instrument names the bar: picker on the left, tools under it */
 .instrument-field {
-  grid-area: ins;
+  width: 210px;
+  gap: 4px;
 }
 
-.test-sound .adsr-field {
-  grid-area: env;
+.instrument-field select,
+.instrument-name {
+  width: 100%;
+  height: 36px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.test-sound select {
-  height: 30px;
-  max-width: 170px;
+.instrument-name {
+  color: inherit;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 0 8px;
 }
 
-.test-sound .segmented.small {
-  height: 32px;
+.instrument-tools {
+  display: flex;
+  gap: 3px;
 }
+
+.mini {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 0 7px;
+}
+
+.mini:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.mini.danger:hover {
+  color: var(--playhead);
+  border-color: var(--playhead);
+}
+
+.mini:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.tryit-inner {
+  justify-content: space-between;
+}
+
 
 .adsr {
   display: grid;
@@ -813,10 +848,6 @@
     padding-bottom: 24px;
   }
 
-  .test-sound {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'ins' 'env';
-  }
 
 }
 
