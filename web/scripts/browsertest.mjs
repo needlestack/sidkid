@@ -260,21 +260,21 @@ try {
   report(before === 4 && after === 3, 'instruments edit changes the trace', `+${before} → +${after} semitones`);
 
   // Playing a key runs the program in the worklet: its steps light up
-  await tm.keyboard.down('q');
+  await tm.keyboard.down('k');
   await tm.waitForSelector('.step.live', { timeout: 3000 })
     .then(() => report(true, 'instruments test note runs the program'), () => report(false, 'instruments test note runs the program'));
-  await tm.keyboard.up('q');
+  await tm.keyboard.up('k');
 
   // Note keys still play after using a dropdown, which keeps focus
   await tm.focus('#next');
-  await tm.keyboard.down('e');
+  await tm.keyboard.down('d');
   const playedFromSelect = await tm.$('.key.down');
-  await tm.keyboard.up('e');
+  await tm.keyboard.up('d');
   report(!!playedFromSelect && (await tm.$eval('#next', (el) => el.value)) !== '', 'instruments note keys work with a dropdown focused');
 
   // A quick tap, released before the note starts sounding, still fades out
-  await tm.keyboard.down('w');
-  await tm.keyboard.up('w');
+  await tm.keyboard.down('s');
+  await tm.keyboard.up('s');
   await tm.waitForFunction(() => {
     const s = window.instrumentMaker.status();
     return s && !(s.regs[4] & 1) && s.envelopes[0] === 0;

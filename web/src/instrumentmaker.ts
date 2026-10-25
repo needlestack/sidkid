@@ -2008,14 +2008,11 @@ function showLive(status: Status) {
   for (const row of $('steps').querySelectorAll<HTMLElement>('.step')) row.classList.toggle('live', Number(row.dataset.step) === step);
 }
 
-// Tracker keys: two rows of a piano, the lower octave on Z-M
-const KEYS: Record<string, number> = {};
-'zsxdcvgbhnjm'.split('').forEach((k, i) => (KEYS[k] = i));
-',l.;/'.split('').forEach((k, i) => (KEYS[k] = 12 + i));
-'q2w3er5t6y7ui9o0p'.split('').forEach((k, i) => (KEYS[k] = 12 + i));
-
-/** The computer key for each of the 25 keys shown: Z row, then Q row. */
-const KEY_LETTERS = [...'ZSXDCVGBHNJM', ...'Q2W3ER5T6Y7UI'];
+// Note keys in one row, like a piano: white keys A S D F G H J K L ; and the
+// black keys above them on W E, T Y U, O P. That reaches from C up to the E
+// a bit over an octave higher.
+const KEY_LETTERS = [...'AWSEDFTGYHUJKOLP;'];
+const KEYS: Record<string, number> = Object.fromEntries(KEY_LETTERS.map((k, i) => [k.toLowerCase(), i]));
 
 function renderKeyboard() {
   const board = $('keyboard');
