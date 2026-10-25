@@ -224,27 +224,27 @@ try {
 
   report(errors.length === 0, 'ui without errors', errors.join(' | '));
 
-  // --- 3. Table maker -------------------------------------------------------
+  // --- 3. Instrument maker --------------------------------------------------
   const tm = await browser.newPage();
   const tmErrors = [];
   tm.on('pageerror', (err) => tmErrors.push(err.message));
   tm.on('console', (msg) => msg.type() === 'error' && tmErrors.push(msg.text()));
   await tm.setViewport({ width: 1180, height: 900, deviceScaleFactor: 2 });
-  await tm.goto(`${base}tables.html`);
+  await tm.goto(`${base}instruments.html`);
   await tm.evaluate(() => localStorage.clear());
   await tm.reload();
-  await tm.waitForFunction(() => window.tableMaker?.ready(), { timeout: 5000 });
-  report(true, 'tables page loads and traces a note');
+  await tm.waitForFunction(() => window.instrumentMaker?.ready(), { timeout: 5000 });
+  report(true, 'instruments page loads and traces a note');
 
-  // The Major arpeggio preset: steps 1-5, then loops back to step 2
-  await tm.click('#program-list li:nth-child(3) button');
-  await tm.waitForFunction(() => window.tableMaker.idle());
-  const order = await tm.evaluate(() => window.tableMaker.frameSteps().slice(0, 10).join(','));
-  report(order === '0,1,2,3,4,1,2,3,4,1', 'tables graph follows the program loop', order);
+  // The Chord instrument plays the Major arpeggio: steps 1-5, then loops back to step 2
+  await tm.click('#instrument-list li:nth-child(2) button');
+  await tm.waitForFunction(() => window.instrumentMaker.idle());
+  const order = await tm.evaluate(() => window.instrumentMaker.frameSteps().slice(0, 10).join(','));
+  report(order === '0,1,2,3,4,1,2,3,4,1', 'instruments graph follows the program loop', order);
 
   // Editing step 2 from +4 to +3 semitones changes the traced pitch
   const pitch = () => tm.evaluate(() => {
-    const t = window.tableMaker.trace();
+    const t = window.instrumentMaker.trace();
     return Math.round(12 * Math.log2(t.freq[1] / t.freq[0]));
   });
   const before = await pitch();
@@ -253,16 +253,16 @@ try {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await tm.waitForFunction(() => {
-    const t = window.tableMaker.trace();
+    const t = window.instrumentMaker.trace();
     return Math.round(12 * Math.log2(t.freq[1] / t.freq[0])) === 3;
   }, { timeout: 2000 }).catch(() => {});
   const after = await pitch();
-  report(before === 4 && after === 3, 'tables edit changes the trace', `+${before} → +${after} semitones`);
+  report(before === 4 && after === 3, 'instruments edit changes the trace', `+${before} → +${after} semitones`);
 
   // Playing a key runs the program in the worklet: its steps light up
   await tm.keyboard.down('q');
   await tm.waitForSelector('.step.live', { timeout: 3000 })
-    .then(() => report(true, 'tables test note runs the program'), () => report(false, 'tables test note runs the program'));
+    .then(() => report(true, 'instruments test note runs the program'), () => report(false, 'instruments test note runs the program'));
   await tm.keyboard.up('q');
 
   // Note keys still play after using a dropdown, which keeps focus
@@ -270,16 +270,16 @@ try {
   await tm.keyboard.down('e');
   const playedFromSelect = await tm.$('.key.down');
   await tm.keyboard.up('e');
-  report(!!playedFromSelect && (await tm.$eval('#next', (el) => el.value)) !== '', 'tables note keys work with a dropdown focused');
+  report(!!playedFromSelect && (await tm.$eval('#next', (el) => el.value)) !== '', 'instruments note keys work with a dropdown focused');
 
   // A quick tap, released before the note starts sounding, still fades out
   await tm.keyboard.down('w');
   await tm.keyboard.up('w');
   await tm.waitForFunction(() => {
-    const s = window.tableMaker.status();
+    const s = window.instrumentMaker.status();
     return s && !(s.regs[4] & 1) && s.envelopes[0] === 0;
   }, { timeout: 3000 })
-    .then(() => report(true, 'tables quick tap is released'), () => report(false, 'tables quick tap is released'));
+    .then(() => report(true, 'instruments quick tap is released'), () => report(false, 'instruments quick tap is released'));
 
   // Dragging across the keyboard plays each key passed over
   const first = await (await tm.$('.key[data-offset="0"]')).boundingBox();
@@ -293,19 +293,37 @@ try {
   }
   await tm.mouse.up();
   const released = await tm.$('.key.down');
-  report(played.size >= 5 && !released, 'tables drag across the keys', `${played.size} notes`);
+  report(played.size >= 5 && !released, 'instruments drag across the keys', `${played.size} notes`);
+
+  // A duplicated instrument shares its programs, until it makes its own copy
+  await tm.click('#duplicate-instrument');
+  await tm.click('#kinds button[data-kind="1"]');
+  const sharedBefore = await tm.evaluate(() => {
+    const s = window.instrumentMaker.state();
+    return s.instruments[1].targets[1].program === s.instruments[s.current].targets[1].program;
+  });
+  const copyShown = await tm.$eval('#copy-program', (b) => !b.hidden);
+  await tm.click('#copy-program');
+  const sharedAfter = await tm.evaluate(() => {
+    const s = window.instrumentMaker.state();
+    return s.instruments[1].targets[1].program === s.instruments[s.current].targets[1].program;
+  });
+  report(sharedBefore && copyShown && !sharedAfter, 'instruments share programs until copied');
 
   await tm.select('#examples', 'cabrinigreen.sng');
-  await tm.waitForFunction(() => window.tableMaker.state().instruments.length > 0, { timeout: 5000 });
-  const loaded = await tm.evaluate(() => window.tableMaker.state().programs.map((l) => l.length).join('/'));
-  report(true, 'tables loads a song', `${loaded} programs`);
+  await tm.waitForFunction(() => window.instrumentMaker.state().source !== '', { timeout: 5000 });
+  const loaded = await tm.evaluate(() => {
+    const s = window.instrumentMaker.state();
+    return `${s.instruments.length} instruments, ${s.programs.map((l) => l.length).join('/')} programs`;
+  });
+  report(true, 'instruments loads a song', loaded);
   await colorScheme(tm, 'dark');
-  await tm.screenshot({ path: `${OUT}/${BROWSER}-tables-dark.png` });
+  await tm.screenshot({ path: `${OUT}/${BROWSER}-instruments-dark.png` });
   await colorScheme(tm, 'light');
   await tm.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
   const overflow = await tm.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  report(overflow <= 0, 'tables fits a phone screen', overflow > 0 ? `${overflow}px too wide` : '');
-  report(tmErrors.length === 0, 'tables without errors', tmErrors.join(' | '));
+  report(overflow <= 0, 'instruments fits a phone screen', overflow > 0 ? `${overflow}px too wide` : '');
+  report(tmErrors.length === 0, 'instruments without errors', tmErrors.join(' | '));
 } finally {
   await browser.close();
   server.httpServer.close();

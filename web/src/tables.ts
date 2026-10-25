@@ -385,6 +385,8 @@ interface Preset {
 export const PRESETS: Preset[][] = [
   [
     { name: 'Saw', hint: 'Sawtooth at the note played: bright and buzzy', rows: [[0x21, 0x00]], loop: null },
+    { name: 'Pulse', hint: 'Pulse wave at the note played, shaped by the pulse program', rows: [[0x41, 0x00]], loop: null },
+    { name: 'Triangle', hint: 'Triangle at the note played: soft and round', rows: [[0x11, 0x00]], loop: null },
     { name: 'Flute', hint: 'A frame of pulse, then triangle', rows: [[0x41, 0x00], [0x11, 0x00]], loop: null },
     { name: 'Koto', hint: 'Starts a semitone high for one frame, with the gate off after it', rows: [[0x41, 0x01], [0x40, 0x00]], loop: null },
     {

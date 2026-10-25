@@ -22,10 +22,12 @@ GoatTracker 2 engine by Lasse Öörni (Cadaver).
   (`web/src/engine/analyzer.ts`) reads songs and scans them; `song.ts` parses
   the song data and `timeline.ts` lays it out as clips and sections for the
   views in `songview.ts`
-- `web/tables.html` – the table maker. `tables.ts` turns GoatTracker's wave,
-  pulse and filter tables into programs (runs of steps that stop or loop) and
-  back; `tablemaker.ts` edits them, traces a held note frame by frame for the
-  graph, and plays them on a test keyboard
+- `web/instruments.html` – the instrument maker. `tables.ts` turns
+  GoatTracker's wave, pulse and filter tables into programs (runs of steps
+  that stop or loop) and back; `instrumentmaker.ts` edits instruments (an
+  envelope and the programs they use, which can be shared), traces a held note
+  frame by frame for the graph, and plays it on a test keyboard. `envelope.ts`
+  works out the SID's volume envelope; `adsr.ts` is the drag-to-edit envelope
 
 ## Building
 
