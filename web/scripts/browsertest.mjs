@@ -337,6 +337,22 @@ try {
   }, { timeout: 2000 }).then(() => true, () => false);
   report(slides, 'instruments slide step moves the pitch');
 
+  // A pulse sweep goes to a goal: moving one goal keeps the next step's, and the width never wraps round
+  await tm.select('#instrument', '0');
+  await tm.click('#kinds button[data-kind="1"]');
+  await tm.$eval('.step[data-step="1"] input[type=range]', (el) => {
+    el.value = '4095';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const swept = await tm.waitForFunction(() => {
+    const t = window.instrumentMaker.trace();
+    const texts = [...document.querySelectorAll('.step-text')].map((e) => e.textContent);
+    const jumps = t.pulse.slice(1).some((v, f) => Math.abs(v - t.pulse[f]) > 200);
+    return Math.max(...t.pulse) > 4000 && !jumps && /to 0%/.test(texts[2] ?? '') ? texts[1] : false;
+  }, { timeout: 2000 }).then((h) => h.jsonValue(), () => false);
+  report(!!swept, 'instruments pulse sweep to a goal', swept || '');
+
   await tm.select('#examples', 'cabrinigreen.sng');
   await tm.waitForFunction(() => window.instrumentMaker.state().source !== '', { timeout: 5000 });
   const loaded = await tm.evaluate(() => {

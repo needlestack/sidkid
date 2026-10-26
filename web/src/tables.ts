@@ -425,3 +425,63 @@ export function defaultStep(kind: number): Step {
   if (kind === PULSE) return { left: 0x88, right: 0x00 };
   return { left: 0x00, right: 0x80 };
 }
+
+// --- Sweeps as goals --------------------------------------------------------
+
+// The player sweeps by adding a signed byte each frame, for up to 127 frames
+// a row. A sweep to a goal is laid out as one or two runs of rows: the first
+// at a speed one faster than the second, so it lands exactly on the goal,
+// with long runs split at 127 frames.
+
+const ROW_FRAMES = 0x7f;
+const FASTEST_UP = 127;
+const FASTEST_DOWN = 128;
+
+export interface Sweep {
+  frames: number;
+  speed: number;
+}
+
+/** The fewest frames a sweep can make a change in. */
+export function fastestSweep(change: number): number {
+  return Math.max(1, Math.ceil(change >= 0 ? change / FASTEST_UP : -change / FASTEST_DOWN));
+}
+
+/** Rows that change a value by exactly `change` over `frames` (at least fastestSweep). */
+export function sweepRows(change: number, frames: number): Sweep[] {
+  const sign = change < 0 ? -1 : 1;
+  const size = Math.abs(change);
+  const slow = Math.floor(size / frames);
+  const fast = size - slow * frames;
+  const out: Sweep[] = [];
+  const run = (n: number, speed: number) => {
+    for (; n > 0; n -= ROW_FRAMES) out.push({ frames: Math.min(ROW_FRAMES, n), speed });
+  };
+  run(fast, sign * (slow + 1));
+  run(frames - fast, sign * slow);
+  return out;
+}
+
+/**
+ * How many of the sweeps from `at` belong to one goal, as sweepRows lays
+ * them out: a run at one speed, then perhaps a run one slower, each run
+ * continuing only after a full 127-frame row.
+ */
+export function sweepLength(sweeps: (Sweep | null)[], at: number): number {
+  const first = sweeps[at];
+  if (!first) return 0;
+  const slower = first.speed > 0 ? first.speed - 1 : first.speed < 0 ? first.speed + 1 : null;
+  let n = 1;
+  let speed = first.speed;
+  while (at + n < sweeps.length) {
+    const prev = sweeps[at + n - 1]!;
+    const next = sweeps[at + n];
+    if (!next) break;
+    if (next.speed === speed && prev.frames === ROW_FRAMES) n++;
+    else if (speed === first.speed && next.speed === slower) {
+      speed = slower;
+      n++;
+    } else break;
+  }
+  return n;
+}

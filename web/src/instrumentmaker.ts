@@ -49,7 +49,11 @@ import {
   waveAction,
   waveLeft,
   waveName,
+  fastestSweep,
+  sweepLength,
+  sweepRows,
   type Layout,
+  type Sweep,
   type Pitch,
   type Program,
   type Step,
@@ -312,17 +316,93 @@ function moveUnit(u: number, by: -1 | 1) {
 
 /**
  * The steps as shown: rows, except that a filter's set-up row and the cutoff
- * row after it run in the same frame, so they show as one step (unless
- * something jumps straight to the cutoff row).
+ * row after it run in the same frame, so they show as one step, and a sweep
+ * to a goal can take a few rows (unless something jumps into the middle).
  */
 function unitsOf(p: Program, kind = state.kind): number[][] {
   const out: number[][] = [];
   const targeted = (row: number) => (p.next?.program === p && p.next.step === row) || state.instruments.some((i) => i.targets[kind]?.program === p && i.targets[kind]!.step === row);
+  const sweeps = kind === WAVE ? [] : p.steps.map((st) => sweepOf(kind, st));
   for (let i = 0; i < p.steps.length; i++) {
     const pair = kind === FILTER && i + 1 < p.steps.length && filterAction(p.steps[i]).type === 'setup' && filterAction(p.steps[i + 1]).type === 'cutoff' && !targeted(i + 1);
-    out.push(pair ? [i, ++i] : [i]);
+    if (pair) {
+      out.push([i, ++i]);
+      continue;
+    }
+    let n = Math.max(1, sweepLength(sweeps, i));
+    for (let k = 1; k < n; k++) {
+      if (targeted(i + k)) {
+        n = k;
+        break;
+      }
+    }
+    out.push(Array.from({ length: n }, (_, k) => i + k));
+    i += n - 1;
   }
   return out;
+}
+
+/** A pulse or filter row's sweep, or null for other rows. */
+function sweepOf(kind: number, st: Step): Sweep | null {
+  const a = kind === PULSE ? pulseAction(st) : kind === FILTER ? filterAction(st) : null;
+  return a?.type === 'sweep' ? { frames: a.frames, speed: a.speed } : null;
+}
+
+/** Pulse width runs 0-4095 and the filter cutoff 0-255; both wrap round past the top. */
+const levelRange = (kind: number) => (kind === PULSE ? 4096 : 256);
+
+/**
+ * The width or cutoff as each row of a program starts, or null where it
+ * isn't known yet: a program starting with a sweep carries on from the
+ * value the voice had. Worked out from where the instrument starts, on the
+ * first pass.
+ */
+function startLevels(p: Program, kind = state.kind): (number | null)[] {
+  const range = levelRange(kind);
+  const out: (number | null)[] = new Array(p.steps.length).fill(null);
+  const t = target(kind);
+  const run = (from: number, to: number) => {
+    let v: number | null = null;
+    for (let r = from; r < to; r++) {
+      out[r] = v;
+      const st = p.steps[r];
+      if (kind === PULSE) {
+        const a = pulseAction(st);
+        if (a.type === 'width') v = a.width;
+      } else {
+        const a = filterAction(st);
+        if (a.type === 'cutoff') v = a.cutoff;
+      }
+      const sw = sweepOf(kind, st);
+      if (sw && v !== null) v = (((v + sw.frames * sw.speed) % range) + range) % range;
+    }
+  };
+  const from = t?.program === p ? t.step : 0;
+  run(0, from);
+  run(from, p.steps.length);
+  return out;
+}
+
+/** A shown sweep's total change and length. */
+function sweepTotal(kind: number, p: Program, rows: number[]): { frames: number; change: number } {
+  let frames = 0;
+  let change = 0;
+  for (const r of rows) {
+    const sw = sweepOf(kind, p.steps[r])!;
+    frames += sw.frames;
+    change += sw.frames * sw.speed;
+  }
+  return { frames, change };
+}
+
+/** Replaces a shown step's rows with new ones, keeping references to it; `rows` is updated to match. */
+function setUnitRows(p: Program, rows: number[], steps: Step[]) {
+  const at = rows[0];
+  const old = rows.length;
+  const grow = steps.length - old;
+  p.steps.splice(at, old, ...steps);
+  if (grow) remap(state.kind, p, (i) => (i >= at + old ? i + grow : i > at ? at : i));
+  rows.splice(0, rows.length, ...steps.map((_, k) => at + k));
 }
 
 /** The shown step a row of the edited program belongs to. */
@@ -1158,14 +1238,21 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
       p.next = { program: p, step: i };
       toast('A slide moves the pitch a little each time it runs, so the program now loops on it to keep sliding');
     }
-    // A filter set-up shows with its cutoff: add one, or drop it for other types
-    if (kind === FILTER && rows.length === 2 && type.value !== 'setup') {
-      p.steps.splice(i + 1, 1);
-      remap(kind, p, (r) => (r > i + 1 ? r - 1 : r > i ? i : r));
-    } else if (kind === FILTER && rows.length === 1 && type.value === 'setup') {
+    // The new type takes one row: drop the rest of a set-up's cutoff, or of a long sweep
+    if (rows.length > 1) {
+      const extra = rows.length - 1;
+      p.steps.splice(i + 1, extra);
+      remap(kind, p, (r) => (r > i + extra ? r - extra : r > i ? i : r));
+    }
+    // A filter set-up shows with its cutoff
+    if (kind === FILTER && type.value === 'setup') {
       p.steps.splice(i + 1, 0, filterStep({ type: 'cutoff', cutoff: 0x80 }));
       remap(kind, p, (r) => (r > i ? r + 1 : r));
     }
+    // A new sweep heads away from the top, so it doesn't wrap round
+    const sweep = sweepOf(kind, p.steps[i]);
+    const start = sweep ? startLevels(p, kind)[i] : null;
+    if (sweep && start !== null && start + sweep.frames * sweep.speed >= levelRange(kind)) p.steps[i] = sweepStep(kind, { frames: sweep.frames, speed: -sweep.speed });
     changed(true);
   });
 
@@ -1188,7 +1275,18 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
     refresh();
     changed(false);
   };
-  if (kind === FILTER) filterFields(p, rows, fields, update);
+  if (sweepOf(kind, s)) {
+    sweepFields(kind, p, rows, fields, (steps) => {
+      before();
+      const goals = laterGoals(kind, p, rows[0]);
+      const closed = loopCloses(kind, p);
+      setUnitRows(p, rows, steps);
+      keepGoals(kind, p, rows[0], goals);
+      if (closed) closeLoop(kind, p, rows[0]);
+      refresh();
+      changed(false);
+    });
+  } else if (kind === FILTER) filterFields(p, rows, fields, update);
   else stepFields(kind, s, fields, update, () => p.steps[i]);
   refresh();
 
@@ -1221,8 +1319,218 @@ function stepRow(p: Program, rows: number[], u: number): HTMLLIElement {
   return li;
 }
 
+function sweepStep(kind: number, sw: Sweep): Step {
+  return kind === PULSE ? pulseStep({ type: 'sweep', ...sw }) : filterStep({ type: 'sweep', ...sw });
+}
+
+/** A level in its units: a percentage of pulse width, or a cutoff. */
+function levelText(kind: number, v: number) {
+  return kind === PULSE ? percent(v / 4096) : String(v);
+}
+
+function framesText(frames: number) {
+  return `${frames} frame${frames === 1 ? '' : 's'} (${(frames / FPS).toFixed(2)} s)`;
+}
+
+/**
+ * A sweep as where it goes and how long it takes. The player only knows a
+ * speed and a time, so a goal is turned into rows that land on it exactly.
+ * Without a known start (a program that carries on from the voice's last
+ * width), it is how far, which way.
+ */
+function sweepFields(kind: number, p: Program, rows: number[], box: HTMLElement, set: (steps: Step[]) => void) {
+  const range = levelRange(kind);
+  const start = startLevels(p, kind)[rows[0]];
+  const total = () => sweepTotal(kind, p, rows);
+  const lay = (change: number, frames: number) => set(sweepRows(change, frames).map((sw) => sweepStep(kind, sw)));
+  // Dragging can change how many rows this and later sweeps take: the list catches up when it's let go
+  const settle = () => {
+    renderSteps();
+    blip();
+  };
+  const time = document.createElement('span');
+  time.className = 'field-label';
+  const showTime = () => {
+    const t = total();
+    const fastest = fastestSweep(t.change);
+    time.textContent = `${(t.frames / FPS).toFixed(2)} s${t.frames === fastest && fastest > 1 ? ' · the fastest it can' : ''}`;
+  };
+  const frames = numberField(
+    'over',
+    total().frames,
+    1,
+    999,
+    'frames',
+    (n) => {
+      const t = total();
+      lay(t.change, Math.max(n, fastestSweep(t.change)));
+      showTime();
+    },
+    'How long the sweep takes. The player moves at most about 3% of the width (or 127 of the cutoff) a frame, so big changes need some time.',
+  );
+  const framesInput = frames.querySelector('input')!;
+  framesInput.addEventListener('change', () => {
+    framesInput.value = String(total().frames);
+    settle();
+  });
+  /** A new total change: the time grows if the player can't make it that fast. */
+  const setChange = (change: number) => {
+    const f = Math.max(total().frames, fastestSweep(change));
+    lay(change, f);
+    if (document.activeElement !== framesInput) framesInput.value = String(f);
+    showTime();
+  };
+  const wrap = (v: number) => ((v % range) + range) % range;
+  if (start !== null) {
+    const goal = wrap(start + total().change);
+    if (kind === PULSE) {
+      const picture = pulseIcon(goal);
+      const goalSlider = slider(goal, 0, range - 1, (n) => percent(n / 4096), (n) => {
+        picture.set(n);
+        setChange(n - start);
+      }, 'Where the width ends up');
+      goalSlider.querySelector('input')!.addEventListener('change', settle);
+      box.append(label('to'), picture.el, goalSlider, frames, time);
+    } else {
+      const shape = setupBefore(p, rows[0]);
+      box.append(
+        label('to'),
+        filterCurve({
+          get: () => ({ passband: shape?.passband ?? 0, resonance: shape?.resonance ?? 0, cutoff: wrap(start + total().change) }),
+          change: ({ cutoff }) => cutoff !== undefined && setChange(cutoff - start),
+          done: settle,
+          resonance: false,
+          borrowed: true,
+        }),
+        frames,
+        time,
+      );
+    }
+  } else {
+    const sign = () => (total().change < 0 ? -1 : 1);
+    const [up, down] = kind === PULSE ? ['Widen', 'Narrow'] : ['Open', 'Close'];
+    const direction = segmented(
+      [
+        [1, up, kind === PULSE ? 'The width grows' : 'The cutoff rises: brighter'],
+        [-1, down, kind === PULSE ? 'The width shrinks' : 'The cutoff falls: darker'],
+      ],
+      sign(),
+      (d) => {
+        setChange(d * Math.abs(total().change));
+        renderSteps();
+        blip();
+      },
+    );
+    const amount = slider(Math.abs(total().change), 0, range - 1, (n) => levelText(kind, n), (n) => setChange(sign() * n), 'How far it moves, from wherever the last note left it');
+    amount.querySelector('input')!.addEventListener('change', settle);
+    box.append(direction, label('by'), amount, frames, time);
+  }
+  showTime();
+}
+
+/**
+ * Where each sweep after a step goes, up to the next step that sets the
+ * level outright: when a sweep's goal moves, the ones after it keep theirs.
+ */
+function laterGoals(kind: number, p: Program, row: number): { offset: number; goal: number; frames: number }[] {
+  const units = unitsOf(p, kind);
+  const at = units.findIndex((u) => u[0] === row);
+  const starts = startLevels(p, kind);
+  const range = levelRange(kind);
+  const out = [];
+  for (let k = at + 1; k < units.length; k++) {
+    const u = units[k];
+    if (!sweepOf(kind, p.steps[u[0]])) {
+      const sets = u.some((r) => (kind === PULSE ? pulseAction(p.steps[r]).type === 'width' : filterAction(p.steps[r]).type === 'cutoff'));
+      if (sets) break;
+      continue;
+    }
+    const start = starts[u[0]];
+    if (start === null) continue;
+    const t = sweepTotal(kind, p, u);
+    out.push({ offset: k - at, goal: (((start + t.change) % range) + range) % range, frames: t.frames });
+  }
+  return out;
+}
+
+function keepGoals(kind: number, p: Program, row: number, goals: { offset: number; goal: number; frames: number }[]) {
+  for (const g of goals) {
+    const units = unitsOf(p, kind);
+    const u = units[units.findIndex((x) => x[0] === row) + g.offset];
+    const start = u && startLevels(p, kind)[u[0]];
+    if (!u || start === null || start === undefined || !sweepOf(kind, p.steps[u[0]])) continue;
+    const change = g.goal - start;
+    setUnitRows(p, [...u], sweepRows(change, Math.max(g.frames, fastestSweep(change))).map((sw) => sweepStep(kind, sw)));
+  }
+}
+
+/** Whether a looping program ends on the level its loop starts from, so it repeats smoothly. */
+function loopCloses(kind: number, p: Program): boolean {
+  if (p.next?.program !== p) return false;
+  const entry = startLevels(p, kind)[p.next.step];
+  return entry !== null && entry !== undefined && endLevel(kind, p) === entry;
+}
+
+/**
+ * Keeps a loop closed after an edit changed where it starts: the last sweep
+ * of the loop (unless it's the one being edited) heads for the new start.
+ */
+function closeLoop(kind: number, p: Program, edited: number) {
+  if (p.next?.program !== p) return;
+  const entry = startLevels(p, kind)[p.next.step];
+  if (entry === null || entry === undefined || endLevel(kind, p) === entry) return;
+  const units = unitsOf(p, kind);
+  const last = units[units.length - 1];
+  if (!last || last[0] < p.next.step || last[0] === edited || !sweepOf(kind, p.steps[last[0]])) return;
+  const start = startLevels(p, kind)[last[0]];
+  if (start === null) return;
+  const t = sweepTotal(kind, p, last);
+  const change = entry - start;
+  setUnitRows(p, [...last], sweepRows(change, Math.max(t.frames, fastestSweep(change))).map((sw) => sweepStep(kind, sw)));
+}
+
+/** The level a program ends on, the first time through. */
+function endLevel(kind: number, p: Program): number | null {
+  const n = p.steps.length;
+  if (!n) return null;
+  const start = startLevels(p, kind)[n - 1];
+  const last = p.steps[n - 1];
+  const sw = sweepOf(kind, last);
+  const range = levelRange(kind);
+  if (sw) return start === null ? null : (((start + sw.frames * sw.speed) % range) + range) % range;
+  if (kind === PULSE) {
+    const a = pulseAction(last);
+    return a.type === 'width' ? a.width : start;
+  }
+  const a = filterAction(last);
+  return a.type === 'cutoff' ? a.cutoff : start;
+}
+
+/** A sweep in words: from and to, or how far which way. */
+function describeSweep(kind: number, p: Program, rows: number[]): string {
+  const t = sweepTotal(kind, p, rows);
+  const start = startLevels(p, kind)[rows[0]];
+  const range = levelRange(kind);
+  const what = kind === PULSE ? '' : 'cutoff ';
+  if (start === null) {
+    const way = kind === PULSE ? (t.change < 0 ? 'Narrow' : 'Widen') : t.change < 0 ? 'Close' : 'Open';
+    return `${way} by ${levelText(kind, Math.abs(t.change))} over ${framesText(t.frames)}`;
+  }
+  const end = start + t.change;
+  const goal = ((end % range) + range) % range;
+  const wraps = end < 0 ? ', wrapping round past 0' : end >= range ? ', wrapping round past the top' : '';
+  // Looping back here starts from where the program ended, which may not be where it first started
+  let again = '';
+  if (p.next?.program === p && p.next.step === rows[0]) {
+    const end = endLevel(kind, p);
+    if (end !== null && end !== start) again = `. Each time round it starts from ${levelText(kind, end)}, not ${levelText(kind, start)}`;
+  }
+  return `Sweep ${what}from ${levelText(kind, start)} to ${levelText(kind, goal)}${wraps} over ${framesText(t.frames)}${again}`;
+}
+
 /** Describes a shown step, which may be a filter set-up with its cutoff. */
 function describeUnit(kind: number, p: Program, rows: number[]): string {
+  if (kind !== WAVE && sweepOf(kind, p.steps[rows[0]])) return describeSweep(kind, p, rows);
   if (rows.length === 2) {
     const setup = filterAction(p.steps[rows[0]]) as { type: 'setup'; passband: number; resonance: number; voices: number };
     const cutoff = filterAction(p.steps[rows[1]]) as { type: 'cutoff'; cutoff: number };
@@ -1508,11 +1816,6 @@ function pulseFields(s: Step, box: HTMLElement, update: Update, get: () => Step)
         'Pulse width: 50% is a square wave; near 0% or 100% it gets thin and quiet',
       ),
     );
-  } else if (a.type === 'sweep') {
-    box.append(
-      numberField('for', a.frames, 1, 127, 'frames', (n) => update(pulseStep({ ...(pulseAction(get()) as { type: 'sweep'; frames: number; speed: number }), frames: n })), 'How long the sweep lasts'),
-      numberField('by', a.speed, -128, 127, 'a frame', (n) => update(pulseStep({ ...(pulseAction(get()) as { type: 'sweep'; frames: number; speed: number }), speed: n })), 'Change in width each frame, out of 4096. Negative narrows it.'),
-    );
   }
 }
 
@@ -1583,13 +1886,6 @@ function filterFields(p: Program, rows: number[], box: HTMLElement, update: (s: 
         resonance: false,
         borrowed: true,
       }),
-    );
-  } else {
-    type Sweep = { type: 'sweep'; frames: number; speed: number };
-    const get = () => filterAction(p.steps[i]) as Sweep;
-    box.append(
-      numberField('for', a.frames, 1, 127, 'frames', (n) => update(filterStep({ ...get(), frames: n })), 'How long the sweep lasts'),
-      numberField('by', a.speed, -128, 127, 'a frame', (n) => update(filterStep({ ...get(), speed: n })), 'Change in cutoff each frame, out of 255. Negative closes the filter (darker), positive opens it (brighter).'),
     );
   }
 }
@@ -2829,8 +3125,14 @@ $('delete-instrument').addEventListener('click', deleteInstrument);
 $('add-step').addEventListener('click', () => {
   const p = current();
   if (!p) return;
-  const last = p.steps[p.steps.length - 1];
-  insertStep(p.steps.length, last ? { ...last } : defaultStep(state.kind));
+  // A copy of the last step; after a sweep, one back the other way, so the two can loop
+  const units = unitsOf(p);
+  const last = units[units.length - 1];
+  if (!last) return insertStep(0, defaultStep(state.kind));
+  if (sweepOf(state.kind, p.steps[last[0]])) {
+    const t = sweepTotal(state.kind, p, last);
+    insertSteps(p.steps.length, sweepRows(-t.change, Math.max(t.frames, fastestSweep(-t.change))).map((sw) => sweepStep(state.kind, sw)));
+  } else insertSteps(p.steps.length, last.map((r) => ({ ...p.steps[r] })));
 });
 
 $<HTMLSelectElement>('next').addEventListener('change', (e) => {
