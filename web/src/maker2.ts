@@ -750,7 +750,7 @@ function drawWidth() {
     ] as const) {
       const edge = el('g', { class: `width-loop-edge${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
       el('rect', { x: x(at) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, edge);
-      el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, edge);
+      el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, edge);
     }
   }
   el('line', { x1: 0, x2: width, y1: widthY(SQUARE), y2: widthY(SQUARE), class: 'width-square' }, plot);
@@ -766,7 +766,7 @@ function drawWidth() {
     const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '' }, plot);
     // The bar and the ↻ at its top left both pull it (the last point on the bar is drawn over it)
     el('rect', { x: at - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, pull);
-    el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, pull);
+    el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, pull);
     el('rect', { x: at - 18, y: r.top, width: 16, height: 16, class: 'hit' }, pull);
     el('text', { x: at - 4, y: r.top + 12, 'text-anchor': 'end', class: 'width-repeat' }, pull).textContent = '↻';
     el('title', {}, pull).textContent = 'Drag left to repeat part of the line while the note is held';

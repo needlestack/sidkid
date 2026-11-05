@@ -513,13 +513,13 @@
   fill: transparent;
 }
 
-.width-loop-edge .bar {
+.width-loop-edge .edge-bar {
   fill: var(--pulse);
   opacity: 0.55;
 }
 
-.width-loop-edge:hover .bar,
-.width-loop-edge.dragging .bar {
+.width-loop-edge:hover .edge-bar,
+.width-loop-edge.dragging .edge-bar {
   opacity: 1;
 }
 
