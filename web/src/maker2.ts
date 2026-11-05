@@ -16,6 +16,7 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
+import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
 import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -82,6 +83,7 @@ function defaults(): State {
         bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }],
         notes: [],
         hold: true,
+        vibrato: null,
         // The classic sweep: narrow to wide and back, over and over
         pulse: {
           points: [
@@ -103,6 +105,7 @@ function defaults(): State {
         ],
         notes: [],
         hold: true,
+        vibrato: null,
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -117,6 +120,7 @@ function defaults(): State {
         ],
         notes: [],
         hold: true,
+        vibrato: null,
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -145,6 +149,7 @@ function load(): State {
         ins.pulse ??= defaultPulse();
         ins.waveLoop ??= null;
         ins.notes ??= [];
+        ins.vibrato ??= null;
         // Bars that kept going until the note ended: now the waveform holds after its last bar
         const open = ins.bars.some((b) => b.end === null);
         if (ins.hold === undefined) ins.hold = open;
@@ -192,6 +197,7 @@ function undo(redo = false) {
   selected = -1;
   selectedPoint = -1;
   selectedNote = -1;
+  selectedVibrato = false;
   changed();
   renderInstruments();
 }
@@ -215,9 +221,12 @@ function audition(): Audition {
   const wave = waveProgram(s, s.name);
   const pulse = pulseProgram(s.bars, s.pulse, s.name);
   const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
+  // Vibrato reads its speed from a row of the speed table
+  const v = s.vibrato;
+  const speed = v ? wobbleRow(v) : null;
   return {
-    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, empty, empty],
-    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, 0, 0], vibratoDelay: 0, gateTimer: 2, firstWave: 0x09 },
+    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, empty, speed ? { left: new Uint8Array([speed[0]]), right: new Uint8Array([speed[1]]) } : empty],
+    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: 2, firstWave: 0x09 },
   };
 }
 
@@ -225,8 +234,11 @@ let analyzer: Analyzer | null = null;
 
 /** What the player writes to the chip for a held note, frame by frame (for tests). */
 function trace(frames = 100): Trace | null {
+  return traceWith(audition(), frames);
+}
+
+function traceWith(a: Audition, frames: number): Trace | null {
   if (!analyzer) return null;
-  const a = audition();
   return analyzer.trace(a.tables, a.instrument, test.note, frames, settings);
 }
 
@@ -302,6 +314,8 @@ let selected = -1;
 let selectedPoint = -1;
 /** The selected note, or -1 */
 let selectedNote = -1;
+/** Whether the vibrato is selected */
+let selectedVibrato = false;
 /** What is being dragged, for its look and the readout */
 let dragging: string | null = null;
 /** While an envelope handle is dragged it follows the pointer, and the setting it will land on is drawn */
@@ -389,7 +403,15 @@ function inRoll(e: PointerEvent): boolean {
 
 /** The timeline's height: taller with sections open */
 function height(): number {
-  return notesTop() + PAD_BOTTOM + (state.notesOpen ? ROLL_H : 0);
+  return notesTop() + PAD_BOTTOM + (state.notesOpen ? ROLL_H + VIB_H : 0);
+}
+
+/** The vibrato lane, under the notes */
+const VIB_H = 34;
+const vibTop = () => rollTop() + ROLL_H;
+
+function inVibrato(e: PointerEvent): boolean {
+  return state.notesOpen && yAt(e) >= vibTop() && yAt(e) < vibTop() + VIB_H;
 }
 
 /** The line at silence, under the envelope or its preview, with the waveform strip below */
@@ -559,6 +581,7 @@ function renderGutter() {
   toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
   if (state.notesOpen) {
     for (const semis of [24, 12, 0, -12]) add(noteY(semis) + SEMI / 2 - 7, 14, [semis === 0 ? 'played' : semitoneText(semis)], 'semi');
+    add(vibTop(), VIB_H, ['Vibrato'], 'lane width rule-thin');
   }
 }
 
@@ -575,6 +598,7 @@ function openNotes(open: boolean, note = -1) {
   selected = -1;
   selectedPoint = -1;
   selectedNote = open ? note : -1;
+  selectedVibrato = false;
   persist();
   render();
 }
@@ -587,6 +611,7 @@ function openWaves(open: boolean, bar = -1) {
   selected = open ? bar : -1;
   selectedPoint = -1;
   selectedNote = -1;
+  selectedVibrato = false;
   persist();
   render();
 }
@@ -722,7 +747,7 @@ function drawNotes() {
     el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: noteY(semis) + SEMI / 2, y2: noteY(semis) + SEMI / 2, class: `roll-line${semis === 0 ? ' zero' : ''}` }, plot);
   }
   // The shared repeat runs through the notes too (its ↻ here when the waveform rows are closed)
-  const icon = drawWaveRepeat(roll, roll + ROLL_H, !state.waveOpen, false);
+  const icon = drawWaveRepeat(roll, roll + ROLL_H, true, false);
   const end = programEnd(s);
   if (end !== null && waveLooping(s)) {
     const from = s.waveLoop!;
@@ -754,7 +779,101 @@ function drawNotes() {
     el('rect', { x: x2 - grip, y: y - 3, width: grip + 2, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'end' }, g);
     el('text', { x: x2 + 4, y: y + SEMI - 0.5, class: 'note-label' }, g).textContent = semitoneText(note.semis);
   });
+  // The pitch as the player makes it, frame by frame: vibrato and all
+  const heard = heardPitch();
+  if (heard) {
+    const pts: string[] = [];
+    heard.forEach((semis, f) => {
+      const y = noteY(Math.max(NOTE_LOW - 0.5, Math.min(NOTE_HIGH + 0.5, semis))) + SEMI / 2;
+      pts.push(`${x(f).toFixed(1)},${y.toFixed(1)}`, `${x(f + 1).toFixed(1)},${y.toFixed(1)}`);
+    });
+    el('polyline', { points: pts.join(' '), class: 'pitch-trace' }, plot);
+  }
   icon();
+  drawVibrato();
+}
+
+/** The pitch the player makes each frame, in semitones from the key played (cached; null until the engine is ready). */
+let heardCache: { key: string; pitch: number[] } | null = null;
+function heardPitch(): number[] | null {
+  const a = audition();
+  const frames = Math.min(TOTAL, Math.ceil(dataEnd() * 2) + 100);
+  const key = JSON.stringify([a.tables.map((t) => [Array.from(t.left), Array.from(t.right)]), a.instrument, test.note, frames, ntsc]);
+  if (heardCache?.key === key) return heardCache.pitch;
+  const t = traceWith(a, frames);
+  if (!t) return null;
+  const base = freqOf(test.note);
+  heardCache = { key, pitch: Array.from(t.freq, (f) => (f ? 12 * Math.log2(f / base) : 0)) };
+  return heardCache.pitch;
+}
+
+const DEFAULT_WOBBLE: Wobble = { turn: 3, even: true, depth: 3 };
+
+/**
+ * Where vibrato first moves the pitch with a delay setting, measured: the
+ * player counts the delay only on frames it runs effects (not on a song
+ * row's first tick, nor where the wave program sets the pitch), so it is
+ * played silently with and without. Null if it never shows.
+ */
+const startCache = new Map<string, number | null>();
+function vibratoStart(delay: number): number | null {
+  const s = shape();
+  if (!s.vibrato) return null;
+  const a = audition();
+  const frames = Math.min(TOTAL, delay * 2 + 60);
+  const key = JSON.stringify([a.tables.map((t) => [Array.from(t.left), Array.from(t.right)]), a.instrument, delay, frames, ntsc]);
+  if (startCache.has(key)) return startCache.get(key)!;
+  const plain = traceWith({ ...a, instrument: { ...a.instrument, vibratoDelay: 0 } }, frames);
+  const wobbly = traceWith({ ...a, instrument: { ...a.instrument, vibratoDelay: delay } }, frames);
+  if (!plain || !wobbly) return null;
+  const at = wobbly.freq.findIndex((f, i) => f !== plain.freq[i]);
+  if (startCache.size > 2000) startCache.clear();
+  startCache.set(key, at < 0 ? null : at);
+  return at < 0 ? null : at;
+}
+
+/** The delay setting whose vibrato starts nearest a frame. */
+function delayFor(frame: number): number {
+  let lo = 1;
+  let hi = 255;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const at = vibratoStart(mid);
+    if (at !== null && at < frame) lo = mid + 1;
+    else hi = mid;
+  }
+  const before = lo > 1 ? vibratoStart(lo - 1) : null;
+  const here = vibratoStart(lo);
+  if (before !== null && here !== null && frame - before < here - frame) return lo - 1;
+  return lo;
+}
+
+/** Where to draw the vibrato's start: as measured, or (where it never shows) as the delay would be in frames */
+function vibratoFrom(): number {
+  const v = shape().vibrato!;
+  return vibratoStart(v.delay) ?? Math.round((v.delay * 6) / 5);
+}
+
+/** The vibrato lane: a bar from where it starts, with the wobble drawn in it; drawn on to add one. */
+function drawVibrato() {
+  const s = shape();
+  const top = vibTop();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'lane-line' }, plot);
+  if (!s.vibrato) {
+    el('text', { x: x(0) + 8, y: top + VIB_H / 2 + 4, class: 'vib-hint' }, plot).textContent = 'Drag along here to add vibrato from where you start';
+    return;
+  }
+  const from = vibratoFrom();
+  const g = el('g', { class: `vib${selectedVibrato ? ' selected' : ''}`, 'data-vib': '' }, plot);
+  el('rect', { x: x(from), y: top + 5, width: x(TOTAL) - x(from), height: VIB_H - 10, rx: 5, class: 'vib-body' }, g);
+  // Its shape: a semitone either way fills the bar
+  const curve = vibratoCurve(s.vibrato, test.note, 1, Math.max(1, TOTAL - from));
+  const mid = top + VIB_H / 2;
+  const amp = (VIB_H - 14) / 2;
+  const pts = Array.from(curve, (v, i) => `${x(from + i).toFixed(1)},${(mid - Math.max(-1, Math.min(1, v)) * amp).toFixed(1)}`);
+  el('polyline', { points: pts.join(' '), class: 'vib-wave' }, g);
+  el('rect', { x: x(from) - 4, y: top + 5, width: 9, height: VIB_H - 10, class: 'bar-edge', 'data-vib-edge': '' }, g);
+  if (vibratoStart(s.vibrato.delay) === null) el('title', {}, g).textContent = 'Not heard: the pitch is set every frame here (a repeating pitch), which restarts the vibrato';
 }
 
 /**
@@ -980,6 +1099,10 @@ function renderReadout() {
   const box = $('readout');
   box.replaceChildren();
   const s = shape();
+  if (state.notesOpen && selectedVibrato && s.vibrato) {
+    vibratoReadout(box);
+    return;
+  }
   if (state.notesOpen && s.notes[selectedNote]) {
     const n = s.notes[selectedNote];
     const text = document.createElement('span');
@@ -1011,6 +1134,60 @@ function renderReadout() {
   box.append(text, del);
 }
 
+/** The vibrato: where it starts, its speed and depth, and deleting it. */
+function vibratoReadout(box: HTMLElement) {
+  const s = shape();
+  const v = s.vibrato!;
+  const from = vibratoStart(v.delay);
+  const text = document.createElement('span');
+  text.textContent = from === null ? 'Vibrato: not heard here (the pitch is set every frame)' : `Vibrato from ${timeText(from)}`;
+  const size = () => vibratoSize(v, test.note);
+  const range = (label: string, value: number, min: number, max: number, show: () => string, set: (n: number) => void) => {
+    const l = document.createElement('label');
+    l.className = 'vib-slider';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.value = String(value);
+    const out = document.createElement('output');
+    out.textContent = show();
+    let marked = false;
+    input.addEventListener('input', () => {
+      if (!marked) before();
+      marked = true;
+      set(Number(input.value));
+      out.textContent = show();
+      persist();
+      sendToPlayer();
+      render();
+    });
+    input.addEventListener('change', () => {
+      marked = false;
+      playShape();
+    });
+    l.append(label, input, out);
+    return l;
+  };
+  // Fewer frames between turns is faster, and fewer halvings of a semitone deeper, so both run backwards
+  const speed = range('Speed', -v.turn, -15, -1, () => `${size().rate.toFixed(1)} a second`, (n) => (v.turn = -n));
+  const depth = range('Depth', -v.depth, -8, 0, () => `± ${pitchText(size().depth)}`, (n) => (v.depth = -n));
+  const del = document.createElement('button');
+  del.className = 'mini danger';
+  del.textContent = 'Delete';
+  del.addEventListener('click', deleteVibrato);
+  box.append(text, speed, depth, del);
+}
+
+function deleteVibrato() {
+  const s = shape();
+  if (!s.vibrato) return;
+  before();
+  s.vibrato = null;
+  selectedVibrato = false;
+  changed();
+}
+
 /** The selected pulse width point: its width and time, and deleting it. */
 function pointReadout(box: HTMLElement) {
   const pulse = shape().pulse;
@@ -1040,6 +1217,7 @@ function deletePoint() {
   }
   selectedPoint = -1;
   selectedNote = -1;
+  selectedVibrato = false;
   changed();
 }
 
@@ -1159,6 +1337,24 @@ plot.addEventListener('pointerdown', (e) => {
       end = to;
       render();
     };
+  } else if (target.closest('[data-vib]') || inVibrato(e)) {
+    // The vibrato: grabbed, or drawn on to add it, it moves its start
+    before();
+    if (!s.vibrato) s.vibrato = { delay: 1, ...DEFAULT_WOBBLE };
+    if (!target.closest('[data-vib]')) {
+      s.vibrato.delay = delayFor(Math.max(0, Math.round(start)));
+      moved = true;
+    }
+    selected = -1;
+    selectedPoint = -1;
+    selectedNote = -1;
+    selectedVibrato = true;
+    dragging = 'vib';
+    plot.style.cursor = 'ew-resize';
+    move = (e) => {
+      s.vibrato!.delay = delayFor(Math.max(0, Math.round(frameAt(e))));
+      render();
+    };
   } else if (target.closest('[data-note]')) {
     // A note: moved in time and pitch, or an end dragged
     const noteEl = target.closest<SVGGElement>('[data-note]')!;
@@ -1169,6 +1365,7 @@ plot.addEventListener('pointerdown', (e) => {
     selectedNote = i;
     selected = -1;
     selectedPoint = -1;
+    selectedVibrato = false;
     before();
     dragging = 'note';
     plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
@@ -1213,6 +1410,7 @@ plot.addEventListener('pointerdown', (e) => {
     selected = -1;
     selectedPoint = -1;
     selectedNote = -1;
+    selectedVibrato = false;
   } else if (rows() && target.closest('[data-loop-end-edge]')) {
     // Where the repeat ends: the last point, moved in time only, and never
     // past the point before it
@@ -1266,6 +1464,7 @@ plot.addEventListener('pointerdown', (e) => {
     selectedPoint = i;
     selected = -1;
     selectedNote = -1;
+    selectedVibrato = false;
     dragging = 'point';
     plot.style.cursor = 'grabbing';
     move = (e) => {
@@ -1284,6 +1483,7 @@ plot.addEventListener('pointerdown', (e) => {
     selected = i;
     selectedPoint = -1;
     selectedNote = -1;
+    selectedVibrato = false;
     before();
     dragging = 'bar';
     // The pointer keeps the look it had over the bar or its end while dragging
@@ -1338,10 +1538,12 @@ plot.addEventListener('pointerdown', (e) => {
     selected = -1;
     selectedPoint = -1;
     selectedNote = -1;
+    selectedVibrato = false;
   } else {
     selected = -1;
     selectedPoint = -1;
     selectedNote = -1;
+    selectedVibrato = false;
     render();
     return;
   }
@@ -1461,6 +1663,7 @@ function deleteNote() {
   before();
   s.notes.splice(selectedNote, 1);
   selectedNote = -1;
+  selectedVibrato = false;
   changed();
 }
 
@@ -1555,6 +1758,7 @@ function pick(i: number) {
   selected = -1;
   selectedPoint = -1;
   selectedNote = -1;
+  selectedVibrato = false;
   renderInstruments();
   changed();
 }
@@ -1562,13 +1766,13 @@ function pick(i: number) {
 $<HTMLSelectElement>('instrument').addEventListener('change', (e) => pick(Number((e.target as HTMLSelectElement).value)));
 $('new-instrument').addEventListener('click', () => {
   before();
-  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, pulse: defaultPulse(), waveLoop: null });
+  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, pulse: defaultPulse(), waveLoop: null });
   pick(state.instruments.length - 1);
 });
 $('duplicate-instrument').addEventListener('click', () => {
   before();
   const s = shape();
-  state.instruments.splice(state.current + 1, 0, { ...s, name: `${s.name} copy`, bars: s.bars.map((b) => ({ ...b })), notes: s.notes.map((n) => ({ ...n })), pulse: JSON.parse(JSON.stringify(s.pulse)) });
+  state.instruments.splice(state.current + 1, 0, { ...s, name: `${s.name} copy`, bars: s.bars.map((b) => ({ ...b })), notes: s.notes.map((n) => ({ ...n })), vibrato: s.vibrato && { ...s.vibrato }, pulse: JSON.parse(JSON.stringify(s.pulse)) });
   pick(state.current + 1);
 });
 $('delete-instrument').addEventListener('click', () => {
@@ -1746,6 +1950,7 @@ window.addEventListener('keydown', (e) => {
       selected = -1;
       selectedPoint = -1;
       selectedNote = -1;
+      selectedVibrato = false;
       render();
     }
     if (typing(e)) (e.target as HTMLElement).blur();
@@ -1756,6 +1961,11 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || typing(e) || e.repeat) return;
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.notesOpen && selectedVibrato) {
+    e.preventDefault();
+    deleteVibrato();
+    return;
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && state.notesOpen && selectedNote >= 0) {
     e.preventDefault();
     deleteNote();
@@ -1857,6 +2067,7 @@ Object.assign(window, {
   maker2: {
     state: () => state,
     trace,
+    traceWith,
     audition,
     ready: () => analyzer !== null,
     status: () => lastStatus,

@@ -477,6 +477,21 @@ try {
   });
   report(ending === '21 21 21 21 21 21 / 21 21 21 21 1 1', 'maker2 hold or fall silent', ending);
 
+  // Vibrato: a steady pitch until its delay runs out, then a wobble around it
+  const vib = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    ins.bars = [{ wave: 0x40, start: 0, end: 4 }];
+    ins.hold = true;
+    ins.vibrato = { delay: 10, turn: 3, even: true, depth: 3 };
+    const f = Array.from(window.maker2.trace(60).freq);
+    ins.vibrato = null;
+    const first = f.findIndex((v) => v !== f[0]);
+    const after = f.slice(first);
+    return `${first > 5 && first < 20 ? 'waits' : `starts at ${first}`}, ${Math.max(...after) > f[0] && Math.min(...after) < f[0] ? 'wobbles' : 'no wobble'}`;
+  });
+  report(vib === 'waits, wobbles', 'maker2 vibrato', vib);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

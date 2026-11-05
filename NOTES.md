@@ -65,7 +65,11 @@ zoomable timeline, aiming for a GarageBand feel.
 - Notes: a third fold, a roll of semitones (−12..+24) from the key played; one pitch at a
   time, a pitch holds until the next note. Notes and waveform make one wave program
   (`stretches()` in shape.ts: each row sets what changed; the repeat target sets both).
-  Not yet: fixed pitches (drums), slides, vibrato.
+  Not yet: fixed pitches (drums), slides. The roll shows the pitch as the engine makes it.
+- Vibrato: a lane under the Pitch roll (instrument vibrato: a speed-table row + delay).
+  The player counts the delay only on frames it runs effects (not a song row's first
+  tick, nor rows that set the pitch), so the start is measured by tracing with and
+  without; dragging picks the delay that lands nearest. Repeating pitches override it.
 - Still missing from Volume/Waveform: an instrument that lets go by itself (gate-off
   rows), Note start (hard restart, first wave, legato), sync/ring mod.
 - Timeline is 32 s (slowest attack 8 s + decay 24 s). Zooming out stops when everything

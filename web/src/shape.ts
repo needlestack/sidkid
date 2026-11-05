@@ -64,6 +64,12 @@ export interface Shape {
   waveLoop: number | null;
   /** After the last bar or note, without a repeat: hold where it got to (true) or fall silent */
   hold: boolean;
+  /**
+   * Vibrato on every note: how it wobbles (a speed table row), and the
+   * player's delay before it starts (counted on the frames it runs
+   * effects, so not quite frames)
+   */
+  vibrato: { delay: number; turn: number; even: boolean; depth: number } | null;
 }
 
 /** The parts of a shape that make its wave program */

@@ -711,3 +711,59 @@
 .note.implied.again {
   opacity: 0.5;
 }
+
+/* The pitch as the player makes it */
+.pitch-trace {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.2;
+  stroke-opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Vibrato */
+.vib {
+  cursor: ew-resize;
+}
+
+.vib-body {
+  fill: var(--accent);
+  fill-opacity: 0.12;
+  stroke: var(--accent);
+  stroke-opacity: 0.6;
+}
+
+.vib.selected .vib-body {
+  fill-opacity: 0.25;
+  stroke: var(--text);
+}
+
+.vib-wave {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  pointer-events: none;
+}
+
+.vib-hint {
+  fill: var(--muted);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.readout .vib-slider input {
+  accent-color: var(--accent);
+}
+
+.readout .vib-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.readout .vib-slider output {
+  min-width: 96px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
