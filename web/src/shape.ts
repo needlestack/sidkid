@@ -34,10 +34,11 @@ const endOf = (b: { end: number | null }) => b.end ?? Infinity;
 
 /** What plays when, from the start of the note: consecutive spans, the last one open. */
 export function spans(bars: Bar[]): Span[] {
+  // Time starts with the note: nothing plays before 0
   const cuts = new Set([0]);
   for (const b of bars) {
-    cuts.add(b.start);
-    if (b.end !== null) cuts.add(b.end);
+    cuts.add(Math.max(0, b.start));
+    if (b.end !== null && b.end > 0) cuts.add(b.end);
   }
   const times = [...cuts].sort((a, b) => a - b);
   const out: Span[] = [];

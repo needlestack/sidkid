@@ -102,7 +102,13 @@ const shape = () => state.instruments[state.current];
 function load(): State {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-    if (saved?.instruments?.length) return { ...defaults(), ...saved };
+    if (saved?.instruments?.length) {
+      // Bars from before drawing stopped at 0 could start before the note did
+      for (const ins of saved.instruments as Shape[]) {
+        ins.bars = ins.bars.filter((b) => b.end === null || b.end > 0).map((b) => ({ ...b, start: Math.max(0, b.start) }));
+      }
+      return { ...defaults(), ...saved };
+    }
   } catch {
     // Unreadable or blocked storage: start afresh
   }
@@ -774,7 +780,8 @@ plot.addEventListener('pointerdown', (e) => {
     before();
     dragging = 'bar';
     move = (e) => {
-      const to = Math.round(frameAt(e));
+      // Not before the note starts, nor past the end
+      const to = Math.max(0, Math.min(TOTAL, Math.round(frameAt(e))));
       const next: Bar = { wave, start: Math.min(from, to), end: Math.max(from, to) === Math.min(from, to) ? Math.min(from, to) + 1 : Math.max(from, to) };
       if (next.end! >= TOTAL - 1) next.end = null;
       const bars = place(original, next);
