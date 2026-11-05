@@ -1,0 +1,325 @@
+/* The second instrument maker: a timeline to shape the sound on. Builds on
+   style.css and instrumentmaker.css (the top bar, keyboard and bar at the
+   bottom). */
+
+.maker2 main {
+  display: grid;
+  gap: 16px;
+}
+
+.shaper {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.shaper-head {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.shaper-head .name-input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.view-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zoom .hint {
+  min-width: 72px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.tab-hint {
+  margin: 0;
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.tl-gutter {
+  position: relative;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tl-gutter-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.tl-gutter-row.lane {
+  color: var(--text);
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+}
+
+.tl-gutter-row.heard {
+  font-size: 11px;
+}
+
+.tl-gutter-row svg {
+  flex: none;
+}
+
+.tl-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.tl-plot {
+  display: block;
+  touch-action: pan-x;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tl-ruler {
+  fill: var(--surface-2);
+}
+
+.tl-tick,
+.tl-grid {
+  stroke: var(--step-beat);
+  stroke-width: 1;
+}
+
+.tl-grid.second {
+  stroke: var(--step-bar);
+  stroke-opacity: 0.6;
+}
+
+.tl-label {
+  fill: var(--muted);
+  font-size: 10.5px;
+}
+
+.tl-keyup {
+  stroke: var(--text);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  opacity: 0.45;
+}
+
+.tl-keyup-tab {
+  cursor: ew-resize;
+}
+
+.tl-keyup-tab rect {
+  fill: var(--surface);
+  stroke: var(--step-bar);
+}
+
+.tl-keyup-tab text {
+  fill: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.tl-keyup-tab:hover rect,
+.tl-keyup-tab.dragging rect,
+.tl-keyup-tab:focus-visible rect {
+  stroke: var(--accent);
+}
+
+.tl-playhead {
+  stroke: var(--playhead);
+  stroke-width: 2;
+}
+
+[data-drag]:focus {
+  outline: none;
+}
+
+/* Volume */
+
+.env-area {
+  fill: var(--accent);
+  opacity: 0.14;
+}
+
+.env-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.env-held {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 4;
+  opacity: 0.5;
+}
+
+.env-handle {
+  cursor: grab;
+}
+
+.env-handle .hit {
+  fill: transparent;
+}
+
+.env-handle circle:not(.hit) {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.env-handle:hover circle:not(.hit),
+.env-handle.dragging circle:not(.hit),
+.env-handle:focus-visible circle:not(.hit) {
+  fill: var(--accent);
+}
+
+.env-handle.dragging {
+  cursor: grabbing;
+}
+
+.env-handle text {
+  fill: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+/* Waveform */
+
+.env-ghost {
+  fill: var(--text);
+  opacity: 0.05;
+}
+
+.lane-line {
+  stroke: var(--border);
+}
+
+.heard rect {
+  fill: var(--surface-2);
+  stroke: var(--step-bar);
+  stroke-width: 1;
+}
+
+.heard.none rect {
+  fill: none;
+  stroke-dasharray: 3 3;
+}
+
+.heard text {
+  fill: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.bar {
+  cursor: grab;
+  --c: var(--accent);
+}
+
+.bar.tri {
+  --c: var(--tri);
+}
+
+.bar.saw {
+  --c: var(--saw);
+}
+
+.bar.pulse {
+  --c: var(--pulse);
+}
+
+.bar.noise {
+  --c: var(--noise);
+}
+
+.bar-body {
+  fill: var(--c);
+  fill-opacity: 0.32;
+  stroke: var(--c);
+  stroke-width: 1.5;
+}
+
+.bar.open .bar-body {
+  stroke-dasharray: none;
+}
+
+.bar.selected .bar-body {
+  fill-opacity: 0.55;
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.bar-arrow {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2;
+}
+
+.bar-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.bar-edge {
+  fill: transparent;
+  cursor: ew-resize;
+}
+
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 28px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.readout .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+@media (max-width: 520px) {
+  .timeline {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .tl-gutter-row.lane svg {
+    display: none;
+  }
+}

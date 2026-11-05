@@ -1,6 +1,6 @@
 # Working notes
 
-Notes for picking the work up again. Last updated 2026-10-30, at `fb0ab9f`.
+Notes for picking the work up again. Last updated 2026-11-05.
 
 ## How we work
 
@@ -34,12 +34,44 @@ Notes for picking the work up again. Last updated 2026-10-30, at `fb0ab9f`.
 - Sweeps are goal-based ("to X over N frames"). Editing a goal keeps later goals
   (`laterGoals`/`keepGoals`) and keeps closed loops closed (`loopCloses`/`closeLoop`).
 
+## Instrument maker 2 (experiment, `instruments2.html`)
+
+The owner wants to nail instruments before the song editor, and is trying a
+second approach next to the first (keep both): no step list, just shaping on a
+zoomable timeline, aiming for a GarageBand feel.
+
+- Tabs: Volume (ADSR handles on the timeline) and Waveform (bars in rows for
+  Triangle/Saw/Pulse/Noise, moved and resized like clips; overlapping bars play
+  together; a dropped bar overwrites what it lands on). Next: **Pitch**, then **Filter**.
+- `web/src/shape.ts`: the model (`Shape`, `Bar`) and `waveProgram()`, which turns
+  bars into a wave program. A delay row of N lasts N+1 frames (checked against the engine).
+- `web/src/maker2.ts`: the page. Own storage (`sidkid.maker2.v1`), not shared with
+  the first maker. Pulse width is fixed at 50% until pulse gets a shape of its own.
+- "key up" on the ruler sets how long Play holds the note and where the picture releases.
+- Not yet: loading instruments from songs, pulse width, pitch, filter, vibrato.
+
+## Song editor plan (agreed 2026-11-05, expect tweaks)
+
+- Patterns stay shared. Instruments hold wave and pulse programs (pulse is part of the patch).
+- **Filter**: one per chip, so it gets its own lane under the voice tracks, like an
+  automation lane on a shared effect. Each voice has a route-through-filter toggle.
+  The lane shows which instrument drives the filter at each moment (last note with
+  a filter program wins), so that's visible rather than warned about.
+- **Tracks on voices**: any number of tracks; each is assigned to one of the 3 voices
+  (picked automatically for the fewest overlaps, shown as a chip, changeable). No
+  per-note reshuffling: filter routing and ring/sync depend on the voice.
+- Merging: on a shared voice the newer note takes it; when that note ends the held
+  note restarts (the classic bass-plus-drums-on-one-channel trick). The interrupted
+  stretch is drawn hatched in its track instead of a warning.
+- Loading a .sng: one track per voice, split by instrument, pinned to their voices,
+  so it round-trips identically. SIDKid's own save keeps tracks; .sng export merges.
+
 ## Next ideas
 
-1. Drag handles on the graph to move sweep end points on the width/cutoff line.
-2. The song editor: pattern effects, filter routing per voice, filter ownership on
-   the timeline, programs that change mid-note.
-3. Saving to .sng.
+1. Instrument maker 2: the Pitch tab, then Filter.
+2. Drag handles on the first maker's graph to move sweep end points.
+3. The song editor (plan above).
+4. Saving to .sng.
 
 ## Known loose ends
 

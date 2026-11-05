@@ -367,6 +367,81 @@ try {
   const overflow = await tm.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   report(overflow <= 0, 'instruments fits a phone screen', overflow > 0 ? `${overflow}px too wide` : '');
   report(tmErrors.length === 0, 'instruments without errors', tmErrors.join(' | '));
+
+  // --- 4. Instrument maker 2 ------------------------------------------------
+  const m2 = await browser.newPage();
+  const m2Errors = [];
+  m2.on('pageerror', (err) => m2Errors.push(err.message));
+  m2.on('console', (msg) => msg.type() === 'error' && m2Errors.push(msg.text()));
+  await m2.setViewport({ width: 1180, height: 900, deviceScaleFactor: 2 });
+  await m2.goto(`${base}instruments2.html`);
+  await m2.evaluate(() => localStorage.clear());
+  await m2.reload();
+  await m2.waitForFunction(() => window.maker2?.ready(), { timeout: 5000 });
+  report(true, 'maker2 page loads');
+
+  // Bars of 1, 2, 15, 16 and 31 frames, a gap, and an overlap play for exactly their frames
+  const exact = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const bars = [
+      { wave: 0x80, start: 0, end: 1 },
+      { wave: 0x40, start: 1, end: 3 },
+      { wave: 0x20, start: 3, end: 18 },
+      { wave: 0x10, start: 18, end: 34 },
+      { wave: 0x40, start: 40, end: 71 },
+      { wave: 0x10, start: 60, end: null },
+    ];
+    s.instruments[s.current].bars = bars;
+    const frames = 80;
+    const got = window.maker2.trace(frames).control;
+    for (let f = 0; f < frames; f++) {
+      let wave = 0;
+      for (const b of bars) if (b.start <= f && f < (b.end ?? Infinity)) wave |= b.wave;
+      if (got[f] !== (wave | 1)) return `frame ${f}: ${got[f].toString(16)}, not ${(wave | 1).toString(16)}`;
+    }
+    return '';
+  });
+  report(exact === '', 'maker2 bars play for their frames', exact);
+
+  // Dragging the attack dot to the right makes the attack slower
+  const plotPoint = (frame, y) =>
+    m2.evaluate(
+      (frame, y) => {
+        const r = document.getElementById('plot').getBoundingClientRect();
+        return [r.left + 16 + frame * window.maker2.state().zoom, r.top + y];
+      },
+      frame,
+      y,
+    );
+  const dragTo = async (from, to) => {
+    await m2.mouse.move(...from);
+    await m2.mouse.down();
+    for (let i = 1; i <= 6; i++) await m2.mouse.move(from[0] + ((to[0] - from[0]) * i) / 6, from[1] + ((to[1] - from[1]) * i) / 6);
+    await m2.mouse.up();
+  };
+  await m2.reload();
+  await m2.waitForFunction(() => window.maker2?.ready(), { timeout: 5000 });
+  const dot = await m2.$eval('[data-drag=a] circle:not(.hit)', (e) => {
+    const r = e.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  });
+  await dragTo(dot, [(await plotPoint(25, 0))[0], dot[1]]);
+  const attack = await m2.evaluate(() => window.maker2.state().instruments[0].ad >> 4);
+  report(attack === 10, 'maker2 drag the attack', `attack ${attack}`);
+
+  // Drawing along the triangle row adds a bar there
+  await m2.click('#tabs [data-tab=wave]');
+  await dragTo(await plotPoint(10, 24 + 24 + 24), await plotPoint(30, 24 + 24 + 24));
+  const drawn = await m2.evaluate(() => JSON.stringify(window.maker2.state().instruments[0].bars.find((b) => b.wave === 0x10)));
+  report(drawn === '{"wave":16,"start":10,"end":30}', 'maker2 draw a bar', drawn);
+
+  await colorScheme(m2, 'dark');
+  await m2.screenshot({ path: `${OUT}/${BROWSER}-maker2-dark.png` });
+  await colorScheme(m2, 'light');
+  await m2.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+  const overflow2 = await m2.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  report(overflow2 <= 0, 'maker2 fits a phone screen', overflow2 > 0 ? `${overflow2}px too wide` : '');
+  report(m2Errors.length === 0, 'maker2 without errors', m2Errors.join(' | '));
 } finally {
   await browser.close();
   server.httpServer.close();

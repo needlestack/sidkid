@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIDKid Instrument Maker 2</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237c6cf2'/><path d='M4 11V5l4 3 4-3v6' stroke='white' stroke-width='1.6' fill='none'/></svg>" />
+  </head>
+  <body class="instrumentmaker maker2">
+    <header class="topbar">
+      <div class="brand">SIDKid <span>Instrument maker 2</span></div>
+      <nav class="files">
+        <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
+          <button data-model="0" class="on" title="The original C64 SID: gritty, with a characterful filter">6581</button>
+          <button data-model="1" title="The later SID revision: cleaner, with a brighter filter">8580</button>
+        </div>
+        <a class="button secondary" href="./instruments.html">Instrument maker</a>
+        <a class="button secondary" href="./">Song player</a>
+      </nav>
+    </header>
+
+    <main>
+      <p class="intro">
+        Shape how a note sounds over time. <b>Volume</b> is how loud it is from the moment a key goes down until it fades after the key
+        comes up. <b>Waveform</b> is the tone it plays, which can change as the note goes on.
+      </p>
+
+      <section class="card shaper">
+        <header class="card-head shaper-head">
+          <input id="name" class="name-input" aria-label="Instrument name" spellcheck="false" />
+          <div class="segmented" id="tabs" role="tablist">
+            <button data-tab="volume" class="on" role="tab">Volume</button>
+            <button data-tab="wave" role="tab">Waveform</button>
+          </div>
+          <div class="view-tools">
+            <button class="button secondary" id="play" title="Play a note held until the key-up line (Space)">▶ Play</button>
+            <span class="zoom">
+              <button class="mini" id="zoom-out" aria-label="Zoom out" title="Zoom out (or pinch, or ⌘/Ctrl + scroll)">−</button>
+              <span id="zoom-label" class="hint"></span>
+              <button class="mini" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+              <button class="mini" id="zoom-fit" title="Show the whole sound, until it fades away">Fit</button>
+            </span>
+          </div>
+        </header>
+        <p class="hint tab-hint" id="tab-hint"></p>
+        <div class="timeline" id="timeline">
+          <div class="tl-gutter" id="gutter"></div>
+          <div class="tl-scroll" id="scroll">
+            <svg id="plot" class="tl-plot"></svg>
+          </div>
+        </div>
+        <div class="readout" id="readout"></div>
+      </section>
+    </main>
+
+    <footer class="tryit" id="tryit">
+      <div class="tryit-inner">
+        <div class="field instrument-field">
+          <span>Instrument</span>
+          <select id="instrument" aria-label="Instrument"></select>
+          <div class="instrument-tools">
+            <button class="mini" id="new-instrument" title="Make a new instrument">New</button>
+            <button class="mini" id="duplicate-instrument" title="A copy of this instrument">Duplicate</button>
+            <button class="mini danger" id="delete-instrument" title="Delete this instrument">Delete</button>
+          </div>
+        </div>
+        <div class="keyboard-wrap">
+          <button class="octave-button" id="octave-down" aria-label="Octave down" title="Octave down">−</button>
+          <div class="keyboard-col">
+            <div class="key-labels" id="key-labels" aria-hidden="true"></div>
+            <div class="keyboard" id="keyboard" aria-label="Test keyboard: play with the mouse or the computer keys shown on it. Esc silences everything."></div>
+          </div>
+          <button class="octave-button" id="octave-up" aria-label="Octave up" title="Octave up">+</button>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script type="module" src="/src/maker2.ts"></script>
+  </body>
+</html>
