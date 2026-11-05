@@ -440,3 +440,56 @@
     display: none;
   }
 }
+
+/* Pulse width, under the pulse row */
+
+.tl-gutter-row.lane.width {
+  padding-left: 40px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.width-square {
+  stroke: var(--step-bar);
+  stroke-dasharray: 2 4;
+  pointer-events: none;
+}
+
+.width-line {
+  fill: none;
+  stroke: var(--pulse);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.width-line.faint {
+  stroke-width: 1.5;
+  opacity: 0.3;
+}
+
+.width-point {
+  cursor: grab;
+}
+
+.width-point .hit {
+  fill: transparent;
+}
+
+.width-point .dot {
+  fill: var(--surface);
+  stroke: var(--pulse);
+  stroke-width: 2;
+}
+
+.width-point:hover .dot,
+.width-point.selected .dot {
+  fill: var(--pulse);
+}
+
+.width-repeat {
+  fill: var(--pulse);
+  font-size: 10.5px;
+  font-weight: 600;
+  pointer-events: none;
+}

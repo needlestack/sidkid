@@ -3,7 +3,7 @@
 // in time play together as a combined waveform. The shape is turned into a
 // GoatTracker wave program for the player.
 
-import { pulseStep, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
+import { fastestSweep, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
 
 /** The waveform rows, top to bottom. */
 export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_PULSE, WAVE_NOISE];
@@ -16,11 +16,36 @@ export interface Bar {
   end: number | null;
 }
 
+/** A pulse width (0-4095) at a time, in frames from the start of the note. */
+export interface PulsePoint {
+  t: number;
+  w: number;
+}
+
+/**
+ * Pulse width over the note: a line through points, holding after the
+ * last one, or repeating from the `loop` point (the last point is kept at
+ * the loop point's width, so each time round starts where it began).
+ */
+export interface PulseShape {
+  points: PulsePoint[];
+  loop: number | null;
+}
+
+/** A square wave: half the 12-bit range */
+export const SQUARE = 0x800;
+export const PULSE_MAX = 0xfff;
+
+export function defaultPulse(): PulseShape {
+  return { points: [{ t: 0, w: SQUARE }], loop: null };
+}
+
 export interface Shape {
   name: string;
   ad: number;
   sr: number;
   bars: Bar[];
+  pulse: PulseShape;
 }
 
 /** A stretch of time with one waveform (oscillator bits, 0 for none). */
@@ -91,10 +116,59 @@ export function waveProgram(bars: Bar[], name: string): Program {
   return { name, steps, next: null };
 }
 
-/** A pulse program for shapes that use pulse: a square wave, until pulse gets a shape of its own. */
-export function pulseProgram(bars: Bar[], name: string): Program | null {
+/**
+ * The pulse program for a shape that uses pulse: set the first width, then
+ * sweep to each point in turn over the time to it; then stop (holding the
+ * width), or jump back to the sweep that leaves the loop point. Setting the
+ * width takes the first frame and each sweep a frame per frame of it, so
+ * each point's width is reached exactly at its time.
+ */
+export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Program | null {
   if (!bars.some((b) => b.wave & WAVE_PULSE)) return null;
-  return { name, steps: [pulseStep({ type: 'width', width: 0x800 })], next: null };
+  const pts = pulse.points;
+  const steps: Step[] = [pulseStep({ type: 'width', width: pts[0].w })];
+  const leaving: number[] = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    leaving.push(steps.length);
+    const change = pts[i + 1].w - pts[i].w;
+    // Too steep for the player (127 up or 128 down a frame) takes a little longer
+    const frames = Math.max(pts[i + 1].t - pts[i].t, fastestSweep(change));
+    for (const sw of sweepRows(change, frames)) steps.push(pulseStep({ type: 'sweep', ...sw }));
+  }
+  const program: Program = { name, steps, next: null };
+  if (pulse.loop !== null && pulse.loop < pts.length - 1) program.next = { program, step: leaving[pulse.loop] };
+  return program;
+}
+
+/** The corners of the pulse width line up to `frames`, with a loop repeated to fill it. */
+export function pulseLine(pulse: PulseShape, frames: number): PulsePoint[] {
+  const pts = pulse.points;
+  const last = pts[pts.length - 1];
+  const out = pts.map((p) => ({ ...p }));
+  if (pulse.loop !== null && pulse.loop < pts.length - 1) {
+    const body = pts.slice(pulse.loop + 1);
+    const period = last.t - pts[pulse.loop].t;
+    for (let n = 1; last.t + (n - 1) * period < frames; n++) for (const p of body) out.push({ t: p.t + n * period, w: p.w });
+  } else out.push({ t: frames, w: last.w });
+  return out;
+}
+
+/** Whether a pulse width point can go to a width: no faster a change from its neighbours than the player can sweep. */
+export function pulseRange(pts: PulsePoint[], i: number): [number, number] {
+  let lo = 0;
+  let hi = PULSE_MAX;
+  const t = pts[i].t;
+  const prev = pts[i - 1];
+  const next = pts[i + 1];
+  if (prev) {
+    lo = Math.max(lo, prev.w - 128 * (t - prev.t));
+    hi = Math.min(hi, prev.w + 127 * (t - prev.t));
+  }
+  if (next) {
+    lo = Math.max(lo, next.w - 127 * (next.t - t));
+    hi = Math.min(hi, next.w + 128 * (next.t - t));
+  }
+  return lo <= hi ? [lo, hi] : [0, PULSE_MAX];
 }
 
 /**

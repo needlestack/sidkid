@@ -406,6 +406,17 @@ try {
   });
   report(exact === '', 'maker2 bars play for their frames', exact);
 
+  // Pulse width reaches each point on its frame, and repeats from the loop point
+  const widths = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    s.instruments[s.current].bars = [{ wave: 0x40, start: 0, end: null }];
+    // Sweeps of 3072 over 30 frames: within the player's 127 a frame
+    s.instruments[s.current].pulse = { points: [{ t: 0, w: 0x200 }, { t: 10, w: 0x200 }, { t: 40, w: 0xe00 }, { t: 70, w: 0x200 }], loop: 1 };
+    const p = window.maker2.trace(140).pulse;
+    return [0, 10, 40, 70, 100, 130].map((f) => p[f].toString(16)).join(' ');
+  });
+  report(widths === '200 200 e00 200 e00 200', 'maker2 pulse width follows its points and repeats', widths);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

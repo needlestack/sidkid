@@ -49,7 +49,13 @@ zoomable timeline, aiming for a GarageBand feel.
 - `web/src/shape.ts`: the model (`Shape`, `Bar`) and `waveProgram()`, which turns
   bars into a wave program. A delay row of N lasts N+1 frames (checked against the engine).
 - `web/src/maker2.ts`: the page. Own storage (`sidkid.maker2.v1`), not shared with
-  the first maker. Pulse width is fixed at 50% until pulse gets a shape of its own.
+  the first maker.
+- Pulse width: a "Width" automation row directly under the Pulse row (only while pulse
+  is used). Points joined by sweeps (`pulseProgram` in shape.ts, via `sweepRows`),
+  holding after the last, or repeating from a loop point (last point locked to the
+  loop point's width). Points are kept within the player's 127/128-a-frame sweep limit.
+- Still missing from Volume/Waveform: an instrument that lets go by itself (gate-off
+  rows), Note start (hard restart, first wave, legato), sync/ring mod, waveform loops.
 - Timeline is 32 s (slowest attack 8 s + decay 24 s). Zooming out stops when everything
   fills a quarter of the view; zooming never jumps (it can stay further out than a
   tightened limit), and the slider's range is frozen during a drag. Pinch zooms around
@@ -69,7 +75,7 @@ zoomable timeline, aiming for a GarageBand feel.
 - Ideas raised, not done: an instrument-level "lets go by itself" (wave rows with the
   gate off, for drums/plucks); hover "let go here" release tails; locking the
   capsule drag to one axis.
-- Not yet: loading instruments from songs, pulse width, pitch, filter, vibrato.
+- Not yet: loading instruments from songs, pitch, filter, vibrato.
 
 ## Song editor plan (agreed 2026-11-05, expect tweaks)
 
