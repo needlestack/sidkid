@@ -10,9 +10,19 @@
     <header class="topbar">
       <div class="brand">SIDKid <span>Instrument maker 2</span></div>
       <nav class="files">
-        <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
-          <button data-model="0" class="on" title="The original C64 SID: gritty, with a characterful filter">6581</button>
-          <button data-model="1" title="The later SID revision: cleaner, with a brighter filter">8580</button>
+        <div class="setting">
+          <span class="setting-label">Chip</span>
+          <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
+            <button data-model="0" class="on" title="The original C64 SID: gritty, with a characterful filter">6581</button>
+            <button data-model="1" title="The later SID revision: cleaner, with a brighter filter">8580</button>
+          </div>
+        </div>
+        <div class="setting">
+          <span class="setting-label">Clock</span>
+          <div class="segmented" id="clock" title="Which kind of C64: it sets how often the player runs and how fast the chip counts">
+            <button data-ntsc="0" class="on" title="European C64s: 50 frames a second">PAL</button>
+            <button data-ntsc="1" title="American C64s: 60 frames a second, and a slightly faster chip">NTSC</button>
+          </div>
         </div>
         <a class="button secondary" href="./instruments.html">Instrument maker</a>
         <a class="button secondary" href="./">Song player</a>

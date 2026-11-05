@@ -472,8 +472,17 @@ try {
   await m2.mouse.click(...spot, { clickCount: 2 });
   const added = await m2.evaluate(() => JSON.stringify(window.maker2.state().instruments[0].bars.find((b) => b.wave === 0x10 && b.start <= 75 && 75 < b.end)));
   report(!!added, 'maker2 double-click adds a bar', added ?? 'none');
-  await m2.click('.tl-gutter-row.fold.rule');
+  // Close the waveform rows again by their name in the left column
+  await m2.evaluate(() => [...document.querySelectorAll('.tl-gutter-row.fold')].find((e) => e.textContent.includes('Waveform')).click());
 
+
+  // The clock: NTSC's faster chip makes the same release setting shorter
+  const releaseText = () => m2.$eval('[data-drag=r] text', (e) => e.textContent);
+  const palRelease = await releaseText();
+  await m2.click('#clock [data-ntsc="1"]');
+  const ntscRelease = await releaseText();
+  await m2.click('#clock [data-ntsc="0"]');
+  report(palRelease === 'Release 761 ms' && ntscRelease === 'Release 733 ms', 'maker2 clock changes envelope times', `${palRelease} → ${ntscRelease}`);
 
   await colorScheme(m2, 'dark');
   await m2.screenshot({ path: `${OUT}/${BROWSER}-maker2-dark.png` });

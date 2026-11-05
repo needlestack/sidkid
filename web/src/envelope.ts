@@ -5,7 +5,9 @@
 const RATE_PERIOD = [9, 32, 63, 95, 149, 220, 267, 313, 392, 977, 1954, 3126, 3907, 11720, 19532, 31251];
 
 /** PAL C64 clock cycles in one 50 Hz frame. */
-const FRAME_CYCLES = 19656;
+export const PAL_FRAME_CYCLES = 19656;
+/** NTSC C64 clock cycles in one 60 Hz frame. */
+export const NTSC_FRAME_CYCLES = 17045;
 
 /** Decay and release slow down as the level falls, to sound roughly exponential. */
 function expPeriod(level: number): number {
@@ -23,14 +25,14 @@ function expPeriod(level: number): number {
  * frame. Starts from silence, as after GoatTracker's hard restart. AD and
  * SR can be given for each frame, for programs that change them mid-note.
  */
-export function envelope(ad: number | ArrayLike<number>, sr: number | ArrayLike<number>, gate: boolean[], perFrame = 4): Float32Array {
+export function envelope(ad: number | ArrayLike<number>, sr: number | ArrayLike<number>, gate: boolean[], perFrame = 4, frameCycles = PAL_FRAME_CYCLES): Float32Array {
   const at = (v: number | ArrayLike<number>, f: number) => (typeof v === 'number' ? v : v[f]);
   let attack = 0;
   let decay = 0;
   let sustain = 0;
   let release = 0;
   const out = new Float32Array(gate.length * perFrame + 1);
-  const slice = FRAME_CYCLES / perFrame;
+  const slice = frameCycles / perFrame;
   let level = 0;
   let state: 'attack' | 'decay' | 'release' = 'release';
   let rate = 0;

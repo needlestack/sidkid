@@ -22,6 +22,25 @@ export function loadModel(): number {
   }
 }
 
+const CLOCK_KEY = 'sidkid.clock';
+
+/** Whether the instrument pages run as an NTSC machine (60 frames a second) rather than PAL. */
+export function loadNtsc(): boolean {
+  try {
+    return localStorage.getItem(CLOCK_KEY) === 'ntsc';
+  } catch {
+    return false;
+  }
+}
+
+export function saveNtsc(ntsc: boolean) {
+  try {
+    localStorage.setItem(CLOCK_KEY, ntsc ? 'ntsc' : 'pal');
+  } catch {
+    // Storage can be unavailable; the choice just isn't remembered
+  }
+}
+
 export function saveModel(model: number) {
   try {
     localStorage.setItem(MODEL_KEY, String(model));

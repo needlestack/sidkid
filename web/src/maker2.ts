@@ -9,10 +9,10 @@ import './instrumentmaker.css';
 import './maker2.css';
 import { Analyzer, type Trace } from './engine/analyzer';
 import type { TableData } from './engine/configure';
-import { loadModel, Player, saveModel } from './engine/player';
-import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
+import { loadModel, loadNtsc, Player, saveModel, saveNtsc } from './engine/player';
+import { DEFAULT_SETTINGS, type Settings, type Status } from './engine/protocol';
 import { ATTACK_MS, DECAY_MS } from './adsr';
-import { envelope } from './envelope';
+import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
@@ -20,11 +20,21 @@ import { LANES, place, pulseProgram, spans, storable, waveProgram, type Bar, typ
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
-const FPS = 50;
+/**
+ * The machine's clock: PAL runs the player 50 times a second, NTSC 60, and
+ * NTSC's chip clock is faster too. Instruments are stored in frames, so
+ * the same instrument takes less time on NTSC.
+ */
+let ntsc = loadNtsc();
+let FPS = ntsc ? 60 : 50;
+/** Chip clock cycles per second */
+let CLOCK = ntsc ? 1022727 : 985248;
+let settings: Settings = { ...DEFAULT_SETTINGS, ntsc };
 const STORAGE_KEY = 'sidkid.maker2.v1';
 const TEST_INSTRUMENT = 1;
 /** The timeline's length: 32 seconds, the slowest attack (8 s) and decay (24 s) together */
-const TOTAL = 1600;
+const SECONDS = 32;
+let TOTAL = SECONDS * FPS;
 const MAX_ZOOM = 24;
 const RULER = 24;
 const PLOT = 196;
@@ -176,7 +186,7 @@ let analyzer: Analyzer | null = null;
 function trace(frames = 100): Trace | null {
   if (!analyzer) return null;
   const a = audition();
-  return analyzer.trace(a.tables, a.instrument, test.note, frames, DEFAULT_SETTINGS);
+  return analyzer.trace(a.tables, a.instrument, test.note, frames, settings);
 }
 
 // --- Volume ---------------------------------------------------------------------
@@ -186,10 +196,10 @@ const simCache = new Map<string, Float32Array>();
 
 /** The envelope level, ENV_STEPS samples a frame, with the key going up at keyUp. */
 function level(ad: number, sr: number, keyUp: number, frames = TOTAL): Float32Array {
-  const key = `${ad},${sr},${keyUp},${frames}`;
+  const key = `${ad},${sr},${keyUp},${frames},${FPS}`;
   let out = simCache.get(key);
   if (!out) {
-    out = envelope(ad, sr, Array.from({ length: frames }, (_, f) => f < keyUp), ENV_STEPS);
+    out = envelope(ad, sr, Array.from({ length: frames }, (_, f) => f < keyUp), ENV_STEPS, ntsc ? NTSC_FRAME_CYCLES : PAL_FRAME_CYCLES);
     if (simCache.size > 400) simCache.clear();
     simCache.set(key, out);
   }
@@ -202,14 +212,19 @@ function firstFrame(curve: Float32Array, from: number, meets: (v: number) => boo
   return null;
 }
 
-const attackFrames = (a: number) => ATTACK_MS[a] / 1000 * FPS;
+/**
+ * The datasheet's envelope times are for a 1 MHz clock; the real ones scale
+ * with the machine's, so PAL is a little slower and NTSC a little faster.
+ */
+const realFrames = (ms: number) => (ms / 1000) * (1e6 / CLOCK) * FPS;
+const attackFrames = (a: number) => realFrames(ATTACK_MS[a]);
 
 /** Where the decay reaches the sustain level, with the key held. */
 function decayEnd(a: number, d: number, s: number): number {
   const top = attackFrames(a);
   // At full sustain there is no fall: the handle sits a little along the top
-  if (s === 15) return top + (DECAY_MS[d] / 1000) * FPS * 0.1;
-  const frames = Math.ceil(top + (DECAY_MS[d] / 1000) * FPS) + 4;
+  if (s === 15) return top + realFrames(DECAY_MS[d]) * 0.1;
+  const frames = Math.ceil(top + realFrames(DECAY_MS[d])) + 4;
   const curve = level((a << 4) | d, s << 4, frames + 1, frames);
   // From the top of the attack: decay starts as soon as it gets there
   let peak = 0;
@@ -219,7 +234,7 @@ function decayEnd(a: number, d: number, s: number): number {
 
 /** Where the sound has died away after the key goes up. */
 function releaseEnd(ad: number, sr: number, keyUp: number): number {
-  const frames = Math.min(2000, Math.ceil(keyUp + (DECAY_MS[sr & 15] / 1000) * FPS) + 4);
+  const frames = Math.min(2400, Math.ceil(keyUp + realFrames(DECAY_MS[sr & 15])) + 4);
   const curve = level(ad, sr, keyUp, frames);
   return firstFrame(curve, keyUp, (v) => v < 0.01) ?? frames;
 }
@@ -232,9 +247,9 @@ function timeText(frames: number): string {
 
 const envText = {
   a: (v: number) => `Attack ${timeText(attackFrames(v))}`,
-  d: (v: number) => `Decay ${timeText((DECAY_MS[v] / 1000) * FPS)}`,
+  d: (v: number) => `Decay ${timeText(realFrames(DECAY_MS[v]))}`,
   s: (v: number) => `Sustain ${Math.round((v / 15) * 100)}%`,
-  r: (v: number) => `Release ${timeText((DECAY_MS[v] / 1000) * FPS)}`,
+  r: (v: number) => `Release ${timeText(realFrames(DECAY_MS[v]))}`,
 };
 
 // --- Drawing --------------------------------------------------------------------
@@ -344,7 +359,9 @@ function setZoom(z: number, pointer?: number) {
 
 /** Ruler ticks: a step in frames that leaves room for the labels. */
 function tickStep(): number {
-  return [1, 2, 5, 10, 25, 50, 100, 250, 500].find((s) => s * state.zoom >= 56) ?? 500;
+  // A frame or two, else a round fraction of a second
+  const steps = [1, 2, ...[0.1, 0.2, 0.5, 1, 2, 5, 10].map((s) => s * FPS)];
+  return steps.find((s) => s * state.zoom >= 56) ?? 10 * FPS;
 }
 
 function render() {
@@ -373,7 +390,7 @@ function render() {
   const step = tickStep();
   el('rect', { x: 0, y: 0, width, height: RULER, class: 'tl-ruler' }, plot);
   for (let f = 0; f <= TOTAL; f += step) {
-    el('line', { x1: x(f), x2: x(f), y1: RULER, y2: HEIGHT, class: f % 50 === 0 ? 'tl-grid second' : 'tl-grid' }, plot);
+    el('line', { x1: x(f), x2: x(f), y1: RULER, y2: HEIGHT, class: f % FPS === 0 ? 'tl-grid second' : 'tl-grid' }, plot);
     el('line', { x1: x(f), x2: x(f), y1: RULER - 6, y2: RULER, class: 'tl-tick' }, plot);
     const label = el('text', { x: x(f) + 3, y: RULER - 9, class: 'tl-label' }, plot);
     label.textContent = f === 0 ? '0' : `${Math.round((f / FPS) * 100) / 100} s`;
@@ -1216,6 +1233,28 @@ $('octave-up').addEventListener('click', () => {
   renderKeyboard();
 });
 $('play').addEventListener('click', playShape);
+
+// The clock: PAL or NTSC, remembered for the instrument pages
+function renderClock() {
+  for (const b of $('clock').querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('on', (b.dataset.ntsc === '1') === ntsc);
+}
+renderClock();
+player.setSettings(settings);
+$('clock').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-ntsc]');
+  if (!b) return;
+  ntsc = b.dataset.ntsc === '1';
+  FPS = ntsc ? 60 : 50;
+  CLOCK = ntsc ? 1022727 : 985248;
+  TOTAL = SECONDS * FPS;
+  settings = { ...settings, ntsc };
+  saveNtsc(ntsc);
+  player.setSettings(settings);
+  state.keyUp = Math.min(state.keyUp, TOTAL - 1);
+  simCache.clear();
+  renderClock();
+  render();
+});
 
 // The chip is a setting for the whole app
 {
