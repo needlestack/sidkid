@@ -315,6 +315,10 @@ export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Prog
  * everything up again as it comes round.
  */
 export function filterProgram(filter: FilterShape, name: string, voices = 1): Program {
+  // A chunk ending on the repeat's end covers that frame too: it is the
+  // repeat's last, so the chunk stays on all the way round
+  const loopEnd = filter.cutoff.loop !== null && filter.cutoff.loop < filter.cutoff.points.length - 1 ? filter.cutoff.points[filter.cutoff.points.length - 1].t : null;
+  filter = { ...filter, types: filter.types.map((c) => (c.end === loopEnd ? { ...c, end: c.end + 1 } : c)) };
   const res = (t: number) => Math.max(0, Math.min(RESONANCE_MAX, Math.round(lineAt(filter.resonance, t))));
   // Outside the chunks the voice goes past the filter (keeping the last type, which is then unheard)
   const typeFor = (t: number) => chunkAt(filter.types, t)?.passband ?? [...filter.types].reverse().find((c) => c.start <= t)?.passband ?? filter.types[0]?.passband ?? 0;

@@ -76,7 +76,10 @@ zoomable timeline, aiming for a GarageBand feel.
   filter-shape icons) handled like waveform bars; gaps aren't filtered (voice routed past),
   and no chunks means no filter program at all (no on/off switch). Cutoff (0-255) is a line
   like pulse width (they share one editor, `LineLane`/`drawLine`); Resonance is a line too,
-  played as steps (16 levels, no sweep). One filter program, so the cutoff's repeat is shared; setup rows
+  played as steps (16 levels, no sweep). One filter program, so one repeat: dragged on the
+  Cutoff row but its band spans all three rows, and type chunks and resonance steps are
+  drawn coming round after it (`filterRepeat`/`filterSource`). A chunk ending on the
+  repeat's end covers that frame too (else one unfiltered frame per pass). One filter program, so the cutoff's repeat is shared; setup rows
   for type/resonance changes share a frame with a cutoff set (`filterProgram`). A scope
   under the timeline shows the response at the playhead or the hovered moment, from the
   engine trace. The setup row routes voice 1

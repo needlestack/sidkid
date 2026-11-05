@@ -798,22 +798,45 @@ function drawFilter() {
   if (!s.filter.types.length) {
     el('text', { x: x(0) + 8, y: top + PAD_BOTTOM / 2 + 4, class: 'vib-hint' }, plot).textContent = 'No filter';
   } else {
-    // The cutoff, where it filters
+    // The cutoff, where it filters, coming round with the repeat
     const py = (v: number) => top + LINE_PAD + (1 - v / CUTOFF_MAX) * (PAD_BOTTOM - 2 * LINE_PAD);
-    for (const c of s.filter.types) {
-      const pts: string[] = [];
-      for (let f = c.start; f <= Math.min(c.end, TOTAL); f++) pts.push(`${x(f).toFixed(1)},${py(lineAt(s.filter.cutoff, f)).toFixed(1)}`);
-      el('polyline', { points: pts.join(' '), class: 'cutoff-preview' }, plot);
+    const rep = filterRepeat();
+    const filtering = (f: number) => s.filter.types.some((c) => c.start <= f && (f < c.end || (rep !== null && f === rep.to && c.end === rep.to)));
+    let pts: string[] = [];
+    const flush = () => {
+      if (pts.length > 1) el('polyline', { points: pts.join(' '), class: 'cutoff-preview' }, plot);
+      pts = [];
+    };
+    for (let f = 0; f <= TOTAL; f++) {
+      const from = filterSource(f);
+      if (filtering(from)) pts.push(`${x(f).toFixed(1)},${py(lineAt(s.filter.cutoff, from)).toFixed(1)}`, `${x(f + 1).toFixed(1)},${py(lineAt(s.filter.cutoff, from)).toFixed(1)}`);
+      else flush();
     }
+    flush();
   }
+  // The types first: the shared repeat's bars and the lines' points go over them
+  if (state.filterOpen) drawTypes();
   for (const key of ['cutoff', 'resonance'] as const) {
     const l = lane(key);
     if (!l) continue;
     el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: l.top, y2: l.top, class: 'lane-line' }, plot);
     drawLine(l);
   }
-  if (state.filterOpen) drawTypes();
   renderFilterControls();
+}
+
+/** The filter's repeat (the cutoff's, shared by type and resonance), if it has one */
+function filterRepeat(): { from: number; to: number } | null {
+  const c = shape().filter.cutoff;
+  if (c.loop === null || c.loop >= c.points.length - 1) return null;
+  return { from: c.points[c.loop].t, to: c.points[c.points.length - 1].t };
+}
+
+/** The frame whose settings play at a frame: past the repeat's end, the one it comes round to */
+function filterSource(f: number): number {
+  const r = filterRepeat();
+  if (!r || f <= r.to || r.to <= r.from) return f;
+  return r.from + ((f - r.to - 1) % (r.to - r.from)) + 1;
 }
 
 /** The type row: a capsule for each type from its change to the next, showing its shape */
@@ -822,6 +845,20 @@ function drawTypes() {
   const top = typeTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'lane-line' }, plot);
   if (!f.types.length) el('text', { x: x(0) + 8, y: top + TYPE_H / 2 + 4, class: 'vib-hint' }, plot).textContent = 'Drag along here to filter this stretch of the sound';
+  // As the filter's repeat comes round, its chunks come round too (faint)
+  const rep = filterRepeat();
+  if (rep && rep.to > rep.from) {
+    const period = rep.to - rep.from;
+    for (let n = 1; rep.to + (n - 1) * period < TOTAL; n++) {
+      for (const c of f.types) {
+        // (a chunk ending on the repeat's end plays its last frame too)
+        const a = Math.max(c.start, rep.from + 1);
+        const z = Math.min(c.end === rep.to ? c.end + 1 : c.end, rep.to + 1);
+        if (z <= a) continue;
+        el('rect', { x: x(a + n * period) + 1, y: top + 5, width: Math.max(1, x(z + n * period) - x(a + n * period) - 2), height: TYPE_H - 10, rx: 6, class: 'type-body ghost' }, plot);
+      }
+    }
+  }
   f.types.forEach((c, i) => {
     const x1 = x(c.start);
     const x2 = x(c.end);
@@ -1255,6 +1292,9 @@ function drawLine(r: LineLane) {
   const width = x(TOTAL) + ORIGIN;
   const { points } = r.line;
   const loop = r.repeat ? r.line.loop : null;
+  // The cutoff's repeat is the whole filter's (one program): it spans type,
+  // cutoff and resonance
+  const span = r.key === 'cutoff' ? { top: typeTop(), h: resTop() + RES_H - typeTop() } : { top: r.top, h: r.h };
   // The repeat: the section that repeats shaded, its repeats fainter after
   // it, and its start an edge to drag from point to point
   if (loop !== null && loop < points.length - 1) {
@@ -1262,18 +1302,18 @@ function drawLine(r: LineLane) {
     const to = points[points.length - 1].t;
     const period = to - from;
     for (let t = to; t < TOTAL && period > 0; t += period) {
-      el('rect', { x: x(t), y: r.top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: r.h - 2, class: 'width-loop again' }, plot);
+      el('rect', { x: x(t), y: span.top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: span.h - 2, class: 'width-loop again' }, plot);
     }
-    el('rect', { x: x(from), y: r.top + 1, width: x(to) - x(from), height: r.h - 2, class: 'width-loop' }, plot);
-    el('text', { x: x(from) + 10, y: r.top + 12, class: 'width-repeat' }, plot).textContent = '↻ repeat';
+    el('rect', { x: x(from), y: span.top + 1, width: x(to) - x(from), height: span.h - 2, class: 'width-loop' }, plot);
+    el('text', { x: x(from) + 10, y: span.top + 12, class: 'width-repeat' }, plot).textContent = '↻ repeat';
     // Both ends drag: the start from point to point, the end in time
     for (const [at, which] of [
       [from, 'loop'],
       [to, 'loop-end'],
     ] as const) {
       const edge = el('g', { class: `width-loop-edge${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '', 'data-line': r.key }, plot);
-      el('rect', { x: x(at) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, edge);
-      el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, edge);
+      el('rect', { x: x(at) - 6, y: span.top, width: 12, height: span.h, class: 'hit' }, edge);
+      el('rect', { x: x(at) - 1.5, y: span.top + 2, width: 3, height: span.h - 4, rx: 1.5, class: 'edge-bar' }, edge);
     }
   }
   if (r.mid !== null) el('line', { x1: 0, x2: width, y1: laneY(r, r.mid), y2: laneY(r, r.mid), class: 'width-square' }, plot);
@@ -1282,25 +1322,35 @@ function drawLine(r: LineLane) {
   // the repeats after it light
   const looping = loop !== null && loop < points.length - 1;
   if (looping) el('polyline', { points: line(pulseLine(r.line, TOTAL)), class: 'width-line faint' }, plot);
-  el('polyline', { points: line(looping ? points : pulseLine(r.line, TOTAL)), class: 'width-line' }, plot);
-  // Resonance plays as steps (16 levels, no sweep): drawn as the steps it takes
+  // Resonance under the filter's repeat: the line as far as the repeat goes (its steps show the rest)
+  const shared = r.key === 'resonance' ? filterRepeat() : null;
+  const drawn = shared ? pulseLine(r.line, TOTAL).filter((p) => p.t <= shared.to).concat([{ t: shared.to, w: lineAt(r.line, shared.to) }]) : null;
+  el('polyline', { points: line(drawn ?? (looping ? points : pulseLine(r.line, TOTAL))), class: 'width-line' }, plot);
+  // Resonance plays as steps (16 levels, no sweep): drawn as the steps it
+  // takes, coming round again with the filter's repeat (lighter)
   if (r.key === 'resonance') {
-    const stairs: string[] = [];
-    for (let f = 0; f <= TOTAL; f++) {
-      const v = Math.round(lineAt(r.line, f));
-      stairs.push(`${x(f).toFixed(1)},${laneY(r, v).toFixed(1)}`, `${x(f + 1).toFixed(1)},${laneY(r, v).toFixed(1)}`);
+    const loopEnd = filterRepeat()?.to ?? TOTAL;
+    for (const [a, b, cls] of [
+      [0, loopEnd, 'res-steps'],
+      [loopEnd, TOTAL, 'res-steps again'],
+    ] as const) {
+      const stairs: string[] = [];
+      for (let f = a; f <= b; f++) {
+        const v = Math.round(lineAt(r.line, filterSource(f)));
+        stairs.push(`${x(f).toFixed(1)},${laneY(r, v).toFixed(1)}`, `${x(f + 1).toFixed(1)},${laneY(r, v).toFixed(1)}`);
+      }
+      el('polyline', { points: stairs.join(' '), class: cls }, plot);
     }
-    el('polyline', { points: stairs.join(' '), class: 'res-steps' }, plot);
   }
   if (r.repeat && !looping && points.length > 1) {
     // No repeat yet: its start waits at the end, to be pulled back from there
     const at = x(points[points.length - 1].t);
     const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '', 'data-line': r.key }, plot);
     // The bar and the ↻ at its top left both pull it (the last point on the bar is drawn over it)
-    el('rect', { x: at - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, pull);
-    el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, pull);
-    el('rect', { x: at - 18, y: r.top, width: 16, height: 16, class: 'hit' }, pull);
-    el('text', { x: at - 4, y: r.top + 12, 'text-anchor': 'end', class: 'width-repeat' }, pull).textContent = '↻';
+    el('rect', { x: at - 6, y: span.top, width: 12, height: span.h, class: 'hit' }, pull);
+    el('rect', { x: at - 1.5, y: span.top + 2, width: 3, height: span.h - 4, rx: 1.5, class: 'edge-bar' }, pull);
+    el('rect', { x: at - 18, y: span.top, width: 16, height: 16, class: 'hit' }, pull);
+    el('text', { x: at - 4, y: span.top + 12, 'text-anchor': 'end', class: 'width-repeat' }, pull).textContent = '↻';
     el('title', {}, pull).textContent = 'Drag left to repeat part of the line while the note is held';
   }
   points.forEach((p, i) => {

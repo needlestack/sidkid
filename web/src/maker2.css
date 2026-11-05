@@ -939,3 +939,13 @@
   font-weight: 500;
   color: var(--muted);
 }
+
+.res-steps.again {
+  stroke-opacity: 0.25;
+}
+
+.type-body.ghost {
+  fill-opacity: 0.06;
+  stroke-opacity: 0.3;
+  pointer-events: none;
+}
