@@ -524,10 +524,6 @@
 }
 
 /* The repeat's start waiting at the end of the line: only its ↻ takes hold */
-.width-loop-edge.pull .bar {
-  pointer-events: none;
-}
-
 .width-loop-edge.pull .width-repeat {
   pointer-events: auto;
   font-size: 13px;

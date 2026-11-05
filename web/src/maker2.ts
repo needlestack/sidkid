@@ -760,22 +760,24 @@ function drawWidth() {
   const looping = loop !== null && loop < points.length - 1;
   if (looping) el('polyline', { points: line(pulseLine(s.pulse, TOTAL)), class: 'width-line faint' }, plot);
   el('polyline', { points: line(looping ? points : pulseLine(s.pulse, TOTAL)), class: 'width-line' }, plot);
-  points.forEach((p, i) => {
-    const g = el('g', { class: `width-point${i === selectedPoint ? ' selected' : ''}`, 'data-point': i }, plot);
-    el('circle', { cx: x(p.t), cy: widthY(p.w), r: 11, class: 'hit' }, g);
-    el('circle', { cx: x(p.t), cy: widthY(p.w), r: 5, class: 'dot' }, g);
-  });
   if (!looping && points.length > 1) {
-    // No repeat yet: its start waits at the end, to be pulled back from
-    // there. Only the ↻ at the top takes hold, so the last point still drags.
+    // No repeat yet: its start waits at the end, to be pulled back from there
     const at = x(points[points.length - 1].t);
     const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '' }, plot);
+    // The bar and the ↻ at its top left both pull it (the last point on the bar is drawn over it)
+    el('rect', { x: at - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, pull);
     el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, pull);
-    // The ↻ sits at the bar's top left, clear of the last point on it
     el('rect', { x: at - 18, y: r.top, width: 16, height: 16, class: 'hit' }, pull);
     el('text', { x: at - 4, y: r.top + 12, 'text-anchor': 'end', class: 'width-repeat' }, pull).textContent = '↻';
     el('title', {}, pull).textContent = 'Drag left to repeat part of the line while the note is held';
   }
+  points.forEach((p, i) => {
+    const g = el('g', { class: `width-point${i === selectedPoint ? ' selected' : ''}`, 'data-point': i }, plot);
+    // The last point sits on the repeat's bar: it takes hold only right on
+    // it, so the bar around it can be grabbed
+    el('circle', { cx: x(p.t), cy: widthY(p.w), r: i === points.length - 1 ? 7 : 11, class: 'hit' }, g);
+    el('circle', { cx: x(p.t), cy: widthY(p.w), r: 5, class: 'dot' }, g);
+  });
 }
 
 function renderReadout() {
