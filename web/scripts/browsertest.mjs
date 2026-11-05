@@ -496,13 +496,18 @@ try {
   const filt = await m2.evaluate(() => {
     const s = window.maker2.state();
     const ins = s.instruments[s.current];
+    const was = ins.filter;
     ins.filter = {
       cutoff: { points: [{ t: 0, w: 0x10 }, { t: 20, w: 0xf0 }], loop: 0 },
       resonance: { points: [{ t: 0, w: 12 }], loop: null },
-      types: [{ start: 0, passband: 0x20 }, { start: 10, passband: 0x50 }],
+      types: [{ start: 0, end: 10, passband: 0x20 }, { start: 10, end: 20, passband: 0x50 }],
     };
     const t = window.maker2.trace(50);
-    ins.filter = null;
+    // A gap between chunks isn't filtered
+    ins.filter = { ...ins.filter, cutoff: { points: [{ t: 0, w: 0x80 }], loop: null }, types: [{ start: 0, end: 5, passband: 0x10 }] };
+    const gap = window.maker2.trace(10).routing[6] & 1;
+    ins.filter = was;
+    if (gap) return 'still filtered after its chunk';
     // The type changes on its frame (and again each time round), the cutoff undisturbed
     const types = [0, 9, 10, 20, 21, 30].map((f) => (t.mode[f] >> 4).toString(16)).join('');
     return `${t.routing[0].toString(16)} ${types} ${[0, 10, 20, 21, 40].map((f) => t.cutoff[f].toString(16)).join(' ')}`;

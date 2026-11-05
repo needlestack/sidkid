@@ -220,10 +220,20 @@ export function filterScope(w = 420, h = 120): { el: HTMLElement; set: (shape: F
     [FILTER_HIGH, 'High'],
   ];
   const set = (shape: FilterShape) => {
+    // A negative passband: the voice goes past the filter, all of it heard
+    if (shape.passband < 0) {
+      const flat = `M${pad},${yy(0)} L${w - pad},${yy(0)}`;
+      line.setAttribute('d', flat);
+      area.setAttribute('d', `${flat} L${w - pad},${h - pad} L${pad},${h - pad} Z`);
+      mark.style.display = 'none';
+      readout.textContent = 'Not filtered here';
+      return;
+    }
     const d = curvePath(shape, w, h, pad);
     line.setAttribute('d', d);
     area.setAttribute('d', `${d} L${w - pad},${h - pad} L${pad},${h - pad} Z`);
     const cx = pad + ((shape.cutoff ?? 128) / 255) * (w - 2 * pad);
+    mark.style.display = '';
     mark.setAttribute('x1', String(cx));
     mark.setAttribute('x2', String(cx));
     const type = names.filter(([bit]) => shape.passband & bit).map(([, n]) => n).join(' + ') || 'None (silent)';

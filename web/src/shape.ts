@@ -72,31 +72,60 @@ export interface Shape {
    * effects, so not quite frames)
    */
   vibrato: { delay: number; turn: number; even: boolean; depth: number } | null;
-  /** The filter this instrument sets going (null: it leaves the filter alone) */
-  filter: FilterShape | null;
+  /** The filter: used where its type has chunks (none: the instrument leaves the filter alone) */
+  filter: FilterShape;
 }
 
 /**
- * The filter as an instrument sets it, over time: its cutoff (0-255) a line
- * like pulse width, its resonance (0-15) a line too (played as steps: the
- * chip has 16 levels and no sweep for them), and its type (low, band, high
- * bits) a step from each change to the next. They make one program, so the
- * cutoff's repeat is theirs too.
+ * The filter as an instrument sets it, over time: its type (low, band, high
+ * bits) in chunks, like waveform bars, filtering the voice while one lasts;
+ * its cutoff (0-255) a line like pulse width; its resonance (0-15) a line
+ * too (played as steps: the chip has 16 levels and no sweep for them). They
+ * make one program, so the cutoff's repeat is theirs too.
  */
 export interface FilterShape {
+  types: FilterChunk[];
   cutoff: PulseShape;
   resonance: PulseShape;
-  types: { start: number; passband: number }[];
+}
+
+/** A stretch of filtering of one type */
+export interface FilterChunk {
+  start: number;
+  end: number;
+  passband: number;
+}
+
+export function defaultFilter(): FilterShape {
+  return {
+    types: [],
+    cutoff: { points: [{ t: 0, w: 0xc0 }, { t: 25, w: 0x40 }], loop: null },
+    resonance: { points: [{ t: 0, w: 8 }], loop: null },
+  };
+}
+
+/** Puts a chunk of filtering in place: chunks it lands on are cut back or removed. */
+export function placeChunk(chunks: FilterChunk[], chunk: FilterChunk): FilterChunk[] {
+  const out: FilterChunk[] = [];
+  for (const c of chunks) {
+    if (c === chunk) continue;
+    if (c.end <= chunk.start || c.start >= chunk.end) {
+      out.push(c);
+      continue;
+    }
+    if (c.start < chunk.start) out.push({ ...c, end: chunk.start });
+    if (c.end > chunk.end) out.push({ ...c, start: chunk.end });
+  }
+  out.push(chunk);
+  return out.sort((a, b) => a.start - b.start);
 }
 
 export const CUTOFF_MAX = 0xff;
 export const RESONANCE_MAX = 15;
 
-/** The filter type at a frame: the last change at or before it */
-export function typeAt(types: FilterShape['types'], t: number): number {
-  let passband = types[0]?.passband ?? 0;
-  for (const c of types) if (c.start <= t) passband = c.passband;
-  return passband;
+/** The chunk of filtering at a frame, if any */
+export function chunkAt(types: FilterChunk[], t: number): FilterChunk | null {
+  return types.find((c) => c.start <= t && t < c.end) ?? null;
 }
 
 /** A line's value at a frame (unrounded), holding after its last point, repeating from its loop */
@@ -287,13 +316,18 @@ export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Prog
  */
 export function filterProgram(filter: FilterShape, name: string, voices = 1): Program {
   const res = (t: number) => Math.max(0, Math.min(RESONANCE_MAX, Math.round(lineAt(filter.resonance, t))));
-  const setup = (t: number) => filterStep({ type: 'setup', passband: typeAt(filter.types, t), resonance: res(t), voices });
+  // Outside the chunks the voice goes past the filter (keeping the last type, which is then unheard)
+  const typeFor = (t: number) => chunkAt(filter.types, t)?.passband ?? [...filter.types].reverse().find((c) => c.start <= t)?.passband ?? filter.types[0]?.passband ?? 0;
+  const setup = (t: number) => filterStep({ type: 'setup', passband: typeFor(t), resonance: res(t), voices: chunkAt(filter.types, t) ? voices : 0 });
   const cut = filter.cutoff;
   const last = cut.points[cut.points.length - 1].t;
   const looping = cut.loop !== null && cut.loop < cut.points.length - 1;
   // Frames where the setup changes: type changes, and resonance level steps
   const changes = new Set<number>();
-  for (const c of filter.types) if (c.start > 0) changes.add(c.start);
+  for (const c of filter.types) {
+    if (c.start > 0) changes.add(c.start);
+    changes.add(c.end);
+  }
   const resEnd = Math.max(last, filter.resonance.points[filter.resonance.points.length - 1].t);
   for (let t = 1; t <= resEnd + 1; t++) if (res(t) !== res(t - 1)) changes.add(t);
   // Within a repeat they play each time round; without, the cutoff holds while later ones come
