@@ -26,16 +26,16 @@ const TEST_INSTRUMENT = 1;
 const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
-const PLOT = 256;
+const PLOT = 244;
 const HEIGHT = RULER + PLOT;
 /** In the waveform tab, the strip above the rows showing what is heard */
 const HEARD = 24;
 const LANE_H = (PLOT - HEARD) / LANES.length;
 /** Room above full volume and below silence for the dots' labels */
 const PAD_TOP = 24;
-const PAD_BOTTOM = 30 + HEARD;
+const PAD_BOTTOM = 8 + HEARD;
 /** In the volume tab, the strip under silence showing what is heard */
-const VOLUME_HEARD = RULER + PLOT - HEARD;
+const VOLUME_HEARD = RULER + PLOT - HEARD - 2;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 /**
@@ -344,10 +344,11 @@ function renderGutter() {
     g.append(d);
   };
   if (state.tab === 'volume') {
-    add(plotY(1) - 8, 16, ['Full']);
-    add(plotY(0.5) - 8, 16, ['Half']);
-    add(plotY(0) - 8, 16, ['Silent']);
-    add(VOLUME_HEARD, HEARD, ['You hear'], 'heard-label');
+    add(0, RULER, ['Volume'], 'heading');
+    add(plotY(1) - 8, 16, ['100%']);
+    add(plotY(0.5) - 8, 16, ['50%']);
+    add(plotY(0) - 8, 16, ['0%']);
+    add(VOLUME_HEARD, HEARD, ['Waveform'], 'heard-label');
   } else {
     add(RULER, HEARD, ['You hear'], 'heard-label');
     LANES.forEach((w, i) => add(laneTop(i), LANE_H, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
@@ -376,12 +377,17 @@ function drawVolume(curve: Float32Array) {
   el('path', { d: areaPath(whole, top, Math.min(TOTAL, silent)), class: 'env-held' }, plot);
   el('path', { d: line, class: 'env-line' }, plot);
 
-  // Labels are centred over (or under) their dot, kept inside the timeline
-  const text = (parent: Element, cx: number, y: number, content: string, cls = '') => {
+  // Labels are centred over (or under) their dot, kept inside the timeline;
+  // or to one side, to keep clear of a neighbour's
+  const text = (parent: Element, cx: number, y: number, content: string, side: 'left' | 'right' | null = null) => {
     const half = content.length * 3.3 + 2;
-    const t = el('text', { x: Math.max(half, Math.min(x(TOTAL) + ORIGIN - half, cx)), y, 'text-anchor': 'middle', class: cls }, parent);
+    const at = side === 'left' ? cx - 10 - half : side === 'right' ? cx + 10 + half : cx;
+    const t = el('text', { x: Math.max(half, Math.min(x(TOTAL) + ORIGIN - half, at)), y, 'text-anchor': 'middle' }, parent);
     t.textContent = content;
   };
+  // Low down, sustain's label sits above its dot, beside release's: apart if the dots are close
+  const sustainLow = s.sr >> 4 <= 2;
+  const crowded = sustainLow && x(handlePos('r', s.ad, s.sr).f) - x(state.keyUp) < 90;
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
   drawHeard(VOLUME_HEARD);
@@ -398,8 +404,10 @@ function drawVolume(curve: Float32Array) {
     el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
     el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
     if (!held) arrows(g, x(p.f), plotY(p.v), upDown ? 'all' : 'side');
-    // Sustain's label goes under its dot, clear of the down arrow
-    text(g, x(p.f), upDown ? below(p.v) + 9 : above(p.v), label);
+    // Sustain's label goes under its dot, clear of the down arrow, unless
+    // it is down by the waveform strip
+    if (upDown) text(g, x(p.f), sustainLow ? above(p.v) : below(p.v) + 9, label, crowded ? 'left' : null);
+    else text(g, x(p.f), above(p.v), label, key === 'r' && crowded ? 'right' : null);
     // The one in hand stays selected under the pointer, with the ways it moves
     if (held) {
       const grip = el('g', { class: 'env-grip' }, plot);
@@ -433,14 +441,22 @@ function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
  */
 function drawHeard(top: number) {
   for (const sp of spans(shape().bars)) {
+    // Silence shows as nothing
+    if (!sp.wave) continue;
     const x1 = x(sp.start);
     const x2 = x(sp.end ?? TOTAL);
     // Coloured like its bars: a mix takes the colour of its first row's
-    const first = LANES.find((w) => sp.wave & w);
-    const g = el('g', { class: `heard ${first ? LANE_COLORS[first] : 'none'}`, 'data-span': sp.start }, plot);
+    const first = LANES.find((w) => sp.wave & w)!;
+    const g = el('g', { class: `heard ${LANE_COLORS[first]}`, 'data-span': sp.start }, plot);
     el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
-    const t = el('text', { x: x1 + 6, y: top + HEARD / 2 + 4 }, g);
-    if (x2 - x1 > 60) t.textContent = sp.wave ? waveName(sp.wave) : 'Silent';
+    // A little picture of the waveform, and its name where there is room
+    if (x2 - x1 > 30) {
+      const icon = waveIcon(sp.wave, 22, 10);
+      icon.setAttribute('x', String(x1 + 5));
+      icon.setAttribute('y', String(top + HEARD / 2 - 5));
+      g.append(icon);
+    }
+    if (x2 - x1 > 130) el('text', { x: x1 + 32, y: top + HEARD / 2 + 4 }, g).textContent = waveName(sp.wave);
   }
 }
 

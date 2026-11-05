@@ -90,6 +90,17 @@
   border-top: 1px solid var(--border);
 }
 
+.tl-gutter-row.heading {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.heard .wave-icon {
+  color: var(--c);
+  pointer-events: none;
+}
+
 .tl-gutter-row.heard-label {
   font-size: 11px;
 }
@@ -303,15 +314,6 @@
   fill-opacity: 0.22;
   stroke: var(--c);
   stroke-width: 1;
-}
-
-.heard.none rect {
-  fill: none;
-  stroke: var(--step-bar);
-}
-
-.heard.none rect {
-  stroke-dasharray: 3 3;
 }
 
 .heard text {
