@@ -363,10 +363,13 @@ function drawVolume(curve: Float32Array) {
   const end = releaseEnd(s.ad, s.sr, state.keyUp);
   const line = areaPath(curve, 0, Math.min(TOTAL, end + 2));
   el('path', { d: `${line}L${x(Math.min(TOTAL, end + 2))},${plotY(0)}L${x(0)},${plotY(0)}Z`, class: 'env-area' }, plot);
-  // Held on instead: how the decay would go on, faintly, past the key going up
-  const held = level(s.ad, s.sr, TOTAL);
-  const dEnd = decayEnd(a, d, sus);
-  if (dEnd > state.keyUp) el('path', { d: areaPath(held, state.keyUp, Math.min(TOTAL, dEnd + 4)), class: 'env-held' }, plot);
+  // The whole decay, faintly: how it would fall all the way to silence with
+  // the key held, past the sustain level and the key going up. Its length
+  // is the decay setting.
+  const whole = level(s.ad, s.sr & 0x0f, TOTAL);
+  const top = attackFrames(a);
+  const silent = firstFrame(whole, top + 1, (v) => v < 0.01) ?? TOTAL;
+  el('path', { d: areaPath(whole, top, Math.min(TOTAL, silent)), class: 'env-held' }, plot);
   el('path', { d: line, class: 'env-line' }, plot);
 
   // Labels are centred over (or under) their dot, kept inside the timeline
