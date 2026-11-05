@@ -468,10 +468,10 @@ function render() {
     [
       state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
       state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them; bars that overlap play together.' : '',
-      state.notesOpen ? 'Draw notes in semitones from the key played; a pitch holds until the next note.' : '',
+      state.notesOpen ? 'Draw pitches in semitones from the key played; each holds until the next.' : '',
     ]
       .join(' ')
-      .trim() || 'Click Volume, Waveform or Notes to open them.';
+      .trim() || 'Click Volume, Waveform or Pitch to open them.';
 
   const width = x(TOTAL) + ORIGIN;
   const HEIGHT = height();
@@ -508,7 +508,7 @@ function render() {
   }
 
   // A gap between the sections, over everything, so each reads as its own
-  for (const y of [floor(), notesTop()]) el('rect', { x: 0, y: y - SECTION_GAP / 2, width: x(TOTAL) + ORIGIN, height: SECTION_GAP, class: 'section-gap' }, plot);
+  for (const y of [floor(), notesTop()]) el('rect', { x: 0, y, width: x(TOTAL) + ORIGIN, height: SECTION_GAP, class: 'section-gap' }, plot);
 
   plot.append(playheadLine);
   movePlayhead();
@@ -551,17 +551,17 @@ function renderGutter() {
     });
   };
   if (state.volumeOpen) {
-    toggle(RULER, 22, 'Volume', true, () => openVolume(false), 'rule');
+    toggle(RULER, 22, 'Volume', true, () => openVolume(false));
     // Each level's number sits just above its line
     for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'rule');
+  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true));
   toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
   const r = rows();
   for (const row of r ?? []) {
     if (row.wave !== null) add(row.top, row.h, [waveIcon(row.wave, 26, 14), waveName(row.wave)], 'lane');
     else add(row.top, row.h, ['Width'], 'lane width');
   }
-  toggle(notesTop(), PAD_BOTTOM, 'Notes', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
+  toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
   if (state.notesOpen) {
     for (const semis of [24, 12, 0, -12]) add(noteY(semis) + SEMI / 2 - 7, 14, [semis === 0 ? 'played' : semitoneText(semis)], 'semi');
   }
@@ -696,7 +696,6 @@ function drawVolumePreview(curve: Float32Array) {
 /** The line at silence, the waveform strip under it (which opens and closes the rows), and the rows if open. */
 function drawWaveBand() {
   const top = floor();
-  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
   drawHeard(top + (PAD_BOTTOM - HEARD) / 2);
   if (state.waveOpen) drawBars();
@@ -713,7 +712,6 @@ const LINE_PAD = 6;
 function drawNotes() {
   const s = shape();
   const top = notesTop();
-  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
   const py = (semis: number) => top + LINE_PAD + ((NOTE_HIGH - semis) / (NOTE_HIGH - NOTE_LOW)) * (PAD_BOTTOM - 2 * LINE_PAD);
   el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);
