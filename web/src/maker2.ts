@@ -16,7 +16,7 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
-import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
+import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -735,6 +735,13 @@ function drawNotes() {
       }
     }
   }
+  // The pitch all the way through, lighter where no note sets it: the key
+  // played until the first note, each pitch held on until the next
+  for (const sp of heardSpans(s, TOTAL)) {
+    if (!sp.wave && sp.end === null) continue;
+    const x2 = x(sp.end ?? TOTAL);
+    el('rect', { x: x(sp.start), y: noteY(sp.pitch) + 0.5, width: Math.max(1, x2 - x(sp.start)), height: SEMI - 1, rx: 2, class: `note implied${sp.again ? ' again' : ''}` }, plot);
+  }
   s.notes.forEach((note, i) => {
     const x1 = x(note.start);
     const x2 = x(note.end);
@@ -829,6 +836,16 @@ function drawBars() {
     el('rect', { x: x1 - 2, y, width: Math.min(EDGE, (x2 - x1) / 3) + 2, height: h, class: 'bar-edge', 'data-edge': 'start' }, g);
     if (b.end !== null) el('rect', { x: x2 - Math.min(EDGE, (x2 - x1) / 3), y, width: Math.min(EDGE, (x2 - x1) / 3) + 2, height: h, class: 'bar-edge', 'data-edge': 'end' }, g);
   });
+  // Holding: what plays at the end carries on in its rows, to the end
+  const end = programEnd(s);
+  if (end !== null && s.hold && !waveLooping(s)) {
+    const last = stretches(s).at(-1)!;
+    for (const wave of LANES) {
+      if (!(last.wave & wave)) continue;
+      const r = rowOf(wave);
+      el('rect', { x: x(end), y: r.top + 5, width: x(TOTAL) - x(end), height: r.h - 10, class: `bar-body held ${LANE_COLORS[wave]}` }, plot);
+    }
+  }
   // The repeat's ↻ goes over the bars, so it can always be grabbed
   icon();
 }

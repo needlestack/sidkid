@@ -674,3 +674,40 @@
   font-weight: 600;
   pointer-events: none;
 }
+
+/* Held to the end, and the pitch where no note sets it */
+.bar-body.held {
+  fill: var(--c);
+  fill-opacity: 0.14;
+  stroke: var(--c);
+  stroke-opacity: 0.45;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.bar-body.held.tri {
+  --c: var(--tri);
+}
+
+.bar-body.held.saw {
+  --c: var(--saw);
+}
+
+.bar-body.held.pulse {
+  --c: var(--pulse);
+}
+
+.bar-body.held.noise {
+  --c: var(--noise);
+}
+
+.note.implied {
+  fill-opacity: 0.12;
+  stroke-opacity: 0.4;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
+
+.note.implied.again {
+  opacity: 0.5;
+}
