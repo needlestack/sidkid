@@ -111,8 +111,10 @@
   pointer-events: none;
 }
 
+/* Between the sections: firmer than the lines within them */
 .heard-rule {
-  stroke: var(--border);
+  stroke: var(--step-bar);
+  stroke-width: 2;
   pointer-events: none;
 }
 
@@ -147,7 +149,7 @@
 }
 
 .tl-gutter-row.rule {
-  border-top: 1px solid var(--border);
+  border-top: 2px solid var(--step-bar);
 }
 
 .tl-gutter-row svg {
