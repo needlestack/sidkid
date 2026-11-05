@@ -47,7 +47,20 @@ zoomable timeline, aiming for a GarageBand feel.
   bars into a wave program. A delay row of N lasts N+1 frames (checked against the engine).
 - `web/src/maker2.ts`: the page. Own storage (`sidkid.maker2.v1`), not shared with
   the first maker. Pulse width is fixed at 50% until pulse gets a shape of its own.
-- "key up" on the ruler sets how long Play holds the note and where the picture releases.
+- "key up" (the ruler tab, or the sustain capsule sideways) sets how long Play holds
+  the note and where the picture releases. It's a preview, not part of the instrument.
+- Envelope handles (settled with the owner 2026-11-05, after several tries):
+  - Attack, decay, release: dots that move sideways, label centred above. Hover shows
+    arrows; no cursor change. The grabbed dot stays filled under the pointer.
+  - Snapping: halfway between settings, but never more than `STEP_GAP` (40 px) from
+    the setting it came from, so wide gaps still answer the pointer. No greyed
+    preview ("less is more").
+  - Sustain: a capsule whose right end is key up; up/down = level, sideways = key up.
+  - Decay is a rate (time to fall all the way), so its dot moves with sustain. The
+    whole decay to silence is always drawn faintly to make that visible.
+- Ideas raised, not done: an instrument-level "lets go by itself" (wave rows with the
+  gate off, for drums/plucks); hover "let go here" release tails; locking the
+  capsule drag to one axis.
 - Not yet: loading instruments from songs, pulse width, pitch, filter, vibrato.
 
 ## Song editor plan (agreed 2026-11-05, expect tweaks)
