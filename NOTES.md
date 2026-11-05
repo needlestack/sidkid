@@ -53,7 +53,8 @@ zoomable timeline, aiming for a GarageBand feel.
 - Pulse width: a "Width" automation row directly under the Pulse row (only while pulse
   is used). Points joined by sweeps (`pulseProgram` in shape.ts, via `sweepRows`),
   holding after the last, or repeating from a loop point (last point locked to the
-  loop point's width). Points are kept within the player's 127/128-a-frame sweep limit.
+  loop point's width). Stretches steeper than the player's sweeps (127 up/128 down a
+  frame, a GoatTracker limit, not the SID's) become one set-width row per frame.
 - Still missing from Volume/Waveform: an instrument that lets go by itself (gate-off
   rows), Note start (hard restart, first wave, legato), sync/ring mod, waveform loops.
 - Timeline is 32 s (slowest attack 8 s + decay 24 s). Zooming out stops when everything

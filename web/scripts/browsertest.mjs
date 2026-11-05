@@ -417,6 +417,15 @@ try {
   });
   report(widths === '200 200 e00 200 e00 200', 'maker2 pulse width follows its points and repeats', widths);
 
+  // Steeper than a sweep can go: set along the line, a frame at a time
+  const steep = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    s.instruments[s.current].pulse = { points: [{ t: 0, w: 0x100 }, { t: 4, w: 0xf00 }], loop: null };
+    const p = window.maker2.trace(8).pulse;
+    return [0, 2, 4, 7].map((f) => p[f].toString(16)).join(' ');
+  });
+  report(steep === '100 800 f00 f00', 'maker2 steep pulse width follows the line', steep);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

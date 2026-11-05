@@ -16,7 +16,7 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
-import { defaultPulse, LANES, place, PULSE_MAX, pulseLine, pulseProgram, pulseRange, spans, SQUARE, storable, waveProgram, type Bar, type Shape } from './shape';
+import { defaultPulse, LANES, place, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveProgram, type Bar, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -928,7 +928,6 @@ plot.addEventListener('pointerdown', (e) => {
         pulse.points.splice(i, 0, { t, w: widthAt(e) });
         if (pulse.loop !== null && pulse.loop >= i) pulse.loop++;
       }
-      pulse.points[i].w = Math.max(pulseRange(pulse.points, i)[0], Math.min(pulseRange(pulse.points, i)[1], pulse.points[i].w));
       moved = true;
     }
     selectedPoint = i;
@@ -940,8 +939,7 @@ plot.addEventListener('pointerdown', (e) => {
       const p = pts[i];
       // The first point stays at the start; the others move between their neighbours
       if (i > 0) p.t = Math.max(pts[i - 1].t + 1, Math.min(i + 1 < pts.length ? pts[i + 1].t - 1 : TOTAL - 1, Math.round(frameAt(e))));
-      const [lo, hi] = pulseRange(pts, i);
-      p.w = Math.max(lo, Math.min(hi, widthAt(e)));
+      p.w = widthAt(e);
       // A repeat ends where it began: the loop point and the last move together
       const last = pts.length - 1;
       if (pulse.loop !== null) {

@@ -119,9 +119,14 @@ export function waveProgram(bars: Bar[], name: string): Program {
 /**
  * The pulse program for a shape that uses pulse: set the first width, then
  * sweep to each point in turn over the time to it; then stop (holding the
- * width), or jump back to the sweep that leaves the loop point. Setting the
+ * width), or jump back to the rows that leave the loop point. Setting the
  * width takes the first frame and each sweep a frame per frame of it, so
  * each point's width is reached exactly at its time.
+ *
+ * The player's sweeps move at most 127 up or 128 down a frame (the speed is
+ * one signed byte); the chip itself takes any width any frame. So a steeper
+ * stretch sets the width on each of its frames instead, along the line:
+ * exact, at a row a frame.
  */
 export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Program | null {
   if (!bars.some((b) => b.wave & WAVE_PULSE)) return null;
@@ -131,9 +136,9 @@ export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Prog
   for (let i = 0; i + 1 < pts.length; i++) {
     leaving.push(steps.length);
     const change = pts[i + 1].w - pts[i].w;
-    // Too steep for the player (127 up or 128 down a frame) takes a little longer
-    const frames = Math.max(pts[i + 1].t - pts[i].t, fastestSweep(change));
-    for (const sw of sweepRows(change, frames)) steps.push(pulseStep({ type: 'sweep', ...sw }));
+    const frames = Math.max(1, pts[i + 1].t - pts[i].t);
+    if (fastestSweep(change) <= frames) for (const sw of sweepRows(change, frames)) steps.push(pulseStep({ type: 'sweep', ...sw }));
+    else for (let f = 1; f <= frames; f++) steps.push(pulseStep({ type: 'width', width: pts[i].w + Math.round((change * f) / frames) }));
   }
   const program: Program = { name, steps, next: null };
   if (pulse.loop !== null && pulse.loop < pts.length - 1) program.next = { program, step: leaving[pulse.loop] };
@@ -151,24 +156,6 @@ export function pulseLine(pulse: PulseShape, frames: number): PulsePoint[] {
     for (let n = 1; last.t + (n - 1) * period < frames; n++) for (const p of body) out.push({ t: p.t + n * period, w: p.w });
   } else out.push({ t: frames, w: last.w });
   return out;
-}
-
-/** Whether a pulse width point can go to a width: no faster a change from its neighbours than the player can sweep. */
-export function pulseRange(pts: PulsePoint[], i: number): [number, number] {
-  let lo = 0;
-  let hi = PULSE_MAX;
-  const t = pts[i].t;
-  const prev = pts[i - 1];
-  const next = pts[i + 1];
-  if (prev) {
-    lo = Math.max(lo, prev.w - 128 * (t - prev.t));
-    hi = Math.min(hi, prev.w + 127 * (t - prev.t));
-  }
-  if (next) {
-    lo = Math.max(lo, next.w - 127 * (next.t - t));
-    hi = Math.min(hi, next.w + 128 * (next.t - t));
-  }
-  return lo <= hi ? [lo, hi] : [0, PULSE_MAX];
 }
 
 /**
