@@ -49,6 +49,8 @@ const PAD_BOTTOM = 8 + HEARD;
 const VOLUME_PREVIEW = 36;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
+/** The gap between the timeline's sections, in pixels */
+const SECTION_GAP = 5;
 /**
  * Across a gap at least this many pixels wide, a dragged dot moves to the
  * next setting once it is this far from the one it came from (rather than
@@ -504,6 +506,9 @@ function render() {
     el('path', { d: `M${ku - 5},${tabTop + 0.5}L${ku},${RULER + 1}L${ku + 5},${tabTop + 0.5}Z`, class: 'tl-keyup-point' }, tab);
     el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = 'key up';
   }
+
+  // A gap between the sections, over everything, so each reads as its own
+  for (const y of [floor(), notesTop()]) el('rect', { x: 0, y: y - SECTION_GAP / 2, width: x(TOTAL) + ORIGIN, height: SECTION_GAP, class: 'section-gap' }, plot);
 
   plot.append(playheadLine);
   movePlayhead();
