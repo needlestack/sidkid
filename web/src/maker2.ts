@@ -9,7 +9,7 @@ import './maker2.css';
 import { Analyzer, type Trace } from './engine/analyzer';
 import type { TableData } from './engine/configure';
 import { loadModel, Player, saveModel } from './engine/player';
-import { DEFAULT_SETTINGS } from './engine/protocol';
+import { DEFAULT_SETTINGS, type Status } from './engine/protocol';
 import { ATTACK_MS, DECAY_MS } from './adsr';
 import { envelope } from './envelope';
 import { noteName, type Instrument } from './song';
@@ -26,12 +26,14 @@ const TEST_INSTRUMENT = 1;
 const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
-const PLOT = 216;
+const PLOT = 232;
 const HEIGHT = RULER + PLOT;
 /** In the waveform tab, the strip above the rows showing what is heard */
 const HEARD = 24;
 const LANE_H = (PLOT - HEARD) / LANES.length;
-const PAD = 10;
+/** Room above full volume and below silence for the dots' labels */
+const PAD_TOP = 24;
+const PAD_BOTTOM = 26;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 
@@ -236,6 +238,8 @@ let dragging: string | null = null;
  * setting it will land on and, greyed out, the next one the other side.
  */
 let free: { key: string; f: number; v: number; ghosts: { ad: number; sr: number }[] } | null = null;
+/** Which way the pointer last moved while dragging a dot, sideways and up or down, and where it was */
+const heading = { x: 0, y: 0, px: 0, py: 0 };
 let playhead = -1;
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number> = {}, parent?: Element): SVGElementTagNameMap[K] {
@@ -248,7 +252,8 @@ function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string,
 /** Room left of time 0, so handles there can be grabbed */
 const ORIGIN = 16;
 const x = (f: number) => ORIGIN + f * state.zoom;
-const plotY = (v: number) => RULER + PAD + (1 - v) * (PLOT - 2 * PAD);
+const LEVEL_H = PLOT - PAD_TOP - PAD_BOTTOM;
+const plotY = (v: number) => RULER + PAD_TOP + (1 - v) * LEVEL_H;
 const laneTop = (i: number) => RULER + HEARD + i * LANE_H;
 
 function minZoom() {
@@ -355,14 +360,17 @@ function drawVolume(curve: Float32Array) {
   if (dEnd > state.keyUp) el('path', { d: areaPath(held, state.keyUp, Math.min(TOTAL, dEnd + 4)), class: 'env-held' }, plot);
   el('path', { d: line, class: 'env-line' }, plot);
 
-  const labelY = (key: string, v: number) => plotY(v) + (key === 'ds' && v > 0.8 ? 20 : -10);
-  // The settings the other side of a dragged dot, greyed out
+  const above = (v: number) => plotY(v) - 11;
+  const below = (v: number) => plotY(v) + 20;
+  // The next setting the way the dot is heading, greyed out; its value
+  // goes under it, so it doesn't run into the one it will land on
   if (free) {
     for (const g of free.ghosts) {
       el('path', { d: areaPath(level(g.ad, g.sr, state.keyUp), 0, Math.min(TOTAL, releaseEnd(g.ad, g.sr, state.keyUp) + 2)), class: 'env-ghostline' }, plot);
       const p = handlePos(free.key, g.ad, g.sr);
       el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'env-ghostdot' }, plot);
-      el('text', { x: x(p.f) + 10, y: labelY(free.key, p.v), class: 'env-ghostlabel' }, plot).textContent = handleText(free.key, g.ad, g.sr);
+      // Decay and sustain show only the value they will land on
+      if (free.key !== 'ds') el('text', { x: x(p.f) + 10, y: below(p.v), class: 'env-ghostlabel' }, plot).textContent = handleText(free.key, g.ad, g.sr);
     }
   }
   for (const key of ['a', 'ds', 'r']) {
@@ -372,9 +380,36 @@ function drawVolume(curve: Float32Array) {
     const g = el('g', { class: `env-handle${held ? ' dragging' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
     el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
     el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
-    el('text', { x: x(p.f) + 10, y: labelY(key, p.v) }, g).textContent = label;
-    // The dot in hand, under the pointer
-    if (held) el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 7, class: 'env-grip' }, plot);
+    if (!held) arrows(g, x(p.f), plotY(p.v), key === 'ds');
+    // Decay is a time, above the line; sustain a level, below it
+    if (key === 'ds') {
+      el('text', { x: x(p.f) + 10, y: above(p.v) }, g).textContent = envText.d(s.ad & 15);
+      el('text', { x: x(p.f) + 10, y: below(p.v) }, g).textContent = envText.s(s.sr >> 4);
+    } else el('text', { x: x(p.f) + 10, y: above(p.v) }, g).textContent = label;
+    // The dot in hand, under the pointer, with the ways it moves
+    if (held) {
+      const grip = el('g', { class: 'env-grip' }, plot);
+      el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 7 }, grip);
+      arrows(grip, x(free!.f), plotY(free!.v), key === 'ds');
+    }
+  }
+}
+
+/** Little arrows round a dot for the ways it moves: sideways, or all four ways. */
+function arrows(parent: Element, cx: number, cy: number, fourWay: boolean) {
+  const g = el('g', { class: 'env-arrows' }, parent);
+  const at = (dx: number, dy: number) => {
+    // A small triangle 15px out, pointing away from the dot
+    const tip = [cx + dx * 19, cy + dy * 19];
+    const base = [cx + dx * 13, cy + dy * 13];
+    const side = [dy * 4, dx * 4];
+    el('path', { d: `M${tip[0]},${tip[1]}L${base[0] + side[0]},${base[1] + side[1]}L${base[0] - side[0]},${base[1] - side[1]}Z` }, g);
+  };
+  at(-1, 0);
+  at(1, 0);
+  if (fourWay) {
+    at(0, -1);
+    at(0, 1);
   }
 }
 
@@ -519,6 +554,8 @@ plot.addEventListener('pointerdown', (e) => {
   if (handle) {
     const key = handle.dataset.drag!;
     dragging = key;
+    Object.assign(heading, { x: 0, y: 0, px: e.clientX, py: e.clientY });
+    plot.style.cursor = key === 'ds' ? 'move' : 'ew-resize';
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
@@ -593,6 +630,7 @@ plot.addEventListener('pointerdown', (e) => {
     plot.removeEventListener('pointercancel', onUp);
     dragging = null;
     free = null;
+    plot.style.cursor = '';
     if (moved) {
       changed();
       playShape();
@@ -612,11 +650,18 @@ function dragHandle(key: string, e: PointerEvent) {
   const s = shape();
   const f = frameAt(e);
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
-  // The setting past the pointer from the nearest one, if the pointer is off it
-  const beyond = (position: (v: number) => number, n: number, at: number): number | null => {
-    if (Math.abs(position(n) - at) * state.zoom < 3) return null;
-    const o = n + (at > position(n) ? 1 : -1);
-    return o >= 0 && o < 16 ? o : null;
+  // Which way it is heading: a setting behind it isn't shown unless it turns back
+  if (Math.abs(e.clientX - heading.px) >= 1) {
+    heading.x = Math.sign(e.clientX - heading.px);
+    heading.px = e.clientX;
+  }
+  if (Math.abs(e.clientY - heading.py) >= 1) {
+    heading.y = -Math.sign(e.clientY - heading.py);
+    heading.py = e.clientY;
+  }
+  const ahead = (n: number, way: number): number | null => {
+    const o = n + way;
+    return way && o >= 0 && o < 16 ? o : null;
   };
   const ghosts: { ad: number; sr: number }[] = [];
   let v = 0;
@@ -624,27 +669,25 @@ function dragHandle(key: string, e: PointerEvent) {
   else if (key === 'a') {
     const n = nearest(attackFrames, f);
     s.ad = (n << 4) | d;
-    const o = beyond(attackFrames, n, f);
+    const o = ahead(n, heading.x);
     if (o !== null) ghosts.push({ ad: (o << 4) | d, sr: s.sr });
     v = 1;
   } else if (key === 'ds') {
-    v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD) / (PLOT - 2 * PAD)));
+    v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD_TOP) / LEVEL_H));
     const ns = Math.round(v * 15);
     const decayAt = (dv: number) => decayEnd(a, dv, ns);
     const nd = nearest(decayAt, f);
     s.ad = (a << 4) | nd;
     s.sr = (ns << 4) | r;
-    const od = beyond(decayAt, nd, f);
+    const od = ahead(nd, heading.x);
     if (od !== null) ghosts.push({ ad: (a << 4) | od, sr: s.sr });
-    // Sustain is a level: its next step up or down, once the pointer leaves it
-    const off = v * 15 - ns;
-    const os = ns + Math.sign(off);
-    if (Math.abs(off) * ((PLOT - 2 * PAD) / 15) >= 3 && os >= 0 && os < 16) ghosts.push({ ad: s.ad, sr: (os << 4) | r });
+    const os = ahead(ns, heading.y);
+    if (os !== null) ghosts.push({ ad: s.ad, sr: (os << 4) | r });
   } else if (key === 'r') {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
     const n = nearest(releaseAt, f);
     s.sr = (sus << 4) | n;
-    const o = beyond(releaseAt, n, f);
+    const o = ahead(n, heading.x);
     if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
   }
   free = key === 'keyup' ? null : { key, f: Math.max(0, f), v, ghosts };
@@ -770,6 +813,8 @@ $('delete-instrument').addEventListener('click', () => {
 
 const player = new Player();
 player.onError = (m) => toast(m);
+let lastStatus: Status | null = null;
+player.onStatus = (status) => (lastStatus = status);
 let held: number | null = null;
 let noteStart = 0;
 let releaseAt: number | null = null;
@@ -1009,5 +1054,6 @@ Object.assign(window, {
     trace,
     audition,
     ready: () => analyzer !== null,
+    status: () => lastStatus,
   },
 });

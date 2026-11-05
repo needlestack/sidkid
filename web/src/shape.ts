@@ -61,6 +61,8 @@ export function storable(bars: Bar[]): boolean {
 export const DELAY_FRAMES = (left: number) => left + 1;
 const LONGEST_DELAY = 15;
 const PITCH_KEEP = 0x80;
+/** Relative pitch 0: the note played */
+const PITCH_NOTE = 0x00;
 
 /**
  * The wave program for a shape: each span sets its waveform (with the gate
@@ -69,7 +71,8 @@ const PITCH_KEEP = 0x80;
 export function waveProgram(bars: Bar[], name: string): Program {
   const steps: Step[] = [];
   for (const s of spans(bars)) {
-    steps.push({ left: waveLeft({ type: 'wave', wave: s.wave | WAVE_GATE }), right: PITCH_KEEP });
+    // The first row plays the note's pitch: the player sets the pitch only from here
+    steps.push({ left: waveLeft({ type: 'wave', wave: s.wave | WAVE_GATE }), right: steps.length ? PITCH_KEEP : PITCH_NOTE });
     if (s.end === null) break;
     let rest = s.end - s.start - 1;
     while (rest > 0) {

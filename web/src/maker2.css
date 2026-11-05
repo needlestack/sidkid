@@ -191,7 +191,27 @@
 }
 
 .env-handle {
-  cursor: grab;
+  cursor: ew-resize;
+}
+
+.env-handle[data-drag='ds'] {
+  cursor: move;
+}
+
+/* Arrows for the ways a dot moves: on hover, and round the dot in hand */
+.env-arrows path {
+  fill: var(--accent);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.env-handle .env-arrows {
+  display: none;
+}
+
+.env-handle:hover .env-arrows,
+.env-handle:focus-visible .env-arrows {
+  display: inline;
 }
 
 .env-handle .hit {
@@ -209,18 +229,18 @@
   fill: var(--accent);
 }
 
-.env-handle.dragging {
-  cursor: grabbing;
-}
 
 /* The dot in hand follows the pointer; the setting it will land on stays in
    colour and the next one past it is greyed out */
 .env-grip {
+  pointer-events: none;
+}
+
+.env-grip circle {
   fill: var(--accent);
   fill-opacity: 0.35;
   stroke: var(--accent);
   stroke-width: 1.5;
-  pointer-events: none;
 }
 
 .env-ghostline {

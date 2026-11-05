@@ -399,9 +399,23 @@ try {
       for (const b of bars) if (b.start <= f && f < (b.end ?? Infinity)) wave |= b.wave;
       if (got[f] !== (wave | 1)) return `frame ${f}: ${got[f].toString(16)}, not ${(wave | 1).toString(16)}`;
     }
+    // And at the note's pitch
+    const freq = window.maker2.trace(frames).freq;
+    if (!freq.every((v) => v === freq[0] && v > 0)) return `pitch ${freq[0]} … ${freq[frames - 1]}`;
     return '';
   });
   report(exact === '', 'maker2 bars play for their frames', exact);
+
+  // A key held plays: the worklet runs the note at a pitch, gate on
+  await m2.keyboard.down('k');
+  const sounding = await m2
+    .waitForFunction(() => {
+      const st = window.maker2.status();
+      return st && (st.regs[0] | st.regs[1]) && st.regs[4] & 1 && st.envelopes[0] > 0;
+    }, { timeout: 3000 })
+    .then(() => true, () => false);
+  await m2.keyboard.up('k');
+  report(sounding, 'maker2 a key plays the note');
 
   // Dragging the attack dot to the right makes the attack slower
   const plotPoint = (frame, y) =>
