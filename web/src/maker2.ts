@@ -23,8 +23,8 @@ const SVG = 'http://www.w3.org/2000/svg';
 const FPS = 50;
 const STORAGE_KEY = 'sidkid.maker2.v1';
 const TEST_INSTRUMENT = 1;
-/** The timeline's length: 15 seconds */
-const TOTAL = 750;
+/** The timeline's length: 32 seconds, the slowest attack (8 s) and decay (24 s) together */
+const TOTAL = 1600;
 const MAX_ZOOM = 24;
 const RULER = 24;
 const PLOT = 196;
@@ -302,9 +302,22 @@ function dataEnd(volume = true, waves = true): number {
   return Math.min(TOTAL, Math.max(5, end));
 }
 
-/** Zoomed right out, everything there is fills half the view (and never more than the whole timeline shows). */
+/** The whole timeline in view */
+const wholeZoom = () => viewWidth() / TOTAL;
+
+/** Zoomed right out, everything there is fills a quarter of the view (or the whole timeline shows). */
 function minZoom() {
-  return Math.min(MAX_ZOOM, Math.max(0.5, viewWidth() / TOTAL, viewWidth() / (2 * dataEnd())));
+  return Math.min(MAX_ZOOM, Math.max(wholeZoom(), viewWidth() / (4 * dataEnd())));
+}
+
+/**
+ * How far out zooming can go now: the limit, or where the view already is
+ * if that is further out (after the instrument has shrunk), so zooming
+ * never jumps. While the slider is dragged, its range stays as it began.
+ */
+let sliderFloor: number | null = null;
+function zoomFloor() {
+  return sliderFloor ?? Math.min(minZoom(), state.zoom);
 }
 
 /**
@@ -323,7 +336,7 @@ function setZoom(z: number, pointer?: number) {
     at = x(mid) - scroller.scrollLeft;
     if (at < 0 || at > scroller.clientWidth) at = scroller.clientWidth / 2;
   }
-  state.zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, z));
+  state.zoom = Math.max(zoomFloor(), Math.min(MAX_ZOOM, z));
   render();
   scroller.scrollLeft = x(mid) - at;
   persist();
@@ -335,7 +348,7 @@ function tickStep(): number {
 }
 
 function render() {
-  if (!state.zoom) state.zoom = Math.max(minZoom(), scroller.clientWidth / 100);
+  if (!state.zoom) state.zoom = Math.max(wholeZoom(), scroller.clientWidth / 100);
   const s = shape();
   $<HTMLInputElement>('name').value = document.activeElement === $('name') ? $<HTMLInputElement>('name').value : s.name;
   $('zoom-label').textContent = `${timeText(scroller.clientWidth / state.zoom)} shown`;
@@ -932,16 +945,25 @@ $('zoom-fit').addEventListener('click', () => {
 const zoomSlider = $<HTMLInputElement>('zoom-slider');
 const SLIDER_STEPS = 1000;
 function sliderValue() {
-  const lo = Math.log(minZoom());
+  const lo = Math.log(zoomFloor());
   return Math.round(((Math.log(state.zoom) - lo) / (Math.log(MAX_ZOOM) - lo)) * SLIDER_STEPS);
 }
 zoomSlider.max = String(SLIDER_STEPS);
+const holdSlider = () => (sliderFloor ??= zoomFloor());
+const letSliderGo = () => (sliderFloor = null);
+zoomSlider.addEventListener('pointerdown', holdSlider);
+zoomSlider.addEventListener('keydown', holdSlider);
+zoomSlider.addEventListener('change', letSliderGo);
+zoomSlider.addEventListener('pointerup', letSliderGo);
+zoomSlider.addEventListener('blur', letSliderGo);
 zoomSlider.addEventListener('input', () => {
-  const lo = Math.log(minZoom());
+  holdSlider();
+  const lo = Math.log(zoomFloor());
   setZoom(Math.exp(lo + (Number(zoomSlider.value) / SLIDER_STEPS) * (Math.log(MAX_ZOOM) - lo)));
 });
 new ResizeObserver(() => {
-  state.zoom = Math.max(minZoom(), state.zoom);
+  // A narrower view can't show more than the whole timeline
+  state.zoom = Math.max(wholeZoom(), state.zoom);
   render();
 }).observe(scroller);
 

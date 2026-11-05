@@ -50,6 +50,10 @@ zoomable timeline, aiming for a GarageBand feel.
   bars into a wave program. A delay row of N lasts N+1 frames (checked against the engine).
 - `web/src/maker2.ts`: the page. Own storage (`sidkid.maker2.v1`), not shared with
   the first maker. Pulse width is fixed at 50% until pulse gets a shape of its own.
+- Timeline is 32 s (slowest attack 8 s + decay 24 s). Zooming out stops when everything
+  fills a quarter of the view; zooming never jumps (it can stay further out than a
+  tightened limit), and the slider's range is frozen during a drag. Pinch zooms around
+  the pointer; buttons and slider around the middle of the instrument.
 - "key up" (the ruler tab, or the sustain capsule sideways) sets how long Play holds
   the note and where the picture releases. It's a preview, not part of the instrument.
 - Envelope handles (settled with the owner 2026-11-05, after several tries):
