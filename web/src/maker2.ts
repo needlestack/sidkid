@@ -768,14 +768,12 @@ function drawWidth() {
   if (!looping && points.length > 1) {
     // No repeat yet: its start waits at the end, to be pulled back from
     // there. Only the ↻ at the top takes hold, so the last point still drags.
-    const last = points[points.length - 1];
-    const at = x(last.t);
-    // Beside the bar rather than over the last point, when that is up at the top
-    const tx = widthY(last.w) < r.top + 24 ? at + 12 : at;
+    const at = x(points[points.length - 1].t);
     const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '' }, plot);
     el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, pull);
-    el('rect', { x: tx - 9, y: r.top, width: 18, height: 17, rx: 4, class: 'tab' }, pull);
-    el('text', { x: tx, y: r.top + 13, 'text-anchor': 'middle', class: 'width-repeat' }, pull).textContent = '↻';
+    // The ↻ sits at the bar's top left, clear of the last point on it
+    el('rect', { x: at - 18, y: r.top, width: 16, height: 16, class: 'hit' }, pull);
+    el('text', { x: at - 4, y: r.top + 12, 'text-anchor': 'end', class: 'width-repeat' }, pull).textContent = '↻';
     el('title', {}, pull).textContent = 'Drag left to repeat part of the line while the note is held';
   }
 }
