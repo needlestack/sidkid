@@ -238,33 +238,6 @@
   stroke-width: 2.5;
 }
 
-.env-ghostline {
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-.env-ghostdot {
-  fill: var(--surface);
-  stroke: var(--muted);
-  stroke-width: 2;
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.env-ghostlabel {
-  fill: var(--muted);
-  font-size: 11px;
-  paint-order: stroke;
-  stroke: var(--surface);
-  stroke-width: 4px;
-  stroke-linejoin: round;
-  pointer-events: none;
-}
-
 .env-handle text {
   fill: var(--text);
   font-size: 11.5px;

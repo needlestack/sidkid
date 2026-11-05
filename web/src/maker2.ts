@@ -38,8 +38,12 @@ const PAD_BOTTOM = 32;
 const EDGE = 7;
 /** Half the sustain capsule's width, in pixels */
 const CAPSULE_HALF = 14;
-/** Settings at least this many pixels apart show the other one, greyed out, while a dot is dragged between them */
-const GHOST_GAP = 40;
+/**
+ * Across a gap at least this many pixels wide, a dragged dot moves to the
+ * next setting once it is this far from the one it came from (rather than
+ * halfway), so a long way between settings still answers the pointer.
+ */
+const STEP_GAP = 40;
 
 type Tab = 'volume' | 'wave';
 
@@ -230,23 +234,10 @@ const scroller = $('scroll');
 let selected = -1;
 /** What is being dragged, for its look and the readout */
 let dragging: string | null = null;
-/**
- * While an envelope dot is dragged it follows the pointer, between the
- * setting it will land on and, greyed out, the next one the other side.
- */
-let free: { key: string; f: number; v: number; ghosts: { ad: number; sr: number }[] } | null = null;
-
-/** For each way a dot moves: where the pointer was, which way it is heading, and the pair of settings it is between */
-interface Aim {
-  last: number;
-  heading: number;
-  near: number;
-  other: number;
-  /** Whether the other setting is shown, greyed out */
-  shown: boolean;
-}
-const NO_AIM: Aim = { last: 0, heading: 0, near: -1, other: -1, shown: false };
-const aim = { x: { ...NO_AIM }, y: { ...NO_AIM } };
+/** While an envelope handle is dragged it follows the pointer, and the setting it will land on is drawn */
+let free: { key: string; f: number; v: number } | null = null;
+/** The setting (0-15) the dragged handle had when grabbed */
+let origin = 0;
 /** Frames from the key going up to where the sustain capsule was grabbed, so it doesn't jump */
 let grabOffset = 0;
 let playhead = -1;
@@ -386,16 +377,6 @@ function drawVolume(curve: Float32Array) {
   };
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
-  // While a dot is dragged, the other setting either side of the pointer,
-  // greyed out with its value underneath
-  if (free) {
-    for (const g of free.ghosts) {
-      el('path', { d: areaPath(level(g.ad, g.sr, state.keyUp), 0, Math.min(TOTAL, releaseEnd(g.ad, g.sr, state.keyUp) + 2)), class: 'env-ghostline' }, plot);
-      const p = handlePos(free.key, g.ad, g.sr);
-      el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'env-ghostdot' }, plot);
-      text(plot, x(p.f), below(p.v), handleText(free.key, g.ad, g.sr), 'env-ghostlabel');
-    }
-  }
   // Attack, decay and release are times: dots that move sideways, labelled
   // above. Sustain is a level: a capsule on its line that moves up and down,
   // labelled below.
@@ -597,10 +578,9 @@ plot.addEventListener('pointerdown', (e) => {
     const key = handle.dataset.drag!;
     dragging = key;
     // Selected from the moment it is grabbed
-    if (key !== 'keyup') free = { key, ...handlePos(key, s.ad, s.sr), ghosts: [] };
+    if (key !== 'keyup') free = { key, ...handlePos(key, s.ad, s.sr) };
     grabOffset = start - state.keyUp;
-    aim.x = { ...NO_AIM, last: e.clientX };
-    aim.y = { ...NO_AIM, last: e.clientY };
+    origin = key === 'a' ? s.ad >> 4 : key === 'd' ? s.ad & 15 : s.sr & 15;
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
@@ -695,43 +675,27 @@ function dragHandle(key: string, e: PointerEvent) {
   const s = shape();
   const f = frameAt(e);
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
-  // Which way the pointer is moving, sideways and up or down
-  for (const [axis, now, sign] of [[aim.x, e.clientX, 1], [aim.y, e.clientY, -1]] as const) {
-    if (Math.abs(now - axis.last) < 1) continue;
-    axis.heading = Math.sign(now - axis.last) * sign;
-    axis.last = now;
-  }
-  // The settings either side of the pointer: the nearer it lands on, and
-  // the other greyed out. Right on a setting, there is only that one. Just
-  // past halfway the one left behind is hidden, until the pointer heads
-  // back towards it.
-  const between = (position: (v: number) => number, at: number, axis: Aim, pixels = state.zoom): [number, number | null] => {
+  // The setting the pointer is at. Settings close together switch halfway
+  // between; across a wide gap, the dot moves on once the pointer is
+  // STEP_GAP pixels from the setting it came from, and back within it.
+  const settle = (position: (v: number) => number, at: number): number => {
     let lo = -1;
     for (let v = 0; v < 16; v++) if (position(v) <= at) lo = v;
-    if (lo < 0) return [0, null];
-    if (lo === 15) return [15, null];
-    const near = at - position(lo) <= position(lo + 1) - at ? lo : lo + 1;
-    const other = near === lo ? lo + 1 : lo;
-    // Settings close together on screen follow the pointer well enough on
-    // their own; only a long way to the next one needs it shown ahead
-    const gap = (position(lo + 1) - position(lo)) * pixels;
-    if (gap < GHOST_GAP || Math.abs(position(near) - at) * pixels < 1) return [near, null];
-    if (near !== axis.near || other !== axis.other) Object.assign(axis, { near, other, shown: false });
-    if (axis.heading === Math.sign(position(other) - position(near))) axis.shown = true;
-    return [near, axis.shown ? other : null];
+    if (lo < 0) return 0;
+    if (lo === 15) return 15;
+    const hi = lo + 1;
+    const px = (frames: number) => frames * state.zoom;
+    if (px(position(hi) - position(lo)) < STEP_GAP) return at - position(lo) <= position(hi) - at ? lo : hi;
+    if (origin >= hi) return px(position(hi) - at) >= STEP_GAP ? lo : hi;
+    return px(at - position(lo)) >= STEP_GAP ? hi : lo;
   };
-  const ghosts: { ad: number; sr: number }[] = [];
   let v = 0;
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
   else if (key === 'a') {
-    const [n, o] = between(attackFrames, f, aim.x);
-    s.ad = (n << 4) | d;
-    if (o !== null) ghosts.push({ ad: (o << 4) | d, sr: s.sr });
+    s.ad = (settle(attackFrames, f) << 4) | d;
     v = 1;
   } else if (key === 'd') {
-    const [n, o] = between((dv) => decayEnd(a, dv, sus), f, aim.x);
-    s.ad = (a << 4) | n;
-    if (o !== null) ghosts.push({ ad: (a << 4) | o, sr: s.sr });
+    s.ad = (a << 4) | settle((dv) => decayEnd(a, dv, sus), f);
     v = sus / 15;
   } else if (key === 's') {
     // Up and down is the level, to the nearest (they are close together);
@@ -741,12 +705,10 @@ function dragHandle(key: string, e: PointerEvent) {
     state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f - grabOffset)));
   } else if (key === 'r') {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
-    const [n, o] = between(releaseAt, f, aim.x);
-    s.sr = (sus << 4) | n;
-    if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
+    s.sr = (sus << 4) | settle(releaseAt, f);
   }
   // Sustain's capsule keeps its end on the key going up
-  free = key === 'keyup' ? null : { key, f: key === 's' ? handlePos('s', s.ad, s.sr).f : Math.max(0, f), v, ghosts };
+  free = key === 'keyup' ? null : { key, f: key === 's' ? handlePos('s', s.ad, s.sr).f : Math.max(0, f), v };
   render();
 }
 
