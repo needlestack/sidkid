@@ -2,13 +2,13 @@
    style.css and instrumentmaker.css (the top bar, keyboard and bar at the
    bottom). */
 
-.topbar .setting {
+/* A setting's name as the first cell of its switch, so they read as one */
+.segmented-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.topbar .setting-label {
+  padding: 0 10px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
   font-size: 12px;
   color: var(--muted);
 }
