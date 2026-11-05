@@ -107,6 +107,11 @@
   pointer-events: none;
 }
 
+.tl-gutter-row.on-line {
+  align-items: flex-end;
+  line-height: 1;
+}
+
 .tl-gutter-row.rule {
   border-top: 1px solid var(--border);
 }

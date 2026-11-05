@@ -35,7 +35,9 @@ const LANE_H = (PLOT - HEARD) / LANES.length;
 const PAD_TOP = 24;
 const PAD_BOTTOM = 8 + HEARD;
 /** In the volume tab, the strip under silence showing what is heard */
-const VOLUME_HEARD = RULER + PLOT - HEARD - 2;
+const FLOOR = RULER + PLOT - PAD_BOTTOM;
+/** In the volume tab, the strip's top: centred in the band between silence and the bottom */
+const VOLUME_HEARD = FLOOR + (PAD_BOTTOM - HEARD) / 2;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 /**
@@ -345,10 +347,9 @@ function renderGutter() {
   };
   if (state.tab === 'volume') {
     add(0, RULER, ['Volume'], 'heading');
-    add(plotY(1) - 8, 16, ['100']);
-    add(plotY(0.5) - 8, 16, ['50']);
-    add(plotY(0) - 8, 16, ['0']);
-    add(VOLUME_HEARD, HEARD, ['Waveform'], 'heard-label rule');
+    // Each level's number sits just above its line
+    for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
+    add(FLOOR, PAD_BOTTOM, ['Waveform'], 'heard-label rule');
   } else {
     add(RULER, HEARD, ['You hear'], 'heard-label');
     LANES.forEach((w, i) => add(laneTop(i), LANE_H, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
@@ -390,8 +391,8 @@ function drawVolume(curve: Float32Array) {
   const crowded = sustainLow && x(handlePos('r', s.ad, s.sr).f) - x(state.keyUp) < 90;
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
-  // A thin line between the envelope and the waveform strip
-  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: VOLUME_HEARD, y2: VOLUME_HEARD, class: 'heard-rule' }, plot);
+  // A thin line at silence, between the envelope and the waveform strip
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: FLOOR, y2: FLOOR, class: 'heard-rule' }, plot);
   drawHeard(VOLUME_HEARD);
 
   // Attack, decay and release are times: dots that move sideways, labelled
