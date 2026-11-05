@@ -497,12 +497,12 @@
 /* The repeating section, and fainter, its repeats */
 .width-loop {
   fill: var(--pulse);
-  fill-opacity: 0.12;
+  fill-opacity: 0.22;
   pointer-events: none;
 }
 
 .width-loop.again {
-  fill-opacity: 0.05;
+  fill-opacity: 0.06;
 }
 
 .width-loop-edge {

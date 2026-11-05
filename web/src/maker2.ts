@@ -748,16 +748,12 @@ function drawWidth() {
     el('rect', { x: x(from) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, edge);
   }
   el('line', { x1: 0, x2: width, y1: widthY(SQUARE), y2: widthY(SQUARE), class: 'width-square' }, plot);
-  const pts = pulseLine(s.pulse, TOTAL)
-    .map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${widthY(p.w).toFixed(1)}`)
-    .join(' ');
-  el('polyline', { points: pts, class: 'width-line faint' }, plot);
-  // Heard where pulse plays, alone or in a mix
-  const clip = el('clipPath', { id: 'pulse-heard' }, el('defs', {}, plot));
-  for (const sp of spans(s.bars)) {
-    if (sp.wave & WAVE_PULSE) el('rect', { x: x(sp.start), y: r.top, width: x(sp.end ?? TOTAL) - x(sp.start), height: r.h }, clip);
-  }
-  el('polyline', { points: pts, class: 'width-line', 'clip-path': 'url(#pulse-heard)' }, plot);
+  const line = (corners: { t: number; w: number }[]) => corners.map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${widthY(p.w).toFixed(1)}`).join(' ');
+  // The line as drawn, strong, holding after its last point; with a repeat,
+  // the repeats after it light
+  const looping = loop !== null && loop < points.length - 1;
+  if (looping) el('polyline', { points: line(pulseLine(s.pulse, TOTAL)), class: 'width-line faint' }, plot);
+  el('polyline', { points: line(looping ? points : pulseLine(s.pulse, TOTAL)), class: 'width-line' }, plot);
   points.forEach((p, i) => {
     const g = el('g', { class: `width-point${i === selectedPoint ? ' selected' : ''}`, 'data-point': i }, plot);
     el('circle', { cx: x(p.t), cy: widthY(p.w), r: 11, class: 'hit' }, g);
