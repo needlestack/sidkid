@@ -92,13 +92,23 @@
 
 .tl-gutter-row.heading {
   color: var(--text);
-  font-weight: 700;
-  font-size: 12px;
 }
 
-.heard .wave-icon {
-  color: var(--c);
+.heard-wave {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.3;
+  stroke-linejoin: round;
   pointer-events: none;
+}
+
+.heard-rule {
+  stroke: var(--border);
+  pointer-events: none;
+}
+
+.tl-gutter-row.rule {
+  border-top: 1px solid var(--border);
 }
 
 .tl-gutter-row.heard-label {
@@ -143,6 +153,7 @@
 }
 
 .tl-keyup {
+  pointer-events: none;
   stroke: var(--text);
   stroke-width: 1.2;
   stroke-dasharray: 4 3;
@@ -182,6 +193,7 @@
 }
 
 .tl-playhead {
+  pointer-events: none;
   stroke: var(--playhead);
   stroke-width: 2;
 }

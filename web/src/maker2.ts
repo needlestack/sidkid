@@ -14,7 +14,7 @@ import { ATTACK_MS, DECAY_MS } from './adsr';
 import { envelope } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
-import { waveIcon } from './waveicon';
+import { waveIcon, waveRun } from './waveicon';
 import { LANES, place, pulseProgram, spans, storable, waveProgram, type Bar, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -345,10 +345,10 @@ function renderGutter() {
   };
   if (state.tab === 'volume') {
     add(0, RULER, ['Volume'], 'heading');
-    add(plotY(1) - 8, 16, ['100%']);
-    add(plotY(0.5) - 8, 16, ['50%']);
-    add(plotY(0) - 8, 16, ['0%']);
-    add(VOLUME_HEARD, HEARD, ['Waveform'], 'heard-label');
+    add(plotY(1) - 8, 16, ['100']);
+    add(plotY(0.5) - 8, 16, ['50']);
+    add(plotY(0) - 8, 16, ['0']);
+    add(VOLUME_HEARD, HEARD, ['Waveform'], 'heard-label rule');
   } else {
     add(RULER, HEARD, ['You hear'], 'heard-label');
     LANES.forEach((w, i) => add(laneTop(i), LANE_H, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
@@ -390,6 +390,8 @@ function drawVolume(curve: Float32Array) {
   const crowded = sustainLow && x(handlePos('r', s.ad, s.sr).f) - x(state.keyUp) < 90;
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
+  // A thin line between the envelope and the waveform strip
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: VOLUME_HEARD, y2: VOLUME_HEARD, class: 'heard-rule' }, plot);
   drawHeard(VOLUME_HEARD);
 
   // Attack, decay and release are times: dots that move sideways, labelled
@@ -449,14 +451,8 @@ function drawHeard(top: number) {
     const first = LANES.find((w) => sp.wave & w)!;
     const g = el('g', { class: `heard ${LANE_COLORS[first]}`, 'data-span': sp.start }, plot);
     el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
-    // A little picture of the waveform, and its name where there is room
-    if (x2 - x1 > 30) {
-      const icon = waveIcon(sp.wave, 22, 10);
-      icon.setAttribute('x', String(x1 + 5));
-      icon.setAttribute('y', String(top + HEARD / 2 - 5));
-      g.append(icon);
-    }
-    if (x2 - x1 > 130) el('text', { x: x1 + 32, y: top + HEARD / 2 + 4 }, g).textContent = waveName(sp.wave);
+    // The waveform drawn along it, start to finish
+    if (x2 - x1 > 8) el('polyline', { points: waveRun(sp.wave, x1 + 4, top + 7, x2 - x1 - 8, HEARD - 14, 12), class: 'heard-wave' }, g);
   }
 }
 

@@ -52,6 +52,25 @@ export function waveIcon(wave: number, w = 34, h = 18): SVGSVGElement {
   return svg;
 }
 
+/**
+ * Points for a waveform repeated along a strip w × h from (x, y), one cycle
+ * every `period` pixels, for an SVG polyline.
+ */
+export function waveRun(wave: number, x: number, y: number, w: number, h: number, period: number): string {
+  const steps = 16;
+  const points: string[] = [];
+  const total = Math.max(1, Math.round((w / period) * steps));
+  for (let i = 0; i <= total; i++) {
+    const t = i / steps;
+    const cycle = Math.floor(t);
+    const phase = t - cycle;
+    const px = x + Math.min(w, (i / steps) * period);
+    const py = y + (1 - sample(wave, phase === 0 && i ? 1 : phase, cycle) / 0xfff) * h;
+    points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+  }
+  return points.join(' ');
+}
+
 /** The CSS colour token for a waveform value's main oscillator. */
 export function waveTone(wave: number): string {
   if (wave & WAVE_NOISE) return 'noise';
