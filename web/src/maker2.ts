@@ -246,6 +246,14 @@ interface Aim {
 const NO_AIM: Aim = { last: 0, heading: 0, near: -1, other: -1, shown: false };
 const aim = { x: { ...NO_AIM }, y: { ...NO_AIM } };
 let playhead = -1;
+/** Kept from one drawing to the next and moved on its own, so playing doesn't redraw what is under the pointer */
+const playheadLine = el('line', { y1: 0, y2: HEIGHT, class: 'tl-playhead' });
+
+function movePlayhead() {
+  playheadLine.style.display = playhead >= 0 ? '' : 'none';
+  playheadLine.setAttribute('x1', String(x(playhead)));
+  playheadLine.setAttribute('x2', String(x(playhead)));
+}
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number> = {}, parent?: Element): SVGElementTagNameMap[K] {
   const e = document.createElementNS(SVG, name);
@@ -318,7 +326,8 @@ function render() {
   el('rect', { x: ku - 30, y: 3, width: 60, height: RULER - 6, rx: 6 }, tab);
   el('text', { x: ku, y: RULER / 2 + 4, 'text-anchor': 'middle' }, tab).textContent = 'key up';
 
-  if (playhead >= 0) el('line', { x1: x(playhead), x2: x(playhead), y1: 0, y2: HEIGHT, class: 'tl-playhead' }, plot);
+  plot.append(playheadLine);
+  movePlayhead();
 
   renderGutter();
   renderReadout();
@@ -912,7 +921,7 @@ function animate() {
     const end = releaseAt === null ? TOTAL : Math.min(TOTAL, releaseEnd(s.ad, s.sr, releaseAt));
     const was = playhead;
     playhead = f >= 0 && f < end ? f : -1;
-    if (playhead !== was) render();
+    if (playhead !== was) movePlayhead();
     if (f < end) requestAnimationFrame(step);
     else animating = false;
   };
