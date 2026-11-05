@@ -16,8 +16,9 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
+import { filterScope, modeIcon } from './filtercurve';
 import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { CUTOFF_MAX, defaultPulse, filterProgram, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type PulseShape, type Shape } from './shape';
+import { CUTOFF_MAX, defaultPulse, filterProgram, lineAt, RESONANCE_MAX, typeAt, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type PulseShape, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -110,7 +111,11 @@ function defaults(): State {
         hold: true,
         vibrato: null,
         // A resonant low pass closing down: the classic bass pluck
-        filter: { passband: FILTER_LOW, resonance: 10, cutoff: { points: [{ t: 0, w: 0xd0 }, { t: 25, w: 0x28 }], loop: null } },
+        filter: {
+          cutoff: { points: [{ t: 0, w: 0xd0 }, { t: 25, w: 0x28 }], loop: null },
+          resonance: { points: [{ t: 0, w: 10 }], loop: null },
+          types: [{ start: 0, passband: FILTER_LOW }],
+        },
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -159,6 +164,11 @@ function load(): State {
         ins.notes = (ins.notes ?? []).map((n) => ({ start: n.start, semis: n.semis }));
         ins.vibrato ??= null;
         ins.filter ??= null;
+        // A filter saved with one type and resonance: those, from the start
+        const old = ins.filter as unknown as { passband?: number; resonance: number | PulseShape } | null;
+        if (old && old.passband !== undefined && typeof old.resonance === 'number') {
+          ins.filter = { cutoff: ins.filter!.cutoff, resonance: { points: [{ t: 0, w: old.resonance }], loop: null }, types: [{ start: 0, passband: old.passband }] };
+        }
         // Bars that kept going until the note ended: now the waveform holds after its last bar
         const open = ins.bars.some((b) => b.end === null);
         if (ins.hold === undefined) ins.hold = open;
@@ -207,6 +217,7 @@ function undo(redo = false) {
   selectedPoint = -1;
   selectedNote = -1;
   selectedVibrato = false;
+  selectedType = -1;
   changed();
   renderInstruments();
 }
@@ -327,6 +338,8 @@ let selectedPoint = -1;
 let selectedNote = -1;
 /** Whether the vibrato is selected */
 let selectedVibrato = false;
+/** The selected filter type change, or -1 */
+let selectedType = -1;
 /** What is being dragged, for its look and the readout */
 let dragging: string | null = null;
 /** While an envelope handle is dragged it follows the pointer, and the setting it will land on is drawn */
@@ -343,6 +356,8 @@ function movePlayhead() {
   playheadLine.style.display = playhead >= 0 ? '' : 'none';
   playheadLine.setAttribute('x1', String(x(playhead)));
   playheadLine.setAttribute('x2', String(x(playhead)));
+  // The filter scope follows the note as it plays
+  if (state.filterOpen) updateScope();
 }
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number> = {}, parent?: Element): SVGElementTagNameMap[K] {
@@ -414,7 +429,7 @@ function inRoll(e: PointerEvent): boolean {
 
 /** The timeline's height: taller with sections open */
 function height(): number {
-  return filterTop() + PAD_BOTTOM + (state.filterOpen && shape().filter ? CUTOFF_H : 0);
+  return filterTop() + PAD_BOTTOM + (state.filterOpen && shape().filter ? CUTOFF_H + RES_H + TYPE_H : 0);
 }
 
 /** The filter's band: under the pitch and its rows */
@@ -422,6 +437,15 @@ const filterTop = () => notesTop() + PAD_BOTTOM + (state.notesOpen ? ROLL_H + VI
 /** The cutoff row's height, open */
 const CUTOFF_H = 80;
 const cutoffTop = () => filterTop() + PAD_BOTTOM;
+/** Resonance's row, and the type's, under the cutoff */
+const RES_H = 52;
+const resTop = () => cutoffTop() + CUTOFF_H;
+const TYPE_H = 40;
+const typeTop = () => resTop() + RES_H;
+
+function inTypeRow(e: PointerEvent): boolean {
+  return state.filterOpen && !!shape().filter && yAt(e) >= typeTop() && yAt(e) < typeTop() + TYPE_H;
+}
 
 /** The vibrato lane, under the notes */
 const VIB_H = 34;
@@ -444,7 +468,7 @@ function dataEnd(volume = true, waves = true): number {
   const s = shape();
   let end = 0;
   if (volume) end = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
-  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.start + 1), ...(s.filter?.cutoff.points.map((p) => p.t + 10) ?? []));
+  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.start + 1), ...(s.filter ? [...s.filter.cutoff.points, ...s.filter.resonance.points].map((p) => p.t + 10) : []), ...(s.filter?.types.map((c) => c.start + 10) ?? []));
   return Math.min(TOTAL, Math.max(5, end));
 }
 
@@ -603,7 +627,11 @@ function renderGutter() {
     add(vibTop(), VIB_H, ['Vibrato'], 'lane width rule-thin');
   }
   toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), 'rule');
-  if (state.filterOpen && shape().filter) add(cutoffTop(), CUTOFF_H, ['Cutoff'], 'lane width');
+  if (state.filterOpen && shape().filter) {
+    add(cutoffTop(), CUTOFF_H, ['Cutoff'], 'lane sub');
+    add(resTop(), RES_H, ['Resonance'], 'lane sub');
+    add(typeTop(), TYPE_H, ['Type'], 'lane sub');
+  }
 }
 
 /** Opens or folds the volume envelope. */
@@ -626,6 +654,7 @@ function openNotes(open: boolean, note = -1) {
   selectedPoint = -1;
   selectedNote = open ? note : -1;
   selectedVibrato = false;
+  selectedType = -1;
   persist();
   render();
 }
@@ -639,6 +668,7 @@ function openWaves(open: boolean, bar = -1) {
   selectedPoint = -1;
   selectedNote = -1;
   selectedVibrato = false;
+  selectedType = -1;
   persist();
   render();
 }
@@ -770,19 +800,72 @@ function drawFilter() {
     const pts = pulseLine(s.filter.cutoff, TOTAL).map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${py(p.w).toFixed(1)}`);
     el('polyline', { points: pts.join(' '), class: 'cutoff-preview' }, plot);
   }
-  const l = lane('cutoff');
-  if (l) {
+  for (const key of ['cutoff', 'resonance'] as const) {
+    const l = lane(key);
+    if (!l) continue;
     el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: l.top, y2: l.top, class: 'lane-line' }, plot);
     drawLine(l);
   }
+  if (state.filterOpen && s.filter) drawTypes();
   renderFilterControls();
 }
 
-const PASSBANDS: [number, string, string][] = [
-  [FILTER_LOW, 'Low', 'Low pass: lets the low end through, softening the top'],
-  [FILTER_BAND, 'Band', 'Band pass: just the frequencies around the cutoff'],
-  [FILTER_HIGH, 'High', 'High pass: lets the high end through, thinning the bottom'],
+/** The type row: a capsule for each type from its change to the next, showing its shape */
+function drawTypes() {
+  const f = shape().filter!;
+  const top = typeTop();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'lane-line' }, plot);
+  f.types.forEach((c, i) => {
+    const x1 = x(c.start);
+    const x2 = x(f.types[i + 1]?.start ?? TOTAL);
+    const g = el('g', { class: `filter-type${i === selectedType ? ' selected' : ''}`, 'data-type': i }, plot);
+    el('rect', { x: x1 + 1, y: top + 5, width: Math.max(2, x2 - x1 - 2), height: TYPE_H - 10, rx: 6, class: 'type-body' }, g);
+    if (x2 - x1 > 34) {
+      const icon = modeIcon(c.passband, 26, 14);
+      icon.setAttribute('x', String(x1 + 7));
+      icon.setAttribute('y', String(top + TYPE_H / 2 - 7));
+      g.append(icon);
+    }
+    if (x2 - x1 > 90) el('text', { x: x1 + 38, y: top + TYPE_H / 2 + 4, class: 'type-label' }, g).textContent = passbandText(c.passband);
+    const grip = Math.min(EDGE, (x2 - x1) / 3);
+    if (i > 0) el('rect', { x: x1 - 3, y: top + 5, width: grip + 3, height: TYPE_H - 10, class: 'bar-edge', 'data-type-edge': 'start' }, g);
+    if (f.types[i + 1]) el('rect', { x: x2 - grip, y: top + 5, width: grip + 3, height: TYPE_H - 10, class: 'bar-edge', 'data-type-edge': 'end' }, g);
+  });
+}
+
+const PASSBAND_NAMES: [number, string][] = [
+  [FILTER_LOW, 'Low'],
+  [FILTER_BAND, 'Band'],
+  [FILTER_HIGH, 'High'],
 ];
+
+function passbandText(bits: number): string {
+  if (bits === (FILTER_LOW | FILTER_HIGH)) return 'Notch';
+  return PASSBAND_NAMES.filter(([b]) => bits & b).map(([, n]) => n).join(' + ') || 'Silent';
+}
+
+/** The filter at a frame, as the player has it (from the trace), for the scope */
+let filterCache: { key: string; at: { passband: number; resonance: number; cutoff: number }[] } | null = null;
+function heardFilter(): { passband: number; resonance: number; cutoff: number }[] | null {
+  const a = audition();
+  const frames = Math.min(TOTAL, Math.ceil(dataEnd() * 2) + 100);
+  const key = JSON.stringify([a.tables[2] && [Array.from(a.tables[2].left), Array.from(a.tables[2].right)], frames]);
+  if (filterCache?.key === key) return filterCache.at;
+  const t = traceWith(a, frames);
+  if (!t) return null;
+  filterCache = { key, at: Array.from({ length: frames }, (_, f) => ({ passband: t.mode[f] & 0x70, resonance: t.routing[f] >> 4, cutoff: t.cutoff[f] })) };
+  return filterCache.at;
+}
+
+/** The scope under the timeline, and the frame it shows: the playhead, else the pointer over the filter, else the start */
+const scope = filterScope();
+let scopeHover = -1;
+function updateScope() {
+  const at = heardFilter();
+  if (!at || !shape().filter) return;
+  const f = playhead >= 0 ? playhead : scopeHover >= 0 ? scopeHover : selectedType >= 0 ? shape().filter!.types[selectedType]?.start ?? 0 : 0;
+  scope.set(at[Math.max(0, Math.min(at.length - 1, Math.round(f)))]);
+}
 
 /** Under the timeline while the filter is open: its type and resonance, or adding one. */
 function renderFilterControls() {
@@ -798,7 +881,11 @@ function renderFilterControls() {
     add.title = 'Filter this instrument: a low pass closing down, to start with';
     add.addEventListener('click', () => {
       before();
-      s.filter = { passband: FILTER_LOW, resonance: 8, cutoff: { points: [{ t: 0, w: 0xc0 }, { t: 25, w: 0x40 }], loop: null } };
+      s.filter = {
+        cutoff: { points: [{ t: 0, w: 0xc0 }, { t: 25, w: 0x40 }], loop: null },
+        resonance: { points: [{ t: 0, w: 8 }], loop: null },
+        types: [{ start: 0, passband: FILTER_LOW }],
+      };
       changed();
       playShape();
     });
@@ -809,62 +896,19 @@ function renderFilterControls() {
     return;
   }
   const f = s.filter;
-  const type = document.createElement('label');
-  type.className = 'vib-slider';
-  const types = document.createElement('div');
-  types.className = 'segmented small';
-  // Each passband switches on and off: mixed, they combine (low and high together make a notch)
-  for (const [bit, label, title] of PASSBANDS) {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.title = title;
-    b.classList.toggle('on', (f.passband & bit) !== 0);
-    b.addEventListener('click', () => {
-      const next = f.passband ^ bit;
-      if (!next) return;
-      before();
-      f.passband = next;
-      changed();
-      playShape();
-    });
-    types.append(b);
-  }
-  type.append('Type', types);
-  const res = document.createElement('label');
-  res.className = 'vib-slider';
-  const input = document.createElement('input');
-  input.type = 'range';
-  input.min = '0';
-  input.max = '15';
-  input.value = String(f.resonance);
-  const out = document.createElement('output');
-  const show = () => (out.textContent = f.resonance ? `${f.resonance} of 15` : 'None');
-  show();
-  let marked = false;
-  input.addEventListener('input', () => {
-    if (!marked) before();
-    marked = true;
-    f.resonance = Number(input.value);
-    show();
-    persist();
-    sendToPlayer();
-  });
-  input.addEventListener('change', () => {
-    marked = false;
-    playShape();
-  });
-  res.title = 'How much the filter rings at its cutoff';
-  res.append('Resonance', input, out);
-  const remove = document.createElement('button');
-  remove.className = 'mini danger';
-  remove.textContent = 'Remove filter';
-  remove.addEventListener('click', () => {
+  box.append(scope.el);
+  updateScope();
+  const remove2 = document.createElement('button');
+  remove2.className = 'mini danger';
+  remove2.textContent = 'Remove filter';
+  remove2.addEventListener('click', () => {
     before();
     s.filter = null;
     selectedPoint = -1;
+    selectedType = -1;
     changed();
   });
-  box.append(type, res, remove);
+  box.append(remove2);
 }
 
 /**
@@ -1175,7 +1219,7 @@ function drawWaveRepeat(top: number, bottom: number, withIcons: boolean, ghostBa
 const WIDTH_PAD = 7;
 
 /** The two lines of points over time: pulse width (under the pulse row) and the filter's cutoff. */
-type LineKey = 'pulse' | 'cutoff';
+type LineKey = 'pulse' | 'cutoff' | 'resonance';
 
 interface LineLane {
   key: LineKey;
@@ -1187,6 +1231,8 @@ interface LineLane {
   text: (v: number) => string;
   /** A level marked across it (a square wave's width) */
   mid: number | null;
+  /** Whether it has a repeat of its own (resonance shares the cutoff's) */
+  repeat: boolean;
 }
 
 const percentText = (v: number, max: number) => `${Math.round((v / max) * 100)}%`;
@@ -1196,10 +1242,13 @@ function lane(key: LineKey): LineLane | null {
   const s = shape();
   if (key === 'pulse') {
     const r = rows()?.find((row) => row.wave === null);
-    return r ? { key, top: r.top, h: r.h, max: PULSE_MAX, line: s.pulse, text: (v) => `Pulse width ${percentText(v, PULSE_MAX)}`, mid: SQUARE } : null;
+    return r ? { key, top: r.top, h: r.h, max: PULSE_MAX, line: s.pulse, text: (v) => `Pulse width ${percentText(v, PULSE_MAX)}`, mid: SQUARE, repeat: true } : null;
   }
   if (!state.filterOpen || !s.filter) return null;
-  return { key, top: cutoffTop(), h: CUTOFF_H, max: CUTOFF_MAX, line: s.filter.cutoff, text: (v) => `Cutoff ${percentText(v, CUTOFF_MAX)}`, mid: null };
+  if (key === 'resonance') {
+    return { key, top: resTop(), h: RES_H, max: RESONANCE_MAX, line: s.filter.resonance, text: (v) => `Resonance ${Math.round(v)} of 15`, mid: null, repeat: false };
+  }
+  return { key, top: cutoffTop(), h: CUTOFF_H, max: CUTOFF_MAX, line: s.filter.cutoff, text: (v) => `Cutoff ${percentText(v, CUTOFF_MAX)}`, mid: null, repeat: true };
 }
 
 const laneY = (l: LineLane, v: number) => l.top + WIDTH_PAD + (1 - v / l.max) * (l.h - 2 * WIDTH_PAD);
@@ -1213,7 +1262,7 @@ function laneValue(l: LineLane, e: PointerEvent): number {
 function laneUnder(target: Element, e: PointerEvent): LineLane | null {
   const key = target.closest<SVGElement>('[data-line]')?.dataset.line as LineKey | undefined;
   if (key) return lane(key);
-  for (const k of ['pulse', 'cutoff'] as const) {
+  for (const k of ['pulse', 'cutoff', 'resonance'] as const) {
     const l = lane(k);
     if (l && yAt(e) >= l.top && yAt(e) < l.top + l.h) return l;
   }
@@ -1230,7 +1279,8 @@ let selectedLine: LineKey = 'pulse';
 function drawLine(r: LineLane) {
   const plot = el('g', { class: `line-${r.key}` }, document.getElementById('plot')!);
   const width = x(TOTAL) + ORIGIN;
-  const { points, loop } = r.line;
+  const { points } = r.line;
+  const loop = r.repeat ? r.line.loop : null;
   // The repeat: the section that repeats shaded, its repeats fainter after
   // it, and its start an edge to drag from point to point
   if (loop !== null && loop < points.length - 1) {
@@ -1259,7 +1309,16 @@ function drawLine(r: LineLane) {
   const looping = loop !== null && loop < points.length - 1;
   if (looping) el('polyline', { points: line(pulseLine(r.line, TOTAL)), class: 'width-line faint' }, plot);
   el('polyline', { points: line(looping ? points : pulseLine(r.line, TOTAL)), class: 'width-line' }, plot);
-  if (!looping && points.length > 1) {
+  // Resonance plays as steps (16 levels, no sweep): drawn as the steps it takes
+  if (r.key === 'resonance') {
+    const stairs: string[] = [];
+    for (let f = 0; f <= TOTAL; f++) {
+      const v = Math.round(lineAt(r.line, f));
+      stairs.push(`${x(f).toFixed(1)},${laneY(r, v).toFixed(1)}`, `${x(f + 1).toFixed(1)},${laneY(r, v).toFixed(1)}`);
+    }
+    el('polyline', { points: stairs.join(' '), class: 'res-steps' }, plot);
+  }
+  if (r.repeat && !looping && points.length > 1) {
     // No repeat yet: its start waits at the end, to be pulled back from there
     const at = x(points[points.length - 1].t);
     const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '', 'data-line': r.key }, plot);
@@ -1296,6 +1355,10 @@ function renderReadout() {
     del.textContent = 'Delete';
     del.addEventListener('click', deleteNote);
     box.append(text, del);
+    return;
+  }
+  if (state.filterOpen && s.filter?.types[selectedType]) {
+    typeReadout(box);
     return;
   }
   if (lane(selectedLine)?.line.points[selectedPoint]) {
@@ -1410,6 +1473,49 @@ function deleteVibrato() {
   before();
   s.vibrato = null;
   selectedVibrato = false;
+  selectedType = -1;
+  changed();
+}
+
+/** The selected filter type: switches for low, band and high (they combine), its shape, and deleting the change. */
+function typeReadout(box: HTMLElement) {
+  const f = shape().filter!;
+  const i = selectedType;
+  const c = f.types[i];
+  const text = document.createElement('span');
+  text.textContent = `From ${timeText(c.start)}: ${passbandText(c.passband)}`;
+  const types = document.createElement('div');
+  types.className = 'segmented small';
+  for (const [bit, name] of PASSBAND_NAMES) {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.classList.toggle('on', (c.passband & bit) !== 0);
+    b.addEventListener('click', () => {
+      before();
+      c.passband ^= bit;
+      changed();
+      playShape();
+    });
+    types.append(b);
+  }
+  const icon = modeIcon(c.passband, 60, 26);
+  icon.classList.add('type-shape');
+  box.append(text, types, icon);
+  if (i > 0) {
+    const del = document.createElement('button');
+    del.className = 'mini danger';
+    del.textContent = 'Delete';
+    del.addEventListener('click', deleteType);
+    box.append(del);
+  }
+}
+
+function deleteType() {
+  const f = shape().filter;
+  if (!f || selectedType <= 0 || !f.types[selectedType]) return;
+  before();
+  f.types.splice(selectedType, 1);
+  selectedType = -1;
   changed();
 }
 
@@ -1444,6 +1550,7 @@ function deletePoint() {
   selectedPoint = -1;
   selectedNote = -1;
   selectedVibrato = false;
+  selectedType = -1;
   changed();
 }
 
@@ -1485,6 +1592,22 @@ function laneAt(e: PointerEvent): number {
   return waves.reduce((a, b) => (near(b) < near(a) ? b : a)).wave!;
 }
 
+
+// Over the filter, the scope shows the moment under the pointer
+plot.addEventListener('pointermove', (e) => {
+  if (!state.filterOpen || dragging) return;
+  const y = yAt(e);
+  const over = y >= filterTop() && y < height();
+  const next = over ? Math.max(0, Math.round(frameAt(e))) : -1;
+  if (next === scopeHover) return;
+  scopeHover = next;
+  updateScope();
+});
+plot.addEventListener('pointerleave', () => {
+  if (scopeHover < 0) return;
+  scopeHover = -1;
+  updateScope();
+});
 
 plot.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
@@ -1605,6 +1728,7 @@ plot.addEventListener('pointerdown', (e) => {
     selected = -1;
     selectedPoint = -1;
     selectedVibrato = false;
+    selectedType = -1;
     before();
     dragging = 'note';
     plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
@@ -1646,6 +1770,55 @@ plot.addEventListener('pointerdown', (e) => {
     selectedPoint = -1;
     selectedNote = -1;
     selectedVibrato = false;
+    selectedType = -1;
+  } else if (target.closest('[data-type]') || inTypeRow(e)) {
+    // A filter type: a click selects it; its middle moves it (with its end,
+    // so it keeps its length), either end moves on its own; double-clicking
+    // splits it there
+    const f = s.filter!;
+    const typeEl = target.closest<SVGGElement>('[data-type]');
+    const double = e.timeStamp - lastPress.time < 400 && Math.hypot(e.clientX - lastPress.x, e.clientY - lastPress.y) < 6;
+    lastPress = double ? { time: 0, x: 0, y: 0 } : { time: e.timeStamp, x: e.clientX, y: e.clientY };
+    if (double) {
+      const t = Math.max(1, Math.round(start));
+      if (!f.types.some((c) => c.start === t)) {
+        before();
+        f.types = [...f.types, { start: t, passband: typeAt(f.types, t) }].sort((a, b) => a.start - b.start);
+        selectedType = f.types.findIndex((c) => c.start === t);
+        changed();
+      }
+      return;
+    }
+    if (!typeEl) return;
+    const edge = target.getAttribute('data-type-edge');
+    const at = Number(typeEl.dataset.type);
+    selected = -1;
+    selectedPoint = -1;
+    selectedNote = -1;
+    selectedVibrato = false;
+    selectedType = at;
+    // The right end is the next change; the first change stays at the start
+    const i = edge === 'end' ? at + 1 : at;
+    const c = f.types[i];
+    const following = edge ? null : f.types[i + 1] ?? null;
+    if (i === 0 && !following) {
+      render();
+      return;
+    }
+    before();
+    const original = f.types.map((t) => ({ ...t }));
+    const lo = i > 0 ? original[i - 1].start + 1 : 0;
+    const beyond = original[i + (following ? 2 : 1)];
+    const hi = (beyond ? beyond.start - 1 : TOTAL - 1) - (following ? following.start - c.start : 0);
+    dragging = 'type';
+    plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
+    move = (e) => {
+      // The first type always starts with the note
+      if (i === 0) return;
+      const by = Math.max(lo, Math.min(hi, original[i].start + Math.round(frameAt(e) - start))) - original[i].start;
+      f.types = original.map((t, k) => (k === i || (following && k === i + 1) ? { ...t, start: t.start + by } : { ...t }));
+      render();
+    };
   } else if (target.closest('[data-loop-end-edge]') && laneUnder(target, e)) {
     // Where the repeat ends: the last point, moved in time only, and never
     // past the point before it
@@ -1703,6 +1876,7 @@ plot.addEventListener('pointerdown', (e) => {
     selected = -1;
     selectedNote = -1;
     selectedVibrato = false;
+    selectedType = -1;
     dragging = 'point';
     plot.style.cursor = 'grabbing';
     move = (e) => {
@@ -1722,6 +1896,7 @@ plot.addEventListener('pointerdown', (e) => {
     selectedPoint = -1;
     selectedNote = -1;
     selectedVibrato = false;
+    selectedType = -1;
     before();
     dragging = 'bar';
     // The pointer keeps the look it had over the bar or its end while dragging
@@ -1777,11 +1952,13 @@ plot.addEventListener('pointerdown', (e) => {
     selectedPoint = -1;
     selectedNote = -1;
     selectedVibrato = false;
+    selectedType = -1;
   } else {
     selected = -1;
     selectedPoint = -1;
     selectedNote = -1;
     selectedVibrato = false;
+    selectedType = -1;
     render();
     return;
   }
@@ -1902,6 +2079,7 @@ function deleteNote() {
   s.notes.splice(selectedNote, 1);
   selectedNote = -1;
   selectedVibrato = false;
+  selectedType = -1;
   changed();
 }
 
@@ -1997,6 +2175,7 @@ function pick(i: number) {
   selectedPoint = -1;
   selectedNote = -1;
   selectedVibrato = false;
+  selectedType = -1;
   renderInstruments();
   changed();
 }
@@ -2189,6 +2368,7 @@ window.addEventListener('keydown', (e) => {
       selectedPoint = -1;
       selectedNote = -1;
       selectedVibrato = false;
+      selectedType = -1;
       render();
     }
     if (typing(e)) (e.target as HTMLElement).blur();
@@ -2207,6 +2387,11 @@ window.addEventListener('keydown', (e) => {
   if ((e.key === 'Delete' || e.key === 'Backspace') && state.notesOpen && selectedNote >= 0) {
     e.preventDefault();
     deleteNote();
+    return;
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.filterOpen && selectedType > 0) {
+    e.preventDefault();
+    deleteType();
     return;
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && lane(selectedLine) && selectedPoint > 0) {

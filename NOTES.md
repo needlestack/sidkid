@@ -72,9 +72,13 @@ zoomable timeline, aiming for a GarageBand feel.
   The player counts the delay only on frames it runs effects (not a song row's first
   tick, nor rows that set the pitch), so the start is measured by tracing with and
   without; dragging picks the delay that lands nearest. Repeating pitches override it.
-- Filter: a fourth fold. Cutoff (0-255) is a line like pulse width (the two share one
-  editor, `LineLane`/`drawLine`, and one program builder, `lineProgram`); Type (low/band/
-  high bits, combinable) and Resonance sit under the timeline. The setup row routes voice 1
+- Filter: a fourth fold with three rows. Cutoff (0-255) is a line like pulse width (they
+  share one editor, `LineLane`/`drawLine`); Resonance is a line too, played as steps (16
+  levels, no sweep); Type is capsules with filter-shape icons, each holding until the next
+  (double-click splits). One filter program, so the cutoff's repeat is shared; setup rows
+  for type/resonance changes share a frame with a cutoff set (`filterProgram`). A scope
+  under the timeline shows the response at the playhead or the hovered moment, from the
+  engine trace. The setup row routes voice 1
   for the preview; the song editor must set the instrument's actual voice (and own the
   shared filter: see the song editor plan).
 - Still missing from Volume/Waveform: an instrument that lets go by itself (gate-off

@@ -828,3 +828,114 @@
 .filter-controls .hint {
   max-width: 60ch;
 }
+
+/* Resonance as the steps it plays, and the filter's types */
+.res-steps {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 1.2;
+  stroke-opacity: 0.55;
+  pointer-events: none;
+}
+
+.line-resonance .width-line {
+  stroke: var(--live);
+  stroke-opacity: 0.35;
+  stroke-dasharray: 3 3;
+}
+
+.line-resonance .width-point .dot {
+  stroke: var(--live);
+}
+
+.line-resonance .width-point:hover .dot,
+.line-resonance .width-point.selected .dot {
+  fill: var(--live);
+}
+
+.filter-type {
+  cursor: grab;
+  color: var(--live);
+}
+
+.type-body {
+  fill: var(--live);
+  fill-opacity: 0.14;
+  stroke: var(--live);
+  stroke-opacity: 0.6;
+}
+
+.filter-type.selected .type-body {
+  fill-opacity: 0.3;
+  stroke: var(--text);
+  stroke-opacity: 1;
+}
+
+.type-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.filter-type .mode-icon {
+  pointer-events: none;
+}
+
+.readout .type-shape {
+  color: var(--live);
+}
+
+/* The scope: the filter's response at a moment */
+.filter-scope {
+  display: grid;
+  gap: 4px;
+  color: var(--live);
+}
+
+.filter-scope .filter-graph {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.filter-scope .filter-area {
+  fill: var(--live);
+  opacity: 0.15;
+}
+
+.filter-scope .filter-line {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 2;
+}
+
+.filter-scope .filter-zero {
+  stroke: var(--border);
+  stroke-dasharray: 3 3;
+}
+
+.filter-scope .filter-mark {
+  stroke: var(--text);
+  stroke-opacity: 0.4;
+}
+
+.filter-scope .filter-axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.filter-scope .filter-axis.end {
+  text-anchor: end;
+}
+
+.filter-scope .filter-readout {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tl-gutter-row.lane.sub {
+  padding-left: 22px;
+  font-weight: 500;
+  color: var(--muted);
+}

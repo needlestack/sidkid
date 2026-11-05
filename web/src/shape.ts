@@ -77,16 +77,32 @@ export interface Shape {
 }
 
 /**
- * The filter as an instrument sets it: its passband (low, band, high bits),
- * resonance (0-15) and cutoff (0-255) over time, as a line like pulse width.
+ * The filter as an instrument sets it, over time: its cutoff (0-255) a line
+ * like pulse width, its resonance (0-15) a line too (played as steps: the
+ * chip has 16 levels and no sweep for them), and its type (low, band, high
+ * bits) a step from each change to the next. They make one program, so the
+ * cutoff's repeat is theirs too.
  */
 export interface FilterShape {
-  passband: number;
-  resonance: number;
   cutoff: PulseShape;
+  resonance: PulseShape;
+  types: { start: number; passband: number }[];
 }
 
 export const CUTOFF_MAX = 0xff;
+export const RESONANCE_MAX = 15;
+
+/** The filter type at a frame: the last change at or before it */
+export function typeAt(types: FilterShape['types'], t: number): number {
+  let passband = types[0]?.passband ?? 0;
+  for (const c of types) if (c.start <= t) passband = c.passband;
+  return passband;
+}
+
+/** A line's value at a frame (unrounded), holding after its last point, repeating from its loop */
+export function lineAt(line: PulseShape, t: number): number {
+  return widthOn(pulseLine(line, Math.max(t + 1, line.points[line.points.length - 1].t + 1)), t);
+}
 
 /** The parts of a shape that make its wave program */
 export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'>;
@@ -262,16 +278,64 @@ export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Prog
 }
 
 /**
- * The filter program: set the filter up (passband, resonance, the voice it
- * filters) with its first cutoff, both in the first frame, then the cutoff
- * line, as pulse width's.
+ * The filter program: the cutoff line as pulse width's, with the filter set
+ * up (type, resonance, the voice it filters) on its first frame and again
+ * wherever the type or resonance level changes. A setup row and a cutoff row
+ * share a frame, so each setup lands on its frame with the cutoff where the
+ * line has it, and the line goes on undisturbed. The cutoff's repeat sets
+ * everything up again as it comes round.
  */
 export function filterProgram(filter: FilterShape, name: string, voices = 1): Program {
-  const first = [
-    filterStep({ type: 'setup', passband: filter.passband, resonance: filter.resonance, voices }),
-    filterStep({ type: 'cutoff', cutoff: filter.cutoff.points[0].w }),
-  ];
-  return lineProgram(filter.cutoff, name, first, (cutoff) => filterStep({ type: 'cutoff', cutoff }), (sw) => filterStep({ type: 'sweep', ...sw }));
+  const res = (t: number) => Math.max(0, Math.min(RESONANCE_MAX, Math.round(lineAt(filter.resonance, t))));
+  const setup = (t: number) => filterStep({ type: 'setup', passband: typeAt(filter.types, t), resonance: res(t), voices });
+  const cut = filter.cutoff;
+  const last = cut.points[cut.points.length - 1].t;
+  const looping = cut.loop !== null && cut.loop < cut.points.length - 1;
+  // Frames where the setup changes: type changes, and resonance level steps
+  const changes = new Set<number>();
+  for (const c of filter.types) if (c.start > 0) changes.add(c.start);
+  const resEnd = Math.max(last, filter.resonance.points[filter.resonance.points.length - 1].t);
+  for (let t = 1; t <= resEnd + 1; t++) if (res(t) !== res(t - 1)) changes.add(t);
+  // Within a repeat they play each time round; without, the cutoff holds while later ones come
+  const end = looping ? last : Math.max(last, ...changes);
+  const times = [...changes].filter((t) => t <= end).sort((a, b) => a - b);
+  // The cutoff's corners, with a point at each setup change (on the line there)
+  const corners = cut.points.map((p) => ({ t: p.t, w: p.w, setup: false, loop: false }));
+  if (looping) corners[cut.loop!].loop = true;
+  if (!looping && end > last) corners.push({ t: end, w: cut.points[cut.points.length - 1].w, setup: false, loop: false });
+  for (const t of times) {
+    const at = corners.findIndex((c) => c.t >= t);
+    if (at >= 0 && corners[at].t === t) corners[at].setup = true;
+    else corners.splice(at < 0 ? corners.length : at, 0, { t, w: Math.round(lineAt(cut, t)), setup: true, loop: false });
+  }
+  const set = (cutoff: number) => filterStep({ type: 'cutoff', cutoff });
+  const steps: Step[] = [setup(0), set(corners[0].w)];
+  let back = 0;
+  const along = (i: number, f: number, frames: number) => corners[i].w + Math.round(((corners[i + 1].w - corners[i].w) * f) / frames);
+  for (let i = 0; i + 1 < corners.length; i++) {
+    const frames = Math.max(1, corners[i + 1].t - corners[i].t);
+    // Coming round again: everything set again on the stretch's first frame
+    const first = corners[i].loop ? 1 : 0;
+    if (first) {
+      back = steps.length;
+      steps.push(setup(corners[i].t + 1), set(along(i, 1, frames)));
+    }
+    // A setup change at the far end takes the last frame, with the cutoff set
+    // (unless that is the frame a repeat's first already set up)
+    const last = corners[i + 1].setup && !(first && frames === 1) ? 1 : 0;
+    const from = first ? along(i, 1, frames) : corners[i].w;
+    const rest = frames - first - last;
+    const to = last ? along(i, frames - 1, frames) : corners[i + 1].w;
+    if (rest > 0) {
+      const change = to - from;
+      if (fastestSweep(change) <= rest) for (const sw of sweepRows(change, rest)) steps.push(filterStep({ type: 'sweep', ...sw }));
+      else for (let f = first + 1; f <= frames - last; f++) steps.push(set(along(i, f, frames)));
+    }
+    if (last) steps.push(setup(corners[i + 1].t), set(corners[i + 1].w));
+  }
+  const program: Program = { name, steps, next: null };
+  if (looping) program.next = { program, step: back };
+  return program;
 }
 
 /** A line of points as program rows: `first` sets the start, then a set or sweep rows for each stretch. */

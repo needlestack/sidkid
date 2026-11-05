@@ -191,3 +191,44 @@ export function filterCurve(o: CurveOptions): HTMLElement {
   wrap.append(svg, readout);
   return wrap;
 }
+
+/**
+ * A wide picture of the filter's response at one moment, to follow a note
+ * as it plays: which frequencies get through, where the cutoff is, and how
+ * much it rings. `set` redraws it for a moment's type, cutoff and resonance.
+ */
+export function filterScope(w = 420, h = 120): { el: HTMLElement; set: (shape: FilterShape) => void } {
+  const wrap = document.createElement('div');
+  wrap.className = 'filter-scope';
+  const svg = el('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'filter-graph' });
+  const pad = 10;
+  const yy = (db: number) => pad + ((TOP_DB - Math.max(FLOOR_DB, Math.min(TOP_DB, db))) / (TOP_DB - FLOOR_DB)) * (h - 2 * pad);
+  const zero = el('line', { x1: pad, x2: w - pad, y1: yy(0), y2: yy(0), class: 'filter-zero' });
+  const area = el('path', { class: 'filter-area' });
+  const line = el('path', { class: 'filter-line' });
+  const mark = el('line', { class: 'filter-mark', y1: 4, y2: h - 4 });
+  const dark = el('text', { x: pad, y: h - 2, class: 'filter-axis' });
+  dark.textContent = 'low';
+  const bright = el('text', { x: w - pad, y: h - 2, class: 'filter-axis end' });
+  bright.textContent = 'high';
+  svg.append(zero, area, line, mark, dark, bright);
+  const readout = document.createElement('div');
+  readout.className = 'filter-readout';
+  const names: [number, string][] = [
+    [FILTER_LOW, 'Low'],
+    [FILTER_BAND, 'Band'],
+    [FILTER_HIGH, 'High'],
+  ];
+  const set = (shape: FilterShape) => {
+    const d = curvePath(shape, w, h, pad);
+    line.setAttribute('d', d);
+    area.setAttribute('d', `${d} L${w - pad},${h - pad} L${pad},${h - pad} Z`);
+    const cx = pad + ((shape.cutoff ?? 128) / 255) * (w - 2 * pad);
+    mark.setAttribute('x1', String(cx));
+    mark.setAttribute('x2', String(cx));
+    const type = names.filter(([bit]) => shape.passband & bit).map(([, n]) => n).join(' + ') || 'None (silent)';
+    readout.textContent = `${type} · cutoff ${shape.cutoff ?? '?'} · resonance ${shape.resonance}`;
+  };
+  wrap.append(svg, readout);
+  return { el: wrap, set };
+}
