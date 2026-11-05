@@ -731,14 +731,14 @@ function pullEnd(bars: Bar[]): number {
 function drawWaveRepeat(): () => void {
   const s = shape();
   if (!s.bars.length) return () => {};
+  // The waveform rows run together from the top, the width row below them
   const waveRows = rows()!.filter((r) => r.wave !== null);
   const top = waveRows[0].top;
+  const bottom = waveRows[waveRows.length - 1].top + waveRows[waveRows.length - 1].h;
   const edge = (at: number, which: string, cls = '') => {
     const g = el('g', { class: `width-loop-edge wave ${cls}${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
-    for (const r of waveRows) {
-      el('rect', { x: x(at) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, g);
-      el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, g);
-    }
+    el('rect', { x: x(at) - 6, y: top, width: 12, height: bottom - top, class: 'hit' }, g);
+    el('rect', { x: x(at) - 1.5, y: top + 2, width: 3, height: bottom - top - 4, rx: 1.5, class: 'edge-bar' }, g);
   };
   const icon = (at: number, which: string, label: string) => () => {
     const g = el('g', { class: 'width-loop-edge wave icon', [`data-${which}-edge`]: '' }, plot);
@@ -753,10 +753,8 @@ function drawWaveRepeat(): () => void {
   const from = s.waveLoop!;
   const end = loopEnd(s.bars)!;
   const period = end - from;
-  for (const r of waveRows) {
-    for (let t = end; t < TOTAL; t += period) el('rect', { x: x(t), y: r.top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: r.h - 2, class: 'wave-loop again' }, plot);
-    el('rect', { x: x(from), y: r.top + 1, width: x(end) - x(from), height: r.h - 2, class: 'wave-loop' }, plot);
-  }
+  for (let t = end; t < TOTAL; t += period) el('rect', { x: x(t), y: top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: bottom - top - 2, class: 'wave-loop again' }, plot);
+  el('rect', { x: x(from), y: top + 1, width: x(end) - x(from), height: bottom - top - 2, class: 'wave-loop' }, plot);
   // The bars as they come round again, faint
   for (let n = 1; end + (n - 1) * period < TOTAL; n++) {
     for (const b of s.bars) {

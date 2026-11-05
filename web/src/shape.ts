@@ -5,8 +5,8 @@
 
 import { fastestSweep, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
 
-/** The waveform rows, top to bottom. */
-export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_PULSE, WAVE_NOISE];
+/** The waveform rows, top to bottom: pulse last, so its width row sits under everything */
+export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_NOISE, WAVE_PULSE];
 
 /** A waveform playing for a while: frames from the start of the note. */
 export interface Bar {
