@@ -191,11 +191,7 @@
 }
 
 .env-handle {
-  cursor: ew-resize;
-}
-
-.env-handle[data-drag='ds'] {
-  cursor: move;
+  cursor: default;
 }
 
 /* Arrows for the ways a dot moves: on hover, and round the dot in hand */
@@ -238,9 +234,8 @@
 
 .env-grip circle {
   fill: var(--accent);
-  fill-opacity: 0.35;
   stroke: var(--accent);
-  stroke-width: 1.5;
+  stroke-width: 2.5;
 }
 
 .env-ghostline {

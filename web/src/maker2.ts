@@ -206,13 +206,6 @@ function releaseEnd(ad: number, sr: number, keyUp: number): number {
   return firstFrame(curve, keyUp, (v) => v < 0.01) ?? frames;
 }
 
-/** The value (0-15) whose position is nearest a frame. */
-function nearest(position: (v: number) => number, frame: number): number {
-  let best = 0;
-  for (let v = 1; v < 16; v++) if (Math.abs(position(v) - frame) < Math.abs(position(best) - frame)) best = v;
-  return best;
-}
-
 function timeText(frames: number): string {
   const s = frames / FPS;
   if (s < 1) return `${Math.round(s * 1000)} ms`;
@@ -238,8 +231,6 @@ let dragging: string | null = null;
  * setting it will land on and, greyed out, the next one the other side.
  */
 let free: { key: string; f: number; v: number; ghosts: { ad: number; sr: number }[] } | null = null;
-/** Which way the pointer last moved while dragging a dot, sideways and up or down, and where it was */
-const heading = { x: 0, y: 0, px: 0, py: 0 };
 let playhead = -1;
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number> = {}, parent?: Element): SVGElementTagNameMap[K] {
@@ -360,36 +351,42 @@ function drawVolume(curve: Float32Array) {
   if (dEnd > state.keyUp) el('path', { d: areaPath(held, state.keyUp, Math.min(TOTAL, dEnd + 4)), class: 'env-held' }, plot);
   el('path', { d: line, class: 'env-line' }, plot);
 
-  const above = (v: number) => plotY(v) - 11;
-  const below = (v: number) => plotY(v) + 20;
-  // The next setting the way the dot is heading, greyed out; its value
-  // goes under it, so it doesn't run into the one it will land on
+  // Labels are centred over (or under) their dot, kept inside the timeline
+  const text = (parent: Element, cx: number, y: number, content: string, cls = '') => {
+    const half = content.length * 3.3 + 2;
+    const t = el('text', { x: Math.max(half, Math.min(x(TOTAL) + ORIGIN - half, cx)), y, 'text-anchor': 'middle', class: cls }, parent);
+    t.textContent = content;
+  };
+  const above = (v: number) => plotY(v) - 12;
+  const below = (v: number) => plotY(v) + 21;
+  // While a dot is dragged, the other setting either side of the pointer,
+  // greyed out with its value underneath
   if (free) {
     for (const g of free.ghosts) {
       el('path', { d: areaPath(level(g.ad, g.sr, state.keyUp), 0, Math.min(TOTAL, releaseEnd(g.ad, g.sr, state.keyUp) + 2)), class: 'env-ghostline' }, plot);
       const p = handlePos(free.key, g.ad, g.sr);
       el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'env-ghostdot' }, plot);
       // Decay and sustain show only the value they will land on
-      if (free.key !== 'ds') el('text', { x: x(p.f) + 10, y: below(p.v), class: 'env-ghostlabel' }, plot).textContent = handleText(free.key, g.ad, g.sr);
+      if (free.key !== 'ds') text(plot, x(p.f), below(p.v), handleText(free.key, g.ad, g.sr), 'env-ghostlabel');
     }
   }
   for (const key of ['a', 'ds', 'r']) {
     const p = handlePos(key, s.ad, s.sr);
     const label = handleText(key, s.ad, s.sr);
     const held = free?.key === key;
-    const g = el('g', { class: `env-handle${held ? ' dragging' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
+    const g = el('g', { class: `env-handle${held ? ' held' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
     el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
     el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
     if (!held) arrows(g, x(p.f), plotY(p.v), key === 'ds');
     // Decay is a time, above the line; sustain a level, below it
     if (key === 'ds') {
-      el('text', { x: x(p.f) + 10, y: above(p.v) }, g).textContent = envText.d(s.ad & 15);
-      el('text', { x: x(p.f) + 10, y: below(p.v) }, g).textContent = envText.s(s.sr >> 4);
-    } else el('text', { x: x(p.f) + 10, y: above(p.v) }, g).textContent = label;
-    // The dot in hand, under the pointer, with the ways it moves
+      text(g, x(p.f), above(p.v), envText.d(s.ad & 15));
+      text(g, x(p.f), below(p.v), envText.s(s.sr >> 4));
+    } else text(g, x(p.f), above(p.v), label);
+    // The dot in hand stays selected under the pointer, with the ways it moves
     if (held) {
       const grip = el('g', { class: 'env-grip' }, plot);
-      el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 7 }, grip);
+      el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 6 }, grip);
       arrows(grip, x(free!.f), plotY(free!.v), key === 'ds');
     }
   }
@@ -554,8 +551,8 @@ plot.addEventListener('pointerdown', (e) => {
   if (handle) {
     const key = handle.dataset.drag!;
     dragging = key;
-    Object.assign(heading, { x: 0, y: 0, px: e.clientX, py: e.clientY });
-    plot.style.cursor = key === 'ds' ? 'move' : 'ew-resize';
+    // Selected from the moment it is grabbed
+    if (key !== 'keyup') free = { key, ...handlePos(key, s.ad, s.sr), ghosts: [] };
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
@@ -630,7 +627,6 @@ plot.addEventListener('pointerdown', (e) => {
     plot.removeEventListener('pointercancel', onUp);
     dragging = null;
     free = null;
-    plot.style.cursor = '';
     if (moved) {
       changed();
       playShape();
@@ -650,44 +646,39 @@ function dragHandle(key: string, e: PointerEvent) {
   const s = shape();
   const f = frameAt(e);
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
-  // Which way it is heading: a setting behind it isn't shown unless it turns back
-  if (Math.abs(e.clientX - heading.px) >= 1) {
-    heading.x = Math.sign(e.clientX - heading.px);
-    heading.px = e.clientX;
-  }
-  if (Math.abs(e.clientY - heading.py) >= 1) {
-    heading.y = -Math.sign(e.clientY - heading.py);
-    heading.py = e.clientY;
-  }
-  const ahead = (n: number, way: number): number | null => {
-    const o = n + way;
-    return way && o >= 0 && o < 16 ? o : null;
+  // The settings either side of the pointer: the nearer it lands on, the
+  // other is shown greyed out. Right on a setting, there is only that one.
+  const between = (position: (v: number) => number, at: number, pixels = state.zoom): [number, number | null] => {
+    let lo = -1;
+    for (let v = 0; v < 16; v++) if (position(v) <= at) lo = v;
+    if (lo < 0) return [0, null];
+    if (lo === 15) return [15, null];
+    const near = at - position(lo) <= position(lo + 1) - at ? lo : lo + 1;
+    const other = near === lo ? lo + 1 : lo;
+    return [near, Math.abs(position(near) - at) * pixels < 1 ? null : other];
   };
   const ghosts: { ad: number; sr: number }[] = [];
   let v = 0;
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
   else if (key === 'a') {
-    const n = nearest(attackFrames, f);
+    const [n, o] = between(attackFrames, f);
     s.ad = (n << 4) | d;
-    const o = ahead(n, heading.x);
     if (o !== null) ghosts.push({ ad: (o << 4) | d, sr: s.sr });
     v = 1;
   } else if (key === 'ds') {
     v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD_TOP) / LEVEL_H));
-    const ns = Math.round(v * 15);
+    // Sustain levels are evenly spaced, 1/15 apart
+    const [ns, os] = between((sv) => sv / 15, v, LEVEL_H);
     const decayAt = (dv: number) => decayEnd(a, dv, ns);
-    const nd = nearest(decayAt, f);
+    const [nd, od] = between(decayAt, f);
     s.ad = (a << 4) | nd;
     s.sr = (ns << 4) | r;
-    const od = ahead(nd, heading.x);
     if (od !== null) ghosts.push({ ad: (a << 4) | od, sr: s.sr });
-    const os = ahead(ns, heading.y);
     if (os !== null) ghosts.push({ ad: s.ad, sr: (os << 4) | r });
   } else if (key === 'r') {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
-    const n = nearest(releaseAt, f);
+    const [n, o] = between(releaseAt, f);
     s.sr = (sus << 4) | n;
-    const o = ahead(n, heading.x);
     if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
   }
   free = key === 'keyup' ? null : { key, f: Math.max(0, f), v, ghosts };
