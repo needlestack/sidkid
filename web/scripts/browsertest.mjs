@@ -452,6 +452,21 @@ try {
   const env = await m2.evaluate(() => window.maker2.state().instruments[0]);
   report(env.sr >> 4 < 10 && (env.ad & 15) === 9, 'maker2 drag the sustain', `sustain ${env.sr >> 4}, decay ${env.ad & 15}`);
 
+  // Clicking the waveform strip under the volume opens the rows there, to draw in
+  const strip = await m2.$eval('[data-span="0"] rect', (e) => {
+    const r = e.getBoundingClientRect();
+    return [r.x + 30, r.y + r.height / 2];
+  });
+  await m2.mouse.click(...strip);
+  const openRowY = await m2.evaluate(() => document.querySelector('.lane-line').getBoundingClientRect().top - document.getElementById('plot').getBoundingClientRect().top + 20);
+  await dragTo(await plotPoint(40, openRowY), await plotPoint(50, openRowY));
+  const folded = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    return `${s.waveOpen ? 'open' : 'closed'} ${JSON.stringify(s.instruments[0].bars.find((b) => b.wave === 0x10))}`;
+  });
+  report(folded === 'open {"wave":16,"start":40,"end":50}', 'maker2 draw under the volume', folded);
+  await m2.click('.tl-gutter-row.toggle');
+
   // Drawing along the triangle row adds a bar there
   await m2.click('#tabs [data-tab=wave]');
   await dragTo(await plotPoint(10, 24 + 24 + 24), await plotPoint(30, 24 + 24 + 24));

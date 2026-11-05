@@ -112,6 +112,27 @@
   line-height: 1;
 }
 
+.tl-gutter-row.toggle {
+  cursor: pointer;
+  gap: 4px;
+}
+
+.tl-gutter-row.toggle:hover {
+  color: var(--text);
+}
+
+.twisty {
+  display: inline-block;
+  width: 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.strip-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
 .tl-gutter-row.rule {
   border-top: 1px solid var(--border);
 }

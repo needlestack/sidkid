@@ -27,10 +27,10 @@ const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
 const PLOT = 244;
-const HEIGHT = RULER + PLOT;
 /** In the waveform tab, the strip above the rows showing what is heard */
 const HEARD = 24;
-const LANE_H = (PLOT - HEARD) / LANES.length;
+/** Each waveform row's height when the rows open under the volume envelope */
+const OPEN_LANE_H = 40;
 /** Room above full volume and below silence for the dots' labels */
 const PAD_TOP = 24;
 const PAD_BOTTOM = 8 + HEARD;
@@ -57,6 +57,8 @@ interface State {
   zoom: number;
   /** When the key goes up in the picture and when Play lets go, in frames */
   keyUp: number;
+  /** Whether the waveform rows are open under the volume envelope */
+  waveOpen: boolean;
 }
 
 function defaults(): State {
@@ -87,6 +89,7 @@ function defaults(): State {
     tab: 'volume',
     zoom: 0,
     keyUp: 50,
+    waveOpen: false,
   };
 }
 
@@ -244,7 +247,7 @@ let origin = 0;
 let grabOffset = 0;
 let playhead = -1;
 /** Kept from one drawing to the next and moved on its own, so playing doesn't redraw what is under the pointer */
-const playheadLine = el('line', { y1: 0, y2: HEIGHT, class: 'tl-playhead' });
+const playheadLine = el('line', { y1: 0, class: 'tl-playhead' });
 
 function movePlayhead() {
   playheadLine.style.display = playhead >= 0 ? '' : 'none';
@@ -264,7 +267,20 @@ const ORIGIN = 16;
 const x = (f: number) => ORIGIN + f * state.zoom;
 const LEVEL_H = PLOT - PAD_TOP - PAD_BOTTOM;
 const plotY = (v: number) => RULER + PAD_TOP + (1 - v) * LEVEL_H;
-const laneTop = (i: number) => RULER + HEARD + i * LANE_H;
+
+/** Where the waveform rows are, if they are shown: their top and each row's height. */
+function rows(): { top: number; h: number } | null {
+  if (state.tab === 'wave') return { top: RULER + HEARD, h: (PLOT - HEARD) / LANES.length };
+  return state.waveOpen ? { top: RULER + PLOT, h: OPEN_LANE_H } : null;
+}
+
+/** The timeline's height: taller with the waveform rows open under the volume */
+function height(): number {
+  const r = rows();
+  return state.tab === 'volume' && r ? r.top + r.h * LANES.length : RULER + PLOT;
+}
+
+const laneTop = (i: number) => rows()!.top + i * rows()!.h;
 
 function minZoom() {
   return Math.max(0.5, (scroller.clientWidth - 2 * ORIGIN) / TOTAL);
@@ -292,13 +308,15 @@ function render() {
   if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
   $('tab-hint').textContent =
     state.tab === 'volume'
-      ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up. Drag “key up” to hold the note longer.'
+      ? `Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.${state.waveOpen ? ' Below, drag along a row to draw a waveform, or drag bars to move and resize them.' : ''}`
       : 'Drag along a row to draw a waveform; drag bars to move them, or their ends to resize. Bars that overlap play together.';
 
   const width = x(TOTAL) + ORIGIN;
+  const HEIGHT = height();
   plot.setAttribute('width', String(width));
   plot.setAttribute('height', String(HEIGHT));
   plot.setAttribute('viewBox', `0 0 ${width} ${HEIGHT}`);
+  playheadLine.setAttribute('y2', String(HEIGHT));
   plot.replaceChildren();
   plot.dataset.tab = state.tab;
 
@@ -336,7 +354,7 @@ function render() {
 function renderGutter() {
   const g = $('gutter');
   g.replaceChildren();
-  g.style.height = `${HEIGHT}px`;
+  g.style.height = `${height()}px`;
   const add = (top: number, height: number, content: (string | Node)[], cls = '') => {
     const d = document.createElement('div');
     d.className = `tl-gutter-row ${cls}`;
@@ -344,16 +362,38 @@ function renderGutter() {
     d.style.height = `${height}px`;
     d.append(...content);
     g.append(d);
+    return d;
   };
   if (state.tab === 'volume') {
     add(0, RULER, ['Volume'], 'heading');
     // Each level's number sits just above its line
     for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-    add(FLOOR, PAD_BOTTOM, ['Waveform'], 'heard-label rule');
-  } else {
-    add(RULER, HEARD, ['You hear'], 'heard-label');
-    LANES.forEach((w, i) => add(laneTop(i), LANE_H, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
-  }
+    // Opens and closes the waveform rows underneath
+    const twisty = document.createElement('span');
+    twisty.className = 'twisty';
+    twisty.textContent = state.waveOpen ? '▾' : '▸';
+    const toggle = add(FLOOR, PAD_BOTTOM, [twisty, 'Waveform'], 'heard-label rule toggle');
+    toggle.setAttribute('role', 'button');
+    toggle.setAttribute('aria-expanded', String(state.waveOpen));
+    toggle.tabIndex = 0;
+    toggle.addEventListener('click', () => openWaves(!state.waveOpen));
+    toggle.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+      openWaves(!state.waveOpen);
+    });
+  } else add(RULER, HEARD, ['You hear'], 'heard-label');
+  const r = rows();
+  if (r) LANES.forEach((w, i) => add(laneTop(i), r.h, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
+}
+
+/** Opens or closes the waveform rows under the volume envelope, selecting a bar or none. */
+function openWaves(open: boolean, bar = -1) {
+  state.waveOpen = open;
+  selected = open ? bar : -1;
+  persist();
+  render();
 }
 
 function areaPath(curve: Float32Array, from: number, to: number): string {
@@ -393,7 +433,10 @@ function drawVolume(curve: Float32Array) {
   const below = (v: number) => plotY(v) + 21;
   // A thin line at silence, between the envelope and the waveform strip
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: FLOOR, y2: FLOOR, class: 'heard-rule' }, plot);
+  // The strip as a whole opens and closes the waveform rows
+  el('rect', { x: 0, y: FLOOR, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
   drawHeard(VOLUME_HEARD);
+  if (state.waveOpen) drawBars();
 
   // Attack, decay and release are times: dots that move sideways, labelled
   // above. Sustain is a level, its dot at the key going up: up and down
@@ -485,16 +528,21 @@ function drawWaves(curve: Float32Array) {
   for (let i = 0; i < curve.length; i += 2) pts.push(`${x(i / ENV_STEPS).toFixed(1)},${gy(curve[i]).toFixed(1)}`);
   if (ghost) el('path', { d: `M${pts.join('L')}L${x(TOTAL)},${gy(0)}L${x(0)},${gy(0)}Z`, class: 'env-ghost' }, plot);
 
-  LANES.forEach((_, i) => el('line', { x1: 0, x2: x(TOTAL), y1: laneTop(i), y2: laneTop(i), class: 'lane-line' }, plot));
-
   drawHeard(RULER);
+  drawBars();
+}
 
+/** The waveform rows, and the bars in them, wherever the rows are. */
+function drawBars() {
+  const s = shape();
+  const r = rows()!;
+  LANES.forEach((_, i) => el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: laneTop(i), y2: laneTop(i), class: 'lane-line' }, plot));
   s.bars.forEach((b, i) => {
     const lane = LANES.indexOf(b.wave);
     const x1 = x(b.start);
     const x2 = x(b.end ?? TOTAL);
     const y = laneTop(lane) + 5;
-    const h = LANE_H - 10;
+    const h = r.h - 10;
     const g = el('g', { class: `bar ${LANE_COLORS[b.wave]}${i === selected ? ' selected' : ''}${b.end === null ? ' open' : ''}`, 'data-bar': i }, plot);
     el('rect', { x: x1, y, width: Math.max(2, x2 - x1), height: h, rx: 5, class: 'bar-body' }, g);
     if (b.end === null) {
@@ -514,7 +562,7 @@ function renderReadout() {
   const box = $('readout');
   box.replaceChildren();
   const s = shape();
-  if (state.tab === 'volume') {
+  if (state.tab === 'volume' && !(state.waveOpen && s.bars[selected])) {
     const parts = [envText.a(s.ad >> 4), envText.d(s.ad & 15), envText.s(s.sr >> 4), envText.r(s.sr & 15), `key up after ${timeText(state.keyUp)}`];
     box.textContent = parts.join(' · ');
     return;
@@ -577,7 +625,8 @@ function yAt(e: PointerEvent): number {
 }
 
 function laneAt(e: PointerEvent): number {
-  return Math.max(0, Math.min(LANES.length - 1, Math.floor((yAt(e) - RULER - HEARD) / LANE_H)));
+  const r = rows()!;
+  return Math.max(0, Math.min(LANES.length - 1, Math.floor((yAt(e) - r.top) / r.h)));
 }
 
 plot.addEventListener('pointerdown', (e) => {
@@ -593,13 +642,17 @@ plot.addEventListener('pointerdown', (e) => {
   let moved = false;
   const span = target.closest<SVGGElement>('[data-span]');
 
-  if (span) {
-    // A stretch of what is heard: its first bar, in the waveform tab
-    const at = Number(span.dataset.span);
-    selected = s.bars.findIndex((b) => b.start <= at && at < (b.end ?? Infinity));
-    state.tab = 'wave';
-    persist();
-    render();
+  const strip = target.closest('[data-strip]');
+  if (span || strip) {
+    // The waveform strip under the volume opens the rows (picking the bar
+    // clicked) or closes them; in the waveform tab it picks the bar
+    const at = span ? Number(span.dataset.span) : -1;
+    const bar = s.bars.findIndex((b) => b.start <= at && at < (b.end ?? Infinity));
+    if (state.tab === 'volume') openWaves(!state.waveOpen, bar);
+    else {
+      selected = bar;
+      render();
+    }
     return;
   } else if (handle) {
     const key = handle.dataset.drag!;
@@ -611,7 +664,7 @@ plot.addEventListener('pointerdown', (e) => {
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
-  } else if (state.tab === 'wave' && barEl) {
+  } else if (rows() && barEl) {
     const i = Number(barEl.dataset.bar);
     const original = s.bars;
     const bar = original[i];
@@ -644,7 +697,7 @@ plot.addEventListener('pointerdown', (e) => {
       selected = bars.indexOf(next);
       render();
     };
-  } else if (state.tab === 'wave' && yAt(e) > RULER + HEARD) {
+  } else if (rows() && yAt(e) > rows()!.top) {
     // Drawing a new bar along a row
     const wave = LANES[laneAt(e)];
     const original = s.bars;
@@ -1029,7 +1082,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || typing(e) || e.repeat) return;
-  if ((e.key === 'Delete' || e.key === 'Backspace') && state.tab === 'wave' && selected >= 0) {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && rows() && selected >= 0) {
     e.preventDefault();
     deleteSelected();
     return;
