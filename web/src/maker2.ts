@@ -1143,6 +1143,7 @@ function vibratoReadout(box: HTMLElement) {
   const text = document.createElement('span');
   text.textContent = from === null ? 'Vibrato: not heard here (the pitch is set every frame)' : `Vibrato from ${timeText(from)}`;
   const size = () => vibratoSize(v, test.note);
+  const outputs: (() => void)[] = [];
   const range = (label: string, value: number, min: number, max: number, show: () => string, set: (n: number) => void) => {
     const l = document.createElement('label');
     l.className = 'vib-slider';
@@ -1153,12 +1154,14 @@ function vibratoReadout(box: HTMLElement) {
     input.value = String(value);
     const out = document.createElement('output');
     out.textContent = show();
+    outputs.push(() => (out.textContent = show()));
     let marked = false;
     input.addEventListener('input', () => {
       if (!marked) before();
       marked = true;
       set(Number(input.value));
-      out.textContent = show();
+      // The depth either way grows with the time between turns, so every readout follows
+      for (const refresh of outputs) refresh();
       persist();
       sendToPlayer();
       // Not the controls: rebuilding them would pull the slider out from under the pointer
@@ -1171,14 +1174,51 @@ function vibratoReadout(box: HTMLElement) {
     l.append(label, input, out);
     return l;
   };
-  // Fewer frames between turns is faster, and fewer halvings of a semitone deeper, so both run backwards
-  const speed = range('Speed', -v.turn, -15, -1, () => `${size().rate.toFixed(1)} a second`, (n) => (v.turn = -n));
-  const depth = range('Depth', -v.depth, -8, 0, () => `± ${pitchText(size().depth)}`, (n) => (v.depth = -n));
+  // Fewer frames between turns is faster, so it runs backwards. The usual
+  // ranges stretch to take in whatever a loaded song has.
+  const speed = range('Speed', -v.turn, -Math.max(15, v.turn), -Math.min(1, v.turn), () => `${size().rate.toFixed(1)} a second`, (n) => (v.turn = -n));
+  // The same on every note: fewer halvings of a semitone's step are deeper.
+  // Wider on low notes: a fixed amount, whose size depends on the note.
+  const depth = v.even
+    ? range('Depth', -v.depth, -Math.max(8, v.depth), 0, () => `± ${pitchText(size().depth)}`, (n) => (v.depth = -n))
+    : range('Depth', v.depth, Math.min(1, v.depth), 255, () => `± ${pitchText(size().depth)} on ${noteName(test.note)}`, (n) => (v.depth = n));
+  const kind = document.createElement('div');
+  kind.className = 'segmented small vib-kind';
+  for (const [even, label, title] of [
+    [true, 'Same on every note', 'The wobble is the same size on every note'],
+    [false, 'Wider on low notes', 'A fixed amount, as GoatTracker usually has it: wider on low notes, narrower on high ones'],
+  ] as const) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    b.classList.toggle('on', v.even === even);
+    b.addEventListener('click', () => {
+      if (v.even === even) return;
+      before();
+      Object.assign(v, convertWobble(v, even));
+      changed();
+      playShape();
+    });
+    kind.append(b);
+  }
   const del = document.createElement('button');
   del.className = 'mini danger';
   del.textContent = 'Delete';
   del.addEventListener('click', deleteVibrato);
-  box.append(text, speed, depth, del);
+  box.append(text, speed, depth, kind, del);
+}
+
+/** The same vibrato the other way: the depth that comes closest on the test note. */
+function convertWobble(w: Wobble, even: boolean): Wobble {
+  if (w.even === even) return w;
+  const want = vibratoSize(w, test.note).depth;
+  let best = { ...w, even, depth: even ? 3 : 32 };
+  const options = even ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : Array.from({ length: 255 }, (_, i) => i + 1);
+  for (const depth of options) {
+    const next = { ...w, even, depth };
+    if (Math.abs(vibratoSize(next, test.note).depth - want) < Math.abs(vibratoSize(best, test.note).depth - want)) best = next;
+  }
+  return best;
 }
 
 function deleteVibrato() {
