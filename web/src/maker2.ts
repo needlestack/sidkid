@@ -308,13 +308,21 @@ function minZoom() {
 }
 
 /**
- * Zooms around the middle of the instrument: it stays where it is on
+ * Zooms around a point in the view (pinching zooms around the pointer), or
+ * else around the middle of the instrument: it stays where it is on
  * screen, or comes to the middle of the view if it was out of sight.
  */
-function setZoom(z: number) {
-  const mid = dataEnd() / 2;
-  let at = x(mid) - scroller.scrollLeft;
-  if (at < 0 || at > scroller.clientWidth) at = scroller.clientWidth / 2;
+function setZoom(z: number, pointer?: number) {
+  let mid: number;
+  let at: number;
+  if (pointer !== undefined) {
+    at = pointer;
+    mid = (scroller.scrollLeft + pointer - ORIGIN) / state.zoom;
+  } else {
+    mid = dataEnd() / 2;
+    at = x(mid) - scroller.scrollLeft;
+    if (at < 0 || at > scroller.clientWidth) at = scroller.clientWidth / 2;
+  }
   state.zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, z));
   render();
   scroller.scrollLeft = x(mid) - at;
@@ -906,7 +914,7 @@ scroller.addEventListener(
     // Pinching, or scrolling with ⌘/Ctrl, zooms around the pointer
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    setZoom(state.zoom * Math.exp(-e.deltaY * 0.01));
+    setZoom(state.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - scroller.getBoundingClientRect().left);
   },
   { passive: false },
 );
