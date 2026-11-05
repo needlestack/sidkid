@@ -26,18 +26,17 @@ const TEST_INSTRUMENT = 1;
 const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
-const PLOT = 244;
+const PLOT = 260;
 /** In the waveform tab, the strip above the rows showing what is heard */
 const HEARD = 24;
 /** Each waveform row's height when the rows open under the volume envelope */
 const OPEN_LANE_H = 40;
 /** Room above full volume and below silence for the dots' labels */
-const PAD_TOP = 24;
+const PAD_TOP = 40;
 const PAD_BOTTOM = 8 + HEARD;
 /** In the volume tab, the strip under silence showing what is heard */
-const FLOOR = RULER + PLOT - PAD_BOTTOM;
-/** In the volume tab, the strip's top: centred in the band between silence and the bottom */
-const VOLUME_HEARD = FLOOR + (PAD_BOTTOM - HEARD) / 2;
+/** The volume envelope's height when folded into a preview */
+const VOLUME_PREVIEW = 36;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 /**
@@ -57,6 +56,8 @@ interface State {
   zoom: number;
   /** When the key goes up in the picture and when Play lets go, in frames */
   keyUp: number;
+  /** Whether the volume envelope is open, or folded into a preview */
+  volumeOpen: boolean;
   /** Whether the waveform rows are open under the volume envelope */
   waveOpen: boolean;
 }
@@ -89,6 +90,7 @@ function defaults(): State {
     tab: 'volume',
     zoom: 0,
     keyUp: 50,
+    volumeOpen: true,
     waveOpen: false,
   };
 }
@@ -271,13 +273,19 @@ const plotY = (v: number) => RULER + PAD_TOP + (1 - v) * LEVEL_H;
 /** Where the waveform rows are, if they are shown: their top and each row's height. */
 function rows(): { top: number; h: number } | null {
   if (state.tab === 'wave') return { top: RULER + HEARD, h: (PLOT - HEARD) / LANES.length };
-  return state.waveOpen ? { top: RULER + PLOT, h: OPEN_LANE_H } : null;
+  return state.waveOpen ? { top: floor() + PAD_BOTTOM, h: OPEN_LANE_H } : null;
 }
 
 /** The timeline's height: taller with the waveform rows open under the volume */
 function height(): number {
   const r = rows();
-  return state.tab === 'volume' && r ? r.top + r.h * LANES.length : RULER + PLOT;
+  if (state.tab !== 'volume') return RULER + PLOT;
+  return r ? r.top + r.h * LANES.length : floor() + PAD_BOTTOM;
+}
+
+/** In the volume tab, the line at silence, under the envelope or its preview, with the waveform strip below */
+function floor(): number {
+  return state.volumeOpen ? RULER + PLOT - PAD_BOTTOM : RULER + VOLUME_PREVIEW;
 }
 
 const laneTop = (i: number) => rows()!.top + i * rows()!.h;
@@ -308,7 +316,10 @@ function render() {
   if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
   $('tab-hint').textContent =
     state.tab === 'volume'
-      ? `Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.${state.waveOpen ? ' Below, drag along a row to draw a waveform, or drag bars to move and resize them.' : ''}`
+      ? [
+          state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
+          state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them.' : '',
+        ].join(' ').trim() || 'Click Volume or Waveform to open them.'
       : 'Drag along a row to draw a waveform; drag bars to move them, or their ends to resize. Bars that overlap play together.';
 
   const width = x(TOTAL) + ORIGIN;
@@ -338,11 +349,14 @@ function render() {
   // pointing up at its time
   const ku = x(state.keyUp);
   el('line', { x1: ku, x2: ku, y1: RULER, y2: HEIGHT, class: 'tl-keyup' }, plot);
-  const tab = el('g', { class: `tl-keyup-tab${dragging === 'keyup' ? ' dragging' : ''}`, 'data-drag': 'keyup', tabindex: 0, role: 'slider', 'aria-label': `Key up at ${timeText(state.keyUp)}` }, plot);
-  const tabTop = RULER + 6;
-  el('rect', { x: ku - 28, y: tabTop, width: 56, height: 16, rx: 6 }, tab);
-  el('path', { d: `M${ku - 5},${tabTop + 0.5}L${ku},${RULER + 1}L${ku + 5},${tabTop + 0.5}Z`, class: 'tl-keyup-point' }, tab);
-  el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = 'key up';
+  // (Over the folded volume preview there is no room for it)
+  if (state.tab === 'wave' || state.volumeOpen) {
+    const tab = el('g', { class: `tl-keyup-tab${dragging === 'keyup' ? ' dragging' : ''}`, 'data-drag': 'keyup', tabindex: 0, role: 'slider', 'aria-label': `Key up at ${timeText(state.keyUp)}` }, plot);
+    const tabTop = RULER + 6;
+    el('rect', { x: ku - 28, y: tabTop, width: 56, height: 16, rx: 6 }, tab);
+    el('path', { d: `M${ku - 5},${tabTop + 0.5}L${ku},${RULER + 1}L${ku + 5},${tabTop + 0.5}Z`, class: 'tl-keyup-point' }, tab);
+    el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = 'key up';
+  }
 
   plot.append(playheadLine);
   movePlayhead();
@@ -364,28 +378,43 @@ function renderGutter() {
     g.append(d);
     return d;
   };
-  if (state.tab === 'volume') {
-    add(0, RULER, ['Volume'], 'heading');
-    // Each level's number sits just above its line
-    for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-    // Opens and closes the waveform rows underneath
-    const twisty = document.createElement('span');
-    twisty.className = 'twisty';
-    twisty.textContent = state.waveOpen ? '▾' : '▸';
-    const toggle = add(FLOOR, PAD_BOTTOM, [twisty, 'Waveform'], 'heard-label rule toggle');
-    toggle.setAttribute('role', 'button');
-    toggle.setAttribute('aria-expanded', String(state.waveOpen));
-    toggle.tabIndex = 0;
-    toggle.addEventListener('click', () => openWaves(!state.waveOpen));
-    toggle.addEventListener('keydown', (e) => {
+  // A section name with a triangle, opening and closing it
+  const toggle = (top: number, height: number, name: string, open: boolean, flip: () => void, cls = '') => {
+    // A solid triangle, pointing down when open and right when closed
+    const twisty = document.createElementNS(SVG, 'svg');
+    twisty.setAttribute('viewBox', '0 0 12 12');
+    twisty.setAttribute('class', 'twisty');
+    twisty.setAttribute('aria-hidden', 'true');
+    el('path', { d: open ? 'M1,3L11,3L6,10Z' : 'M3,1L10,6L3,11Z' }, twisty);
+    const t = add(top, height, [twisty, name], `fold ${cls}`);
+    t.setAttribute('role', 'button');
+    t.setAttribute('aria-expanded', String(open));
+    t.tabIndex = 0;
+    t.addEventListener('click', flip);
+    t.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault();
       e.stopPropagation();
-      openWaves(!state.waveOpen);
+      flip();
     });
+  };
+  if (state.tab === 'volume') {
+    if (state.volumeOpen) {
+      toggle(RULER, 22, 'Volume', true, () => openVolume(false));
+      // Each level's number sits just above its line
+      for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
+    } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true));
+    toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
   } else add(RULER, HEARD, ['You hear'], 'heard-label');
   const r = rows();
   if (r) LANES.forEach((w, i) => add(laneTop(i), r.h, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
+}
+
+/** Opens or folds the volume envelope. */
+function openVolume(open: boolean) {
+  state.volumeOpen = open;
+  persist();
+  render();
 }
 
 /** Opens or closes the waveform rows under the volume envelope, selecting a bar or none. */
@@ -404,6 +433,11 @@ function areaPath(curve: Float32Array, from: number, to: number): string {
 }
 
 function drawVolume(curve: Float32Array) {
+  if (!state.volumeOpen) {
+    drawVolumePreview(curve);
+    drawWaveBand();
+    return;
+  }
   const s = shape();
   const [a, d, sus] = [s.ad >> 4, s.ad & 15, s.sr >> 4];
   const end = releaseEnd(s.ad, s.sr, state.keyUp);
@@ -431,12 +465,7 @@ function drawVolume(curve: Float32Array) {
   const crowded = sustainLow && x(handlePos('r', s.ad, s.sr).f) - x(state.keyUp) < 90;
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
-  // A thin line at silence, between the envelope and the waveform strip
-  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: FLOOR, y2: FLOOR, class: 'heard-rule' }, plot);
-  // The strip as a whole opens and closes the waveform rows
-  el('rect', { x: 0, y: FLOOR, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
-  drawHeard(VOLUME_HEARD);
-  if (state.waveOpen) drawBars();
+  drawWaveBand();
 
   // Attack, decay and release are times: dots that move sideways, labelled
   // above. Sustain is a level, its dot at the key going up: up and down
@@ -479,6 +508,27 @@ function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
     at(0, -1, 13);
     at(0, 1, 13);
   }
+}
+
+/** The volume envelope folded into a thin picture of its shape; clicking it opens it. */
+function drawVolumePreview(curve: Float32Array) {
+  const s = shape();
+  const end = Math.min(TOTAL, releaseEnd(s.ad, s.sr, state.keyUp) + 2);
+  const py = (v: number) => RULER + 5 + (1 - v) * (VOLUME_PREVIEW - 10);
+  const pts: string[] = [];
+  for (let i = 0; i <= Math.min(curve.length - 1, Math.round(end * ENV_STEPS)); i++) pts.push(`${x(i / ENV_STEPS).toFixed(1)},${py(curve[i]).toFixed(1)}`);
+  el('path', { d: `M${pts.join('L')}L${x(end)},${py(0)}L${x(0)},${py(0)}Z`, class: 'env-area' }, plot);
+  el('path', { d: `M${pts.join('L')}`, class: 'env-line thin' }, plot);
+  el('rect', { x: 0, y: RULER, width: x(TOTAL) + ORIGIN, height: VOLUME_PREVIEW, class: 'strip-hit', 'data-volume-strip': '' }, plot);
+}
+
+/** The line at silence, the waveform strip under it (which opens and closes the rows), and the rows if open. */
+function drawWaveBand() {
+  const top = floor();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
+  el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
+  drawHeard(top + (PAD_BOTTOM - HEARD) / 2);
+  if (state.waveOpen) drawBars();
 }
 
 /**
@@ -562,11 +612,8 @@ function renderReadout() {
   const box = $('readout');
   box.replaceChildren();
   const s = shape();
-  if (state.tab === 'volume' && !(state.waveOpen && s.bars[selected])) {
-    const parts = [envText.a(s.ad >> 4), envText.d(s.ad & 15), envText.s(s.sr >> 4), envText.r(s.sr & 15), `key up after ${timeText(state.keyUp)}`];
-    box.textContent = parts.join(' · ');
-    return;
-  }
+  // The envelope's settings are on it already: only a selected bar has more to say
+  if (state.tab === 'volume' && !(state.waveOpen && s.bars[selected])) return;
   const b = s.bars[selected];
   if (!b) {
     box.textContent = s.bars.length ? 'Click a bar to change it.' : 'No waveform yet: the note is silent. Drag along a row to draw one.';
@@ -643,7 +690,10 @@ plot.addEventListener('pointerdown', (e) => {
   const span = target.closest<SVGGElement>('[data-span]');
 
   const strip = target.closest('[data-strip]');
-  if (span || strip) {
+  if (target.closest('[data-volume-strip]')) {
+    openVolume(true);
+    return;
+  } else if (span || strip) {
     // The waveform strip under the volume opens the rows (picking the bar
     // clicked) or closes them; in the waveform tab it picks the bar
     const at = span ? Number(span.dataset.span) : -1;

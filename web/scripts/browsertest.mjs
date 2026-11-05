@@ -465,7 +465,7 @@ try {
     return `${s.waveOpen ? 'open' : 'closed'} ${JSON.stringify(s.instruments[0].bars.find((b) => b.wave === 0x10))}`;
   });
   report(folded === 'open {"wave":16,"start":40,"end":50}', 'maker2 draw under the volume', folded);
-  await m2.click('.tl-gutter-row.toggle');
+  await m2.click('.tl-gutter-row.fold.rule');
 
   // Drawing along the triangle row adds a bar there
   await m2.click('#tabs [data-tab=wave]');
