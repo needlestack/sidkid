@@ -36,8 +36,6 @@ const PAD_TOP = 24;
 const PAD_BOTTOM = 32;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
-/** Half the sustain capsule's width, in pixels */
-const CAPSULE_HALF = 14;
 /**
  * Across a gap at least this many pixels wide, a dragged dot moves to the
  * next setting once it is this far from the one it came from (rather than
@@ -238,7 +236,7 @@ let dragging: string | null = null;
 let free: { key: string; f: number; v: number } | null = null;
 /** The setting (0-15) the dragged handle had when grabbed */
 let origin = 0;
-/** Frames from the key going up to where the sustain capsule was grabbed, so it doesn't jump */
+/** Frames from the key going up to where the sustain dot was grabbed, so it doesn't jump */
 let grabOffset = 0;
 let playhead = -1;
 /** Kept from one drawing to the next and moved on its own, so playing doesn't redraw what is under the pointer */
@@ -314,12 +312,15 @@ function render() {
   if (state.tab === 'volume') drawVolume(curve);
   else drawWaves(curve);
 
-  // The key going up, with a tab on the ruler to drag it by
+  // The key going up, with a tab just under the ruler to drag it by,
+  // pointing up at its time
   const ku = x(state.keyUp);
   el('line', { x1: ku, x2: ku, y1: RULER, y2: HEIGHT, class: 'tl-keyup' }, plot);
   const tab = el('g', { class: `tl-keyup-tab${dragging === 'keyup' ? ' dragging' : ''}`, 'data-drag': 'keyup', tabindex: 0, role: 'slider', 'aria-label': `Key up at ${timeText(state.keyUp)}` }, plot);
-  el('rect', { x: ku - 30, y: 3, width: 60, height: RULER - 6, rx: 6 }, tab);
-  el('text', { x: ku, y: RULER / 2 + 4, 'text-anchor': 'middle' }, tab).textContent = 'key up';
+  const tabTop = RULER + 6;
+  el('rect', { x: ku - 28, y: tabTop, width: 56, height: 16, rx: 6 }, tab);
+  el('path', { d: `M${ku - 5},${tabTop + 0.5}L${ku},${RULER + 1}L${ku + 5},${tabTop + 0.5}Z`, class: 'tl-keyup-point' }, tab);
+  el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = 'key up';
 
   plot.append(playheadLine);
   movePlayhead();
@@ -381,39 +382,29 @@ function drawVolume(curve: Float32Array) {
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
   // Attack, decay and release are times: dots that move sideways, labelled
-  // above. Sustain is a level: a capsule on its line that moves up and down,
-  // labelled below.
+  // above. Sustain is a level, its dot at the key going up: up and down
+  // sets the level, sideways the key up; labelled below.
   for (const key of ['a', 'd', 'r', 's']) {
     const p = handlePos(key, s.ad, s.sr);
     const label = handleText(key, s.ad, s.sr);
     const held = free?.key === key;
     const upDown = key === 's';
     const g = el('g', { class: `env-handle${held ? ' held' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
-    if (upDown) {
-      el('rect', { x: x(p.f) - 22, y: plotY(p.v) - 11, width: 44, height: 22, class: 'hit' }, g);
-      capsule(g, x(p.f), plotY(p.v));
-    } else {
-      el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
-      el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
-    }
+    el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
+    el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
     if (!held) arrows(g, x(p.f), plotY(p.v), upDown ? 'all' : 'side');
-    // Under the capsule, clear of its down arrow
-    text(g, x(p.f), upDown ? below(p.v) + 7 : above(p.v), label);
+    // Sustain's label goes under its dot, clear of the down arrow
+    text(g, x(p.f), upDown ? below(p.v) + 9 : above(p.v), label);
     // The one in hand stays selected under the pointer, with the ways it moves
     if (held) {
       const grip = el('g', { class: 'env-grip' }, plot);
-      if (upDown) capsule(grip, x(free!.f), plotY(free!.v));
-      else el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 6, class: 'dot' }, grip);
+      el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 6, class: 'dot' }, grip);
       arrows(grip, x(free!.f), plotY(free!.v), upDown ? 'all' : 'side');
     }
   }
 }
 
-function capsule(parent: Element, cx: number, cy: number) {
-  el('rect', { x: cx - CAPSULE_HALF, y: cy - 5, width: CAPSULE_HALF * 2, height: 10, rx: 5, class: 'dot' }, parent);
-}
-
-/** Little arrows round a handle for the ways it moves: sideways, or all four ways for the capsule. */
+/** Little arrows round a handle for the ways it moves: sideways, or all four ways. */
 function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
   const g = el('g', { class: 'env-arrows' }, parent);
   const at = (dx: number, dy: number, out: number) => {
@@ -423,14 +414,11 @@ function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
     const side = [dy * 4, dx * 4];
     el('path', { d: `M${tip[0]},${tip[1]}L${base[0] + side[0]},${base[1] + side[1]}L${base[0] - side[0]},${base[1] - side[1]}Z` }, g);
   };
+  at(-1, 0, 13);
+  at(1, 0, 13);
   if (ways === 'all') {
-    at(0, -1, 9);
-    at(0, 1, 9);
-    at(-1, 0, CAPSULE_HALF + 5);
-    at(1, 0, CAPSULE_HALF + 5);
-  } else {
-    at(-1, 0, 13);
-    at(1, 0, 13);
+    at(0, -1, 13);
+    at(0, 1, 13);
   }
 }
 
@@ -439,15 +427,15 @@ function handlePos(key: string, ad: number, sr: number): { f: number; v: number 
   const [a, d, sus] = [ad >> 4, ad & 15, sr >> 4];
   if (key === 'a') return { f: attackFrames(a), v: 1 };
   if (key === 'd') return { f: decayEnd(a, d, sus), v: sus / 15 };
-  // At the level held, ending where the key goes up
-  if (key === 's') return { f: state.keyUp - CAPSULE_HALF / state.zoom, v: sus / 15 };
+  // At the level held, where the key goes up
+  if (key === 's') return { f: state.keyUp, v: sus / 15 };
   return { f: releaseEnd(ad, sr, state.keyUp), v: 0 };
 }
 
 function handleText(key: string, ad: number, sr: number): string {
   if (key === 'a') return envText.a(ad >> 4);
   if (key === 'd') return envText.d(ad & 15);
-  if (key === 's') return `${envText.s(sr >> 4)} · key up at ${timeText(state.keyUp)}`;
+  if (key === 's') return envText.s(sr >> 4);
   return envText.r(sr & 15);
 }
 
@@ -710,7 +698,7 @@ function dragHandle(key: string, e: PointerEvent) {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
     s.sr = (sus << 4) | settle(releaseAt, f);
   }
-  // Sustain's capsule keeps its end on the key going up
+  // Sustain's dot stays on the key going up
   free = key === 'keyup' ? null : { key, f: key === 's' ? handlePos('s', s.ad, s.sr).f : Math.max(0, f), v };
   render();
 }

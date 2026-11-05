@@ -153,10 +153,21 @@
   font-weight: 600;
 }
 
+.tl-keyup-tab .tl-keyup-point {
+  fill: var(--step-bar);
+  stroke: none;
+}
+
 .tl-keyup-tab:hover rect,
 .tl-keyup-tab.dragging rect,
 .tl-keyup-tab:focus-visible rect {
   stroke: var(--accent);
+}
+
+.tl-keyup-tab:hover .tl-keyup-point,
+.tl-keyup-tab.dragging .tl-keyup-point,
+.tl-keyup-tab:focus-visible .tl-keyup-point {
+  fill: var(--accent);
 }
 
 .tl-playhead {

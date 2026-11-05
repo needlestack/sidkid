@@ -55,7 +55,8 @@ zoomable timeline, aiming for a GarageBand feel.
   - Snapping: halfway between settings, but never more than `STEP_GAP` (40 px) from
     the setting it came from, so wide gaps still answer the pointer. No greyed
     preview ("less is more").
-  - Sustain: a capsule whose right end is key up; up/down = level, sideways = key up.
+  - Sustain: a dot at key up; up/down = level, sideways = key up. The key-up tab sits
+    just under the ruler with a little triangle pointing at its time.
   - Decay is a rate (time to fall all the way), so its dot moves with sustain. The
     whole decay to silence is always drawn faintly to make that visible.
 - Ideas raised, not done: an instrument-level "lets go by itself" (wave rows with the
