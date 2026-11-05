@@ -743,9 +743,15 @@ function drawWidth() {
     }
     el('rect', { x: x(from), y: r.top + 1, width: x(to) - x(from), height: r.h - 2, class: 'width-loop' }, plot);
     el('text', { x: x(from) + 10, y: r.top + 12, class: 'width-repeat' }, plot).textContent = '↻ repeat';
-    const edge = el('g', { class: `width-loop-edge${dragging === 'loop' ? ' dragging' : ''}`, 'data-loop-edge': '' }, plot);
-    el('rect', { x: x(from) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, edge);
-    el('rect', { x: x(from) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, edge);
+    // Both ends drag: the start from point to point, the end in time
+    for (const [at, which] of [
+      [from, 'loop'],
+      [to, 'loop-end'],
+    ] as const) {
+      const edge = el('g', { class: `width-loop-edge${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
+      el('rect', { x: x(at) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, edge);
+      el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, edge);
+    }
   }
   el('line', { x1: 0, x2: width, y1: widthY(SQUARE), y2: widthY(SQUARE), class: 'width-square' }, plot);
   const line = (corners: { t: number; w: number }[]) => corners.map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${widthY(p.w).toFixed(1)}`).join(' ');
@@ -920,6 +926,18 @@ plot.addEventListener('pointerdown', (e) => {
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
+  } else if (rows() && target.closest('[data-loop-end-edge]')) {
+    // Where the repeat ends: the last point, moved in time only, and never
+    // past the point before it
+    const pts = s.pulse.points;
+    before();
+    dragging = 'loop-end';
+    plot.style.cursor = 'ew-resize';
+    move = (e) => {
+      const last = pts[pts.length - 1];
+      last.t = Math.max(pts[pts.length - 2].t + 1, Math.min(TOTAL - 1, Math.round(frameAt(e))));
+      render();
+    };
   } else if (rows() && target.closest('[data-loop-edge]')) {
     // Where the repeat starts: snapped to the nearest point before the last
     const pulse = s.pulse;
