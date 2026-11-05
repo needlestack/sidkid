@@ -453,7 +453,7 @@ try {
     const s = window.maker2.state();
     const ins = s.instruments[s.current];
     ins.bars = [{ wave: 0x40, start: 0, end: 3 }];
-    ins.notes = [{ start: 0, end: 1, semis: 0 }, { start: 1, end: 2, semis: 4 }, { start: 2, end: 3, semis: 7 }];
+    ins.notes = [{ start: 0, semis: 0 }, { start: 1, semis: 4 }, { start: 2, semis: 7 }];
     ins.waveLoop = 0;
     const t = window.maker2.trace(9);
     const out = Array.from(t.freq).map((f) => Math.round(12 * Math.log2(f / t.freq[0]))).join(' ');

@@ -1,6 +1,6 @@
 // Instruments as shapes on a timeline, for the second instrument maker:
 // waveforms are bars in time, one row per oscillator, and bars that overlap
-// in time play together as a combined waveform; notes are bars at a pitch.
+// in time play together as a combined waveform; pitch is a line of steps.
 // Both go into one GoatTracker wave program (each of its rows sets a
 // waveform and a pitch), and pulse width into a pulse program.
 
@@ -17,10 +17,12 @@ export interface Bar {
   end: number | null;
 }
 
-/** A pitch for a while, in semitones from the note played. */
+/**
+ * A change of pitch, in semitones from the note played. A pitch has no end
+ * in the player: it holds until the next change.
+ */
 export interface Note {
   start: number;
-  end: number;
   semis: number;
 }
 
@@ -77,7 +79,7 @@ export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'>;
 
 /** Where the wave program's bars and notes end, or null if there are none. */
 export function programEnd(s: Pick<Shape, 'bars' | 'notes'>): number | null {
-  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...s.notes.map((n) => n.end)];
+  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...s.notes.map((n) => n.start + 1)];
   return ends.length ? Math.max(...ends) : null;
 }
 
@@ -92,15 +94,14 @@ export function waveChanges(s: WaveParts): number[] {
   return stretches(s).map((st) => st.start);
 }
 
-/** The pitch at a time: the note playing then, or the last one before it (a pitch holds), or the note played. */
+/** The pitch at a time: the last change at or before it, or the note played. */
 export function pitchAt(notes: Note[], t: number): number {
   let pitch = 0;
   let from = -1;
   for (const n of notes) {
-    if (n.start <= t && t < n.end) return n.semis;
-    if (n.end <= t && n.end > from) {
+    if (n.start <= t && n.start > from) {
       pitch = n.semis;
-      from = n.end;
+      from = n.start;
     }
   }
   return pitch;
@@ -123,10 +124,7 @@ export function stretches(s: Pick<Shape, 'bars' | 'notes'>): Stretch[] {
     cuts.add(Math.max(0, b.start));
     if (b.end !== null) cuts.add(b.end);
   }
-  for (const n of s.notes) {
-    cuts.add(Math.max(0, n.start));
-    cuts.add(n.end);
-  }
+  for (const n of s.notes) cuts.add(Math.max(0, n.start));
   const times = [...cuts].filter((t) => t <= end).sort((a, b) => a - b);
   const out: Stretch[] = [];
   for (let i = 0; i + 1 < times.length; i++) {
@@ -339,18 +337,7 @@ export function heardSpans(s: WaveParts, frames: number): HeardSpan[] {
   return out;
 }
 
-/** Puts a note in place: one pitch at a time, so notes it lands on are cut back or removed. */
+/** Puts a change of pitch in place: one at a time, so it replaces any already there. */
 export function placeNote(notes: Note[], note: Note): Note[] {
-  const out: Note[] = [];
-  for (const n of notes) {
-    if (n === note) continue;
-    if (n.end <= note.start || n.start >= note.end) {
-      out.push(n);
-      continue;
-    }
-    if (n.start < note.start) out.push({ ...n, end: note.start });
-    if (n.end > note.end) out.push({ ...n, start: note.end });
-  }
-  out.push(note);
-  return out.sort((a, b) => a.start - b.start);
+  return [...notes.filter((n) => n !== note && n.start !== note.start), note].sort((a, b) => a.start - b.start);
 }

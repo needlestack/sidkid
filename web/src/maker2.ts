@@ -17,7 +17,7 @@ import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
 import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
+import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -148,7 +148,8 @@ function load(): State {
         // Saved before pulse width had a shape: a square, as they played
         ins.pulse ??= defaultPulse();
         ins.waveLoop ??= null;
-        ins.notes ??= [];
+        // Notes had ends, which the player never heard (a pitch holds): now just their starts
+        ins.notes = (ins.notes ?? []).map((n) => ({ start: n.start, semis: n.semis }));
         ins.vibrato ??= null;
         // Bars that kept going until the note ended: now the waveform holds after its last bar
         const open = ins.bars.some((b) => b.end === null);
@@ -427,7 +428,7 @@ function dataEnd(volume = true, waves = true): number {
   const s = shape();
   let end = 0;
   if (volume) end = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
-  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.end));
+  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.start + 1));
   return Math.min(TOTAL, Math.max(5, end));
 }
 
@@ -749,36 +750,33 @@ function drawNotes() {
   }
   // The shared repeat runs through the notes too (its ↻ here when the waveform rows are closed)
   const icon = drawWaveRepeat(roll, roll + ROLL_H, true, false);
-  const end = programEnd(s);
-  if (end !== null && waveLooping(s)) {
-    const from = s.waveLoop!;
-    const period = end - from;
-    for (let n = 1; end + (n - 1) * period < TOTAL; n++) {
-      for (const note of s.notes) {
-        const a = Math.max(note.start, from);
-        const z = Math.min(note.end, end);
-        if (z > a) el('rect', { x: x(a + n * period), y: noteY(note.semis) + 0.5, width: x(z + n * period) - x(a + n * period), height: SEMI - 1, rx: 2, class: 'note ghost' }, plot);
-      }
-    }
+  // The pitch all the way through, one continuous line of steps: the key
+  // played until the first change, then each pitch until the next (its
+  // repeats faint)
+  const spansHeard = heardSpans(s, TOTAL).filter((sp) => sp.wave || sp.end !== null);
+  // One step per pitch: changes of waveform alone don't split it
+  const steps: HeardSpan[] = [];
+  for (const sp of spansHeard) {
+    const last = steps[steps.length - 1];
+    if (last && last.pitch === sp.pitch && !!last.again === !!sp.again && last.end === sp.start) last.end = sp.end;
+    else steps.push({ ...sp });
   }
-  // The pitch all the way through, lighter where no note sets it: the key
-  // played until the first note, each pitch held on until the next
-  for (const sp of heardSpans(s, TOTAL)) {
-    if (!sp.wave && sp.end === null) continue;
+  for (const sp of steps) {
     const x2 = x(sp.end ?? TOTAL);
-    el('rect', { x: x(sp.start), y: noteY(sp.pitch) + 0.5, width: Math.max(1, x2 - x(sp.start)), height: SEMI - 1, rx: 2, class: `note implied${sp.again ? ' again' : ''}` }, plot);
+    el('rect', { x: x(sp.start), y: noteY(sp.pitch) + 0.5, width: Math.max(1, x2 - x(sp.start)), height: SEMI - 1, rx: 2, class: `note${sp.again ? ' ghost' : ''}` }, plot);
   }
+  // Each change, to grab: its step to move in time and pitch, its start to move in time
+  const lastEnd = spansHeard.filter((sp) => !sp.again).at(-1)?.end ?? null;
   s.notes.forEach((note, i) => {
+    const next = s.notes[i + 1]?.start ?? lastEnd ?? TOTAL;
     const x1 = x(note.start);
-    const x2 = x(note.end);
+    const x2 = x(Math.max(note.start + 1, next));
     const y = noteY(note.semis);
     const g = el('g', { class: `note-bar${i === selectedNote ? ' selected' : ''}`, 'data-note': i }, plot);
-    el('rect', { x: x1, y: y - 3, width: Math.max(2, x2 - x1), height: SEMI + 6, class: 'hit' }, g);
-    el('rect', { x: x1, y: y + 0.5, width: Math.max(2, x2 - x1), height: SEMI - 1, rx: 2, class: 'note' }, g);
-    const grip = Math.min(EDGE, (x2 - x1) / 3);
-    el('rect', { x: x1 - 2, y: y - 3, width: grip + 2, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'start' }, g);
-    el('rect', { x: x2 - grip, y: y - 3, width: grip + 2, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'end' }, g);
-    el('text', { x: x2 + 4, y: y + SEMI - 0.5, class: 'note-label' }, g).textContent = semitoneText(note.semis);
+    el('rect', { x: x1, y: y - 3, width: x2 - x1, height: SEMI + 6, class: 'hit' }, g);
+    if (i === selectedNote) el('rect', { x: x1, y: y + 0.5, width: x2 - x1, height: SEMI - 1, rx: 2, class: 'note picked' }, g);
+    el('rect', { x: x1 - 3, y: y - 3, width: Math.min(EDGE, (x2 - x1) / 3) + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'start' }, g);
+    el('text', { x: x1 + 3, y: y - 2, class: 'note-label' }, g).textContent = semitoneText(note.semis);
   });
   // The pitch as the player makes it, frame by frame: vibrato and all
   const heard = heardPitch();
@@ -1107,7 +1105,7 @@ function renderReadout() {
   if (state.notesOpen && s.notes[selectedNote]) {
     const n = s.notes[selectedNote];
     const text = document.createElement('span');
-    text.textContent = `${n.semis ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}` : 'The note played'} from ${timeText(n.start)} for ${timeText(n.end - n.start)}`;
+    text.textContent = `From ${timeText(n.start)}: ${n.semis ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}` : 'the note played'}`;
     const del = document.createElement('button');
     del.className = 'mini danger';
     del.textContent = 'Delete';
@@ -1375,7 +1373,6 @@ plot.addEventListener('pointerdown', (e) => {
     move = (e) => {
       const to = Math.max(floor, Math.min(TOTAL, Math.round(frameAt(e))));
       s.bars = s.bars.map((b) => (b.end === end ? { ...b, end: to } : b));
-      s.notes = s.notes.map((n) => (n.end === end ? { ...n, end: to } : n));
       end = to;
       render();
     };
@@ -1398,12 +1395,15 @@ plot.addEventListener('pointerdown', (e) => {
       render();
     };
   } else if (target.closest('[data-note]')) {
-    // A note: moved in time and pitch, or an end dragged
+    // A change of pitch: its step moved in time and pitch, or its start in time
     const noteEl = target.closest<SVGGElement>('[data-note]')!;
     const i = Number(noteEl.dataset.note);
     const original = s.notes;
     const note = original[i];
     const edge = target.getAttribute('data-note-edge');
+    // Between the changes either side
+    const lo = i > 0 ? original[i - 1].start + 1 : 0;
+    const hi = i + 1 < original.length ? original[i + 1].start - 1 : TOTAL - 1;
     selectedNote = i;
     selected = -1;
     selectedPoint = -1;
@@ -1413,14 +1413,7 @@ plot.addEventListener('pointerdown', (e) => {
     plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
     move = (e) => {
       const df = Math.round(frameAt(e) - start);
-      let next: Note;
-      if (edge === 'start') next = { ...note, start: Math.max(0, Math.min(note.end - 1, note.start + df)) };
-      else if (edge === 'end') next = { ...note, end: Math.max(note.start + 1, Math.min(TOTAL, Math.round(frameAt(e)))) };
-      else {
-        const len = note.end - note.start;
-        const from = Math.max(0, Math.min(TOTAL - len, note.start + df));
-        next = { start: from, end: from + len, semis: semiAt(e) };
-      }
+      const next: Note = { start: Math.max(lo, Math.min(hi, note.start + df)), semis: edge ? note.semis : semiAt(e) };
       s.notes = placeNote(
         original.filter((o) => o !== note),
         next,
@@ -1435,16 +1428,20 @@ plot.addEventListener('pointerdown', (e) => {
       addGridNote(e);
       return;
     }
-    // Drawing a new note along a semitone
+    // Drawing along a semitone: a change to it where the drag starts, and
+    // back to the pitch that was there where it ends (unless a change comes first)
     const semis = semiAt(e);
     const original = s.notes;
     const from = Math.max(0, Math.round(start));
     before();
     dragging = 'note';
     move = (e) => {
-      const to = Math.max(0, Math.min(TOTAL, Math.round(frameAt(e))));
-      const next: Note = { start: Math.min(from, to), end: Math.max(Math.min(from, to) + 1, Math.max(from, to)), semis };
-      s.notes = placeNote(original, next);
+      const to = Math.max(from + 1, Math.min(TOTAL - 1, Math.round(frameAt(e))));
+      const next: Note = { start: from, semis };
+      let notes = placeNote(original, next);
+      const back = pitchAt(original, to);
+      if (!original.some((n) => n.start > from && n.start <= to) && back !== semis) notes = placeNote(notes, { start: to, semis: back });
+      s.notes = notes;
       selectedNote = s.notes.indexOf(next);
       render();
     };
@@ -1684,12 +1681,12 @@ function addGridBar(e: PointerEvent) {
   playShape();
 }
 
-/** Adds a note one grid step long at the semitone under the pointer: what double-clicking the notes does. */
+/** Changes the pitch to the semitone under the pointer, at the grid line before it: what double-clicking the pitch does. */
 function addGridNote(e: PointerEvent) {
   const s = shape();
   const step = tickStep();
   const from = Math.max(0, Math.floor(frameAt(e) / step) * step);
-  const note: Note = { start: from, end: Math.min(TOTAL, from + step), semis: semiAt(e) };
+  const note: Note = { start: from, semis: semiAt(e) };
   before();
   s.notes = placeNote(s.notes, note);
   selectedNote = s.notes.indexOf(note);

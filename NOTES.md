@@ -62,8 +62,10 @@ zoomable timeline, aiming for a GarageBand feel.
 - Endings: after the last bar/note, `hold` (→: program stops, last sound held, pitch left
   free for effects) or silence (a silent row, gate on), or the shared repeat (↻). Bars are
   always finite now; old "keeps going" bars load as finite bars with hold on.
-- Notes: a third fold, a roll of semitones (−12..+24) from the key played; one pitch at a
-  time, a pitch holds until the next note. Notes and waveform make one wave program
+- Pitch (was Notes): a third fold, a roll of semitones (−12..+24) from the key played.
+  A pitch is a change at a time (`Note {start, semis}`, no end: the player has none), drawn
+  as one continuous line of steps. Dragging along draws a change and a change back. The
+  owner may want a fake "end" later so a pitch can set the repeat's end. Notes and waveform make one wave program
   (`stretches()` in shape.ts: each row sets what changed; the repeat target sets both).
   Not yet: fixed pitches (drums), slides. The roll shows the pitch as the engine makes it.
 - Vibrato: a lane under the Pitch roll (instrument vibrato: a speed-table row + delay).
