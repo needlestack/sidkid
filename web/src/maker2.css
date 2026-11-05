@@ -723,7 +723,7 @@
 
 /* Vibrato */
 .vib {
-  cursor: ew-resize;
+  cursor: pointer;
 }
 
 .vib-body {

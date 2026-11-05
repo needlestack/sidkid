@@ -866,10 +866,13 @@ function drawVibrato() {
     return;
   }
   const from = vibratoFrom();
+  // It lasts as the sound does: on to the end holding or repeating, else to where it falls silent
+  const end = programEnd(s);
+  const until = end === null || s.hold || waveLooping(s) ? TOTAL : Math.max(from + 1, end);
   const g = el('g', { class: `vib${selectedVibrato ? ' selected' : ''}`, 'data-vib': '' }, plot);
-  el('rect', { x: x(from), y: top + 5, width: x(TOTAL) - x(from), height: VIB_H - 10, rx: 5, class: 'vib-body' }, g);
+  el('rect', { x: x(from), y: top + 5, width: x(until) - x(from), height: VIB_H - 10, rx: 5, class: 'vib-body' }, g);
   // Its shape: a semitone either way fills the bar
-  const curve = vibratoCurve(s.vibrato, test.note, 1, Math.max(1, TOTAL - from));
+  const curve = vibratoCurve(s.vibrato, test.note, 1, Math.max(1, until - from));
   const mid = top + VIB_H / 2;
   const amp = (VIB_H - 14) / 2;
   const pts = Array.from(curve, (v, i) => `${x(from + i).toFixed(1)},${(mid - Math.max(-1, Math.min(1, v)) * amp).toFixed(1)}`);
@@ -1379,11 +1382,19 @@ plot.addEventListener('pointerdown', (e) => {
       end = to;
       render();
     };
-  } else if (target.closest('[data-vib]') || inVibrato(e)) {
-    // The vibrato: grabbed, or drawn on to add it, it moves its start
+  } else if (target.closest('[data-vib]') && !target.closest('[data-vib-edge]')) {
+    // The vibrato's bar: a click selects it
+    selected = -1;
+    selectedPoint = -1;
+    selectedNote = -1;
+    selectedVibrato = true;
+    render();
+    return;
+  } else if (target.closest('[data-vib-edge]') || (inVibrato(e) && !s.vibrato)) {
+    // Its start, dragged; or drawn on an empty lane to add it from there
     before();
-    if (!s.vibrato) s.vibrato = { delay: 1, ...DEFAULT_WOBBLE };
-    if (!target.closest('[data-vib]')) {
+    if (!s.vibrato) {
+      s.vibrato = { delay: 1, ...DEFAULT_WOBBLE };
       s.vibrato.delay = delayFor(Math.max(0, Math.round(start)));
       moved = true;
     }
