@@ -935,19 +935,23 @@ plot.addEventListener('pointerdown', (e) => {
       render();
     };
   } else if (rows() && target.closest('[data-loop-edge]')) {
-    // Where the repeat starts: snapped to the nearest point. Pulled out from
-    // the end it makes one; pushed back onto the end, there is none.
+    // Where the repeat starts: on a point, settling there as the envelope's
+    // dots do. Pulled out from the end it makes one; pushed back onto the
+    // end, there is none.
     const pulse = s.pulse;
+    const from = pulse.loop ?? pulse.points.length - 1;
     before();
     dragging = 'loop';
     plot.style.cursor = 'ew-resize';
     move = (e) => {
       const pts = pulse.points;
       const last = pts.length - 1;
-      const f = frameAt(e);
-      let best = 0;
-      for (let i = 1; i <= last; i++) if (Math.abs(pts[i].t - f) < Math.abs(pts[best].t - f)) best = i;
-      pulse.loop = best < last ? best : null;
+      const at = settleAt(
+        pts.map((p) => p.t),
+        frameAt(e),
+        from,
+      );
+      pulse.loop = at < last ? at : null;
       render();
     };
   } else if (rows() && (target.closest('[data-point]') || inWidthRow(e))) {
@@ -1080,24 +1084,29 @@ plot.addEventListener('pointerdown', (e) => {
   render();
 });
 
+/**
+ * Which of some places in time (in order) a dragged handle lands on, for
+ * the pointer at a frame. Places close together switch halfway between;
+ * across a wide gap, it moves on once the pointer is STEP_GAP pixels from
+ * the place it came from (`origin`), and back within it.
+ */
+function settleAt(places: number[], at: number, origin: number): number {
+  let lo = -1;
+  places.forEach((p, i) => p <= at && (lo = i));
+  if (lo < 0) return 0;
+  if (lo === places.length - 1) return lo;
+  const hi = lo + 1;
+  const px = (frames: number) => frames * state.zoom;
+  if (px(places[hi] - places[lo]) < STEP_GAP) return at - places[lo] <= places[hi] - at ? lo : hi;
+  if (origin >= hi) return px(places[hi] - at) >= STEP_GAP ? lo : hi;
+  return px(at - places[lo]) >= STEP_GAP ? hi : lo;
+}
+
 function dragHandle(key: string, e: PointerEvent) {
   const s = shape();
   const f = frameAt(e);
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
-  // The setting the pointer is at. Settings close together switch halfway
-  // between; across a wide gap, the dot moves on once the pointer is
-  // STEP_GAP pixels from the setting it came from, and back within it.
-  const settle = (position: (v: number) => number, at: number): number => {
-    let lo = -1;
-    for (let v = 0; v < 16; v++) if (position(v) <= at) lo = v;
-    if (lo < 0) return 0;
-    if (lo === 15) return 15;
-    const hi = lo + 1;
-    const px = (frames: number) => frames * state.zoom;
-    if (px(position(hi) - position(lo)) < STEP_GAP) return at - position(lo) <= position(hi) - at ? lo : hi;
-    if (origin >= hi) return px(position(hi) - at) >= STEP_GAP ? lo : hi;
-    return px(at - position(lo)) >= STEP_GAP ? hi : lo;
-  };
+  const settle = (position: (v: number) => number, at: number) => settleAt(Array.from({ length: 16 }, (_, v) => position(v)), at, origin);
   let v = 0;
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
   else if (key === 'a') {
