@@ -765,6 +765,19 @@ function drawWidth() {
     el('circle', { cx: x(p.t), cy: widthY(p.w), r: 11, class: 'hit' }, g);
     el('circle', { cx: x(p.t), cy: widthY(p.w), r: 5, class: 'dot' }, g);
   });
+  if (!looping && points.length > 1) {
+    // No repeat yet: its start waits at the end, to be pulled back from
+    // there. Only the ↻ at the top takes hold, so the last point still drags.
+    const last = points[points.length - 1];
+    const at = x(last.t);
+    // Beside the bar rather than over the last point, when that is up at the top
+    const tx = widthY(last.w) < r.top + 24 ? at + 12 : at;
+    const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '' }, plot);
+    el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, pull);
+    el('rect', { x: tx - 9, y: r.top, width: 18, height: 17, rx: 4, class: 'tab' }, pull);
+    el('text', { x: tx, y: r.top + 13, 'text-anchor': 'middle', class: 'width-repeat' }, pull).textContent = '↻';
+    el('title', {}, pull).textContent = 'Drag left to repeat part of the line while the note is held';
+  }
 }
 
 function renderReadout() {
@@ -804,29 +817,14 @@ function renderReadout() {
   box.append(text, keep, del);
 }
 
-/** The selected pulse width point: its width and time, repeating from it, and deleting it. */
+/** The selected pulse width point: its width and time, and deleting it. */
 function pointReadout(box: HTMLElement) {
   const pulse = shape().pulse;
   const i = selectedPoint;
   const p = pulse.points[i];
-  const last = pulse.points.length - 1;
   const text = document.createElement('span');
   text.textContent = `Pulse width ${percentText(p.w)} at ${timeText(p.t)}`;
-  const repeat = document.createElement('label');
-  repeat.className = 'check';
-  const box2 = document.createElement('input');
-  box2.type = 'checkbox';
-  box2.checked = pulse.loop === i;
-  // The last point can't start a repeat: there is nothing after it to repeat
-  box2.disabled = i === last;
-  box2.addEventListener('change', () => {
-    before();
-    pulse.loop = box2.checked ? i : null;
-    changed();
-  });
-  repeat.append(box2, ' Repeat from here while the note is held');
-  repeat.title = i === last ? 'Add a point after this one to repeat between them' : '';
-  box.append(text, repeat);
+  box.append(text);
   if (i > 0) {
     const del = document.createElement('button');
     del.className = 'mini danger';
@@ -939,7 +937,8 @@ plot.addEventListener('pointerdown', (e) => {
       render();
     };
   } else if (rows() && target.closest('[data-loop-edge]')) {
-    // Where the repeat starts: snapped to the nearest point before the last
+    // Where the repeat starts: snapped to the nearest point. Pulled out from
+    // the end it makes one; pushed back onto the end, there is none.
     const pulse = s.pulse;
     before();
     dragging = 'loop';
@@ -949,8 +948,8 @@ plot.addEventListener('pointerdown', (e) => {
       const last = pts.length - 1;
       const f = frameAt(e);
       let best = 0;
-      for (let i = 1; i < last; i++) if (Math.abs(pts[i].t - f) < Math.abs(pts[best].t - f)) best = i;
-      pulse.loop = best;
+      for (let i = 1; i <= last; i++) if (Math.abs(pts[i].t - f) < Math.abs(pts[best].t - f)) best = i;
+      pulse.loop = best < last ? best : null;
       render();
     };
   } else if (rows() && (target.closest('[data-point]') || inWidthRow(e))) {

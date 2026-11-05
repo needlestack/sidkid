@@ -522,3 +522,25 @@
 .width-loop-edge.dragging .bar {
   opacity: 1;
 }
+
+/* The repeat's start waiting at the end of the line, faint until the row is hovered */
+.width-loop-edge.pull {
+  opacity: 0.35;
+}
+
+.width-loop-edge.pull .bar {
+  pointer-events: none;
+}
+
+.width-loop-edge.pull .tab {
+  fill: var(--surface);
+  stroke: var(--pulse);
+}
+
+.tl-plot:hover .width-loop-edge.pull {
+  opacity: 0.8;
+}
+
+.width-loop-edge.pull:hover {
+  opacity: 1;
+}
