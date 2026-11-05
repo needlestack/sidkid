@@ -36,6 +36,8 @@ const PAD_TOP = 24;
 const PAD_BOTTOM = 32;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
+/** Half the sustain capsule's width, in pixels */
+const CAPSULE_HALF = 14;
 /** Settings at least this many pixels apart show the other one, greyed out, while a dot is dragged between them */
 const GHOST_GAP = 40;
 
@@ -245,6 +247,8 @@ interface Aim {
 }
 const NO_AIM: Aim = { last: 0, heading: 0, near: -1, other: -1, shown: false };
 const aim = { x: { ...NO_AIM }, y: { ...NO_AIM } };
+/** Frames from the key going up to where the sustain capsule was grabbed, so it doesn't jump */
+let grabOffset = 0;
 let playhead = -1;
 /** Kept from one drawing to the next and moved on its own, so playing doesn't redraw what is under the pointer */
 const playheadLine = el('line', { y1: 0, y2: HEIGHT, class: 'tl-playhead' });
@@ -408,7 +412,7 @@ function drawVolume(curve: Float32Array) {
       el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
       el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
     }
-    if (!held) arrows(g, x(p.f), plotY(p.v), upDown);
+    if (!held) arrows(g, x(p.f), plotY(p.v), upDown ? 'all' : 'side');
     // Under the capsule, clear of its down arrow
     text(g, x(p.f), upDown ? below(p.v) + 7 : above(p.v), label);
     // The one in hand stays selected under the pointer, with the ways it moves
@@ -416,17 +420,17 @@ function drawVolume(curve: Float32Array) {
       const grip = el('g', { class: 'env-grip' }, plot);
       if (upDown) capsule(grip, x(free!.f), plotY(free!.v));
       else el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 6, class: 'dot' }, grip);
-      arrows(grip, x(free!.f), plotY(free!.v), upDown);
+      arrows(grip, x(free!.f), plotY(free!.v), upDown ? 'all' : 'side');
     }
   }
 }
 
 function capsule(parent: Element, cx: number, cy: number) {
-  el('rect', { x: cx - 14, y: cy - 5, width: 28, height: 10, rx: 5, class: 'dot' }, parent);
+  el('rect', { x: cx - CAPSULE_HALF, y: cy - 5, width: CAPSULE_HALF * 2, height: 10, rx: 5, class: 'dot' }, parent);
 }
 
-/** Little arrows either side of a handle for the way it moves: sideways, or up and down. */
-function arrows(parent: Element, cx: number, cy: number, upDown: boolean) {
+/** Little arrows round a handle for the ways it moves: sideways, or all four ways for the capsule. */
+function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
   const g = el('g', { class: 'env-arrows' }, parent);
   const at = (dx: number, dy: number, out: number) => {
     // A small triangle pointing away from the handle
@@ -435,9 +439,11 @@ function arrows(parent: Element, cx: number, cy: number, upDown: boolean) {
     const side = [dy * 4, dx * 4];
     el('path', { d: `M${tip[0]},${tip[1]}L${base[0] + side[0]},${base[1] + side[1]}L${base[0] - side[0]},${base[1] - side[1]}Z` }, g);
   };
-  if (upDown) {
+  if (ways === 'all') {
     at(0, -1, 9);
     at(0, 1, 9);
+    at(-1, 0, CAPSULE_HALF + 5);
+    at(1, 0, CAPSULE_HALF + 5);
   } else {
     at(-1, 0, 13);
     at(1, 0, 13);
@@ -449,19 +455,15 @@ function handlePos(key: string, ad: number, sr: number): { f: number; v: number 
   const [a, d, sus] = [ad >> 4, ad & 15, sr >> 4];
   if (key === 'a') return { f: attackFrames(a), v: 1 };
   if (key === 'd') return { f: decayEnd(a, d, sus), v: sus / 15 };
-  if (key === 's') {
-    // Midway along the level held, from the end of the decay to the key going up
-    const from = decayEnd(a, d, sus);
-    const to = Math.max(state.keyUp, from + 80 / state.zoom);
-    return { f: (from + to) / 2, v: sus / 15 };
-  }
+  // At the level held, ending where the key goes up
+  if (key === 's') return { f: state.keyUp - CAPSULE_HALF / state.zoom, v: sus / 15 };
   return { f: releaseEnd(ad, sr, state.keyUp), v: 0 };
 }
 
 function handleText(key: string, ad: number, sr: number): string {
   if (key === 'a') return envText.a(ad >> 4);
   if (key === 'd') return envText.d(ad & 15);
-  if (key === 's') return envText.s(sr >> 4);
+  if (key === 's') return `${envText.s(sr >> 4)} · key up at ${timeText(state.keyUp)}`;
   return envText.r(sr & 15);
 }
 
@@ -596,6 +598,7 @@ plot.addEventListener('pointerdown', (e) => {
     dragging = key;
     // Selected from the moment it is grabbed
     if (key !== 'keyup') free = { key, ...handlePos(key, s.ad, s.sr), ghosts: [] };
+    grabOffset = start - state.keyUp;
     aim.x = { ...NO_AIM, last: e.clientX };
     aim.y = { ...NO_AIM, last: e.clientY };
     // Where the key goes up is a view setting, not part of the instrument
@@ -731,16 +734,18 @@ function dragHandle(key: string, e: PointerEvent) {
     if (o !== null) ghosts.push({ ad: (a << 4) | o, sr: s.sr });
     v = sus / 15;
   } else if (key === 's') {
-    // Levels are close together: it goes to the nearest, nothing shown ahead
+    // Up and down is the level, to the nearest (they are close together);
+    // sideways is when the key goes up, for Play and the picture
     v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD_TOP) / LEVEL_H));
     s.sr = (Math.round(v * 15) << 4) | r;
+    state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f - grabOffset)));
   } else if (key === 'r') {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
     const [n, o] = between(releaseAt, f, aim.x);
     s.sr = (sus << 4) | n;
     if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
   }
-  // Sustain's capsule stays midway along its line, following only up and down
+  // Sustain's capsule keeps its end on the key going up
   free = key === 'keyup' ? null : { key, f: key === 's' ? handlePos('s', s.ad, s.sr).f : Math.max(0, f), v, ghosts };
   render();
 }
@@ -759,7 +764,8 @@ plot.addEventListener('keydown', (e) => {
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, state.keyUp + dir * 5));
   else if (key === 'a') s.ad = (clamp((s.ad >> 4) + dir) << 4) | (s.ad & 15);
   else if (key === 'd') s.ad = (s.ad & 0xf0) | clamp((s.ad & 15) + dir);
-  else if (key === 's') s.sr = (clamp((s.sr >> 4) + dir) << 4) | (s.sr & 15);
+  else if (key === 's' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) s.sr = (clamp((s.sr >> 4) + dir) << 4) | (s.sr & 15);
+  else if (key === 's') state.keyUp = Math.max(1, Math.min(TOTAL - 1, state.keyUp + dir));
   else if (key === 'r') s.sr = (s.sr & 0xf0) | clamp((s.sr & 15) + dir);
   changed();
   (plot.querySelector(`[data-drag="${key}"]`) as SVGGElement | null)?.focus();
