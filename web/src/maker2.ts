@@ -16,7 +16,7 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
-import { defaultPulse, LANES, place, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveProgram, type Bar, type Shape } from './shape';
+import { defaultPulse, LANES, place, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveProgram, widthOn, type Bar, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -638,6 +638,9 @@ function drawWaveBand() {
  */
 function drawHeard(top: number) {
   const defs = el('defs', {}, plot);
+  // Pulse drawn at its width at each moment
+  const line = pulseLine(shape().pulse, TOTAL);
+  const pulseWidth = (px: number) => widthOn(line, (px - ORIGIN) / state.zoom) / PULSE_MAX;
   for (const sp of spans(shape().bars)) {
     // Silence shows as nothing
     if (!sp.wave) continue;
@@ -649,7 +652,7 @@ function drawHeard(top: number) {
     const g = el('g', { class: `heard ${LANE_COLORS[waves[0]]}`, 'data-span': sp.start }, plot);
     const rect = el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
     // The waveform drawn along it, start to finish
-    const line = x2 - x1 > 8 ? el('polyline', { points: waveRun(sp.wave, x1 + 4, top + 7, x2 - x1 - 8, HEARD - 14, 12), class: 'heard-wave' }, g) : null;
+    const line = x2 - x1 > 8 ? el('polyline', { points: waveRun(sp.wave, x1 + 4, top + 7, x2 - x1 - 8, HEARD - 14, 12, pulseWidth), class: 'heard-wave' }, g) : null;
     if (waves.length > 1) {
       const id = `mix-${top}-${sp.wave}`;
       if (!defs.querySelector(`#${id}`)) {

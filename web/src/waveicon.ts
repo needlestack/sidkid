@@ -16,11 +16,11 @@ const NOISE = Array.from({ length: 16 }, (_, i) => ((i * 2654435761) >>> 20) & 0
  * them; real chips differ (and the 6581 from the 8580), so this is a
  * sketch of the shape, not the sound.
  */
-function sample(wave: number, phase: number, cycle: number): number {
+function sample(wave: number, phase: number, cycle: number, width = 0.5): number {
   let out = 0xfff;
   if (wave & WAVE_TRI) out &= Math.round((phase < 0.5 ? phase * 2 : 2 - phase * 2) * 0xfff);
   if (wave & WAVE_SAW) out &= Math.round(phase * 0xfff);
-  if (wave & WAVE_PULSE) out &= phase < 0.5 ? 0xfff : 0;
+  if (wave & WAVE_PULSE) out &= phase < width ? 0xfff : 0;
   if (wave & WAVE_NOISE) out &= NOISE[(cycle * 8 + Math.floor(phase * 8)) % NOISE.length];
   return wave & 0xf0 ? out : 0x800;
 }
@@ -54,19 +54,26 @@ export function waveIcon(wave: number, w = 34, h = 18): SVGSVGElement {
 
 /**
  * Points for a waveform repeated along a strip w × h from (x, y), one cycle
- * every `period` pixels, for an SVG polyline.
+ * every `period` pixels, for an SVG polyline; `width` gives the pulse width
+ * (0-1) at a point along it, for pulse that changes.
  */
-export function waveRun(wave: number, x: number, y: number, w: number, h: number, period: number): string {
+export function waveRun(wave: number, x: number, y: number, w: number, h: number, period: number, width?: (px: number) => number): string {
   const steps = 16;
   const points: string[] = [];
-  const total = Math.max(1, Math.round((w / period) * steps));
-  for (let i = 0; i <= total; i++) {
-    const t = i / steps;
-    const cycle = Math.floor(t);
-    const phase = t - cycle;
-    const px = x + Math.min(w, (i / steps) * period);
-    const py = y + (1 - sample(wave, phase === 0 && i ? 1 : phase, cycle) / 0xfff) * h;
-    points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+  for (let c = 0; c * period < w; c++) {
+    // Pulse width (0-1) for this cycle: how much of it the pulse is high,
+    // with its edge drawn exactly where it falls
+    const pw = width ? Math.max(0, Math.min(1, width(x + c * period))) : 0.5;
+    const phases = Array.from({ length: steps + 1 }, (_, k) => k / steps);
+    if (wave & WAVE_PULSE) phases.push(pw - 1e-6, pw);
+    phases.sort((a, b) => a - b);
+    for (const phase of phases) {
+      if (phase < 0 || phase > 1 || (c > 0 && phase === 0)) continue;
+      const px = x + (c + phase) * period;
+      if (px > x + w) break;
+      const py = y + (1 - sample(wave, phase, c, pw) / 0xfff) * h;
+      points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+    }
   }
   return points.join(' ');
 }

@@ -187,3 +187,15 @@ export function place(bars: Bar[], bar: Bar): Bar[] {
   out.push(bar);
   return out.sort((a, b) => a.start - b.start || LANES.indexOf(a.wave) - LANES.indexOf(b.wave));
 }
+
+/** The pulse width (0-4095) at a time, from the line's corners (as pulseLine gives them). */
+export function widthOn(line: PulsePoint[], t: number): number {
+  for (let i = line.length - 1; i > 0; i--) {
+    const a = line[i - 1];
+    const b = line[i];
+    if (t < a.t) continue;
+    if (t >= b.t) return b.w;
+    return a.w + ((b.w - a.w) * (t - a.t)) / (b.t - a.t);
+  }
+  return line[0].w;
+}
