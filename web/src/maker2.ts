@@ -784,8 +784,12 @@ function drawNotes() {
   // The pitch as the player makes it, frame by frame: vibrato and all
   const heard = heardPitch();
   if (heard) {
+    // Only while there is sound: on to the end holding or repeating, else to where it falls silent
+    const end = programEnd(s);
+    const until = end === null || s.hold || waveLooping(s) ? TOTAL : end;
     const pts: string[] = [];
     heard.forEach((semis, f) => {
+      if (f >= until) return;
       const y = noteY(Math.max(NOTE_LOW - 0.5, Math.min(NOTE_HIGH + 0.5, semis))) + SEMI / 2;
       pts.push(`${x(f).toFixed(1)},${y.toFixed(1)}`, `${x(f + 1).toFixed(1)},${y.toFixed(1)}`);
     });
