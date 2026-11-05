@@ -775,7 +775,10 @@ function drawNotes() {
     const g = el('g', { class: `note-bar${i === selectedNote ? ' selected' : ''}`, 'data-note': i }, plot);
     el('rect', { x: x1, y: y - 3, width: x2 - x1, height: SEMI + 6, class: 'hit' }, g);
     if (i === selectedNote) el('rect', { x: x1, y: y + 0.5, width: x2 - x1, height: SEMI - 1, rx: 2, class: 'note picked' }, g);
-    el('rect', { x: x1 - 3, y: y - 3, width: Math.min(EDGE, (x2 - x1) / 3) + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'start' }, g);
+    const grip = Math.min(EDGE, (x2 - x1) / 3);
+    el('rect', { x: x1 - 3, y: y - 3, width: grip + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'start' }, g);
+    // Its end is the next change: grabbed here too
+    if (s.notes[i + 1]) el('rect', { x: x2 - grip, y: y - 3, width: grip + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'end' }, g);
     el('text', { x: x1 + 3, y: y - 2, class: 'note-label' }, g).textContent = semitoneText(note.semis);
   });
   // The pitch as the player makes it, frame by frame: vibrato and all
@@ -1395,15 +1398,20 @@ plot.addEventListener('pointerdown', (e) => {
       render();
     };
   } else if (target.closest('[data-note]')) {
-    // A change of pitch: its step moved in time and pitch, or its start in time
+    // A step of pitch: moved whole (its change and the next, so it keeps its
+    // length) in time and pitch, or either end in time
     const noteEl = target.closest<SVGGElement>('[data-note]')!;
-    const i = Number(noteEl.dataset.note);
     const original = s.notes;
-    const note = original[i];
     const edge = target.getAttribute('data-note-edge');
-    // Between the changes either side
+    const at = Number(noteEl.dataset.note);
+    // The right end is the next change's start
+    const i = edge === 'end' ? at + 1 : at;
+    const note = original[i];
+    const following = edge ? null : original[i + 1] ?? null;
+    // Kept between the changes either side
     const lo = i > 0 ? original[i - 1].start + 1 : 0;
-    const hi = i + 1 < original.length ? original[i + 1].start - 1 : TOTAL - 1;
+    const beyond = original[i + (following ? 2 : 1)];
+    const hi = (beyond ? beyond.start - 1 : TOTAL - 1) - (following ? following.start - note.start : 0);
     selectedNote = i;
     selected = -1;
     selectedPoint = -1;
@@ -1413,12 +1421,11 @@ plot.addEventListener('pointerdown', (e) => {
     plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
     move = (e) => {
       const df = Math.round(frameAt(e) - start);
-      const next: Note = { start: Math.max(lo, Math.min(hi, note.start + df)), semis: edge ? note.semis : semiAt(e) };
-      s.notes = placeNote(
-        original.filter((o) => o !== note),
-        next,
-      );
-      selectedNote = s.notes.indexOf(next);
+      const moveBy = Math.max(lo, Math.min(hi, note.start + df)) - note.start;
+      const next: Note = { start: note.start + moveBy, semis: edge ? note.semis : semiAt(e) };
+      s.notes = original.map((o) => (o === note ? next : o === following ? { ...o, start: o.start + moveBy } : o));
+      // The step grabbed stays selected (for its right end, that is the step before the change moved)
+      selectedNote = edge === 'end' ? at : s.notes.indexOf(next);
       render();
     };
   } else if (inRoll(e)) {
