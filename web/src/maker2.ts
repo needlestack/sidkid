@@ -36,6 +36,8 @@ const PAD_TOP = 24;
 const PAD_BOTTOM = 26;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
+/** Settings at least this many pixels apart show the other one, greyed out, while a dot is dragged between them */
+const GHOST_GAP = 40;
 
 type Tab = 'volume' | 'wave';
 
@@ -655,7 +657,10 @@ function dragHandle(key: string, e: PointerEvent) {
     if (lo === 15) return [15, null];
     const near = at - position(lo) <= position(lo + 1) - at ? lo : lo + 1;
     const other = near === lo ? lo + 1 : lo;
-    return [near, Math.abs(position(near) - at) * pixels < 1 ? null : other];
+    // Settings close together on screen follow the pointer well enough on
+    // their own; only a long way to the next one needs it shown ahead
+    const gap = (position(lo + 1) - position(lo)) * pixels;
+    return [near, gap < GHOST_GAP || Math.abs(position(near) - at) * pixels < 1 ? null : other];
   };
   const ghosts: { ad: number; sr: number }[] = [];
   let v = 0;
