@@ -49,8 +49,6 @@ const PAD_BOTTOM = 8 + HEARD;
 const VOLUME_PREVIEW = 36;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
-/** The gap between the timeline's sections, in pixels */
-const SECTION_GAP = 5;
 /**
  * Across a gap at least this many pixels wide, a dragged dot moves to the
  * next setting once it is this far from the one it came from (rather than
@@ -507,9 +505,6 @@ function render() {
     el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = 'key up';
   }
 
-  // A gap between the sections, over everything, so each reads as its own
-  for (const y of [floor(), notesTop()]) el('rect', { x: 0, y, width: x(TOTAL) + ORIGIN, height: SECTION_GAP, class: 'section-gap' }, plot);
-
   plot.append(playheadLine);
   movePlayhead();
 
@@ -551,10 +546,10 @@ function renderGutter() {
     });
   };
   if (state.volumeOpen) {
-    toggle(RULER, 22, 'Volume', true, () => openVolume(false));
+    toggle(RULER, 22, 'Volume', true, () => openVolume(false), 'rule');
     // Each level's number sits just above its line
     for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true));
+  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'rule');
   toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
   const r = rows();
   for (const row of r ?? []) {
@@ -696,6 +691,7 @@ function drawVolumePreview(curve: Float32Array) {
 /** The line at silence, the waveform strip under it (which opens and closes the rows), and the rows if open. */
 function drawWaveBand() {
   const top = floor();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
   drawHeard(top + (PAD_BOTTOM - HEARD) / 2);
   if (state.waveOpen) drawBars();
@@ -712,6 +708,7 @@ const LINE_PAD = 6;
 function drawNotes() {
   const s = shape();
   const top = notesTop();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
   const py = (semis: number) => top + LINE_PAD + ((NOTE_HIGH - semis) / (NOTE_HIGH - NOTE_LOW)) * (PAD_BOTTOM - 2 * LINE_PAD);
   el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);

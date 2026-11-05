@@ -111,10 +111,8 @@
   pointer-events: none;
 }
 
-/* Between the sections: firmer than the lines within them */
 .heard-rule {
-  stroke: var(--step-bar);
-  stroke-width: 2;
+  stroke: var(--border);
   pointer-events: none;
 }
 
@@ -149,32 +147,14 @@
 }
 
 .tl-gutter-row.rule {
-  border-top: 5px solid var(--surface);
-}
-
-.section-gap {
-  fill: var(--surface);
-  pointer-events: none;
+  border-top: 1px solid var(--border);
 }
 
 .tl-gutter-row svg {
   flex: none;
 }
 
-/* The timeline's sections sit on a faint tint, so the white gaps between
-   them read as breaks all the way across */
-:root {
-  --plot-bg: #f7f6fb;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --plot-bg: #22212f;
-  }
-}
-
 .tl-scroll {
-  background: var(--plot-bg);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -332,7 +312,7 @@
   font-size: 11.5px;
   font-weight: 600;
   paint-order: stroke;
-  stroke: var(--plot-bg);
+  stroke: var(--surface);
   stroke-width: 4px;
   stroke-linejoin: round;
 }
