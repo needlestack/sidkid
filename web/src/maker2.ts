@@ -733,6 +733,8 @@ plot.addEventListener('pointerdown', (e) => {
     selected = i;
     before();
     dragging = 'bar';
+    // The pointer keeps the look it had over the bar or its end while dragging
+    plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
     move = (e) => {
       const df = Math.round(frameAt(e) - start);
       let next: Bar;
@@ -759,6 +761,12 @@ plot.addEventListener('pointerdown', (e) => {
       render();
     };
   } else if (rows() && yAt(e) > rows()!.top) {
+    const double = e.timeStamp - lastPress.time < 400 && Math.hypot(e.clientX - lastPress.x, e.clientY - lastPress.y) < 6;
+    lastPress = double ? { time: 0, x: 0, y: 0 } : { time: e.timeStamp, x: e.clientX, y: e.clientY };
+    if (double) {
+      addGridBar(e);
+      return;
+    }
     // Drawing a new bar along a row
     const wave = LANES[laneAt(e)];
     const original = s.bars;
@@ -797,6 +805,7 @@ plot.addEventListener('pointerdown', (e) => {
     plot.removeEventListener('pointercancel', onUp);
     dragging = null;
     free = null;
+    plot.style.cursor = '';
     if (moved) {
       changed();
       playShape();
@@ -852,6 +861,27 @@ function dragHandle(key: string, e: PointerEvent) {
   free = key === 'keyup' ? null : { key, f: key === 's' ? handlePos('s', s.ad, s.sr).f : Math.max(0, f), v };
   render();
 }
+
+/**
+ * Adds a bar of a row's waveform, one grid step long, from the grid line
+ * before the pointer: what double-clicking an empty spot in a row does.
+ */
+function addGridBar(e: PointerEvent) {
+  const s = shape();
+  const step = tickStep();
+  const from = Math.max(0, Math.floor(frameAt(e) / step) * step);
+  const bar: Bar = { wave: LANES[laneAt(e)], start: from, end: Math.min(TOTAL, from + step) };
+  const bars = place(s.bars, bar);
+  if (!storable(bars)) return;
+  before();
+  s.bars = bars;
+  selected = bars.indexOf(bar);
+  changed();
+  playShape();
+}
+
+/** The last press on an empty spot in a row, to tell a double-click (the page redraws between the clicks, so the browser can't) */
+let lastPress = { time: 0, x: 0, y: 0 };
 
 // Handles move with the arrow keys too, a step at a time
 plot.addEventListener('keydown', (e) => {
