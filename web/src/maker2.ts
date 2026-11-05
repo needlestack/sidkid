@@ -478,7 +478,8 @@ function tickStep(): number {
   return steps.find((s) => s * state.zoom >= 56) ?? 10 * FPS;
 }
 
-function render() {
+/** Redraws the page; `keepReadout` leaves the controls under the timeline alone (a slider there is being dragged). */
+function render(keepReadout = false) {
   if (!state.zoom) state.zoom = Math.max(wholeZoom(), scroller.clientWidth / 100);
   const s = shape();
   $<HTMLInputElement>('name').value = document.activeElement === $('name') ? $<HTMLInputElement>('name').value : s.name;
@@ -531,7 +532,7 @@ function render() {
   movePlayhead();
 
   renderGutter();
-  renderReadout();
+  if (!keepReadout) renderReadout();
 }
 
 function renderGutter() {
@@ -1160,7 +1161,8 @@ function vibratoReadout(box: HTMLElement) {
       out.textContent = show();
       persist();
       sendToPlayer();
-      render();
+      // Not the controls: rebuilding them would pull the slider out from under the pointer
+      render(true);
     });
     input.addEventListener('change', () => {
       marked = false;
