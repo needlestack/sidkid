@@ -493,3 +493,32 @@
   font-weight: 600;
   pointer-events: none;
 }
+
+/* The repeating section, and fainter, its repeats */
+.width-loop {
+  fill: var(--pulse);
+  fill-opacity: 0.12;
+  pointer-events: none;
+}
+
+.width-loop.again {
+  fill-opacity: 0.05;
+}
+
+.width-loop-edge {
+  cursor: ew-resize;
+}
+
+.width-loop-edge .hit {
+  fill: transparent;
+}
+
+.width-loop-edge .bar {
+  fill: var(--pulse);
+  opacity: 0.55;
+}
+
+.width-loop-edge:hover .bar,
+.width-loop-edge.dragging .bar {
+  opacity: 1;
+}

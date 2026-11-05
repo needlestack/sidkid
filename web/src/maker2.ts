@@ -731,6 +731,22 @@ function drawWidth() {
   const s = shape();
   const r = rowOf(null);
   const width = x(TOTAL) + ORIGIN;
+  const { points, loop } = s.pulse;
+  // The repeat: the section that repeats shaded, its repeats fainter after
+  // it, and its start an edge to drag from point to point
+  if (loop !== null && loop < points.length - 1) {
+    const from = points[loop].t;
+    const to = points[points.length - 1].t;
+    const period = to - from;
+    for (let t = to; t < TOTAL && period > 0; t += period) {
+      el('rect', { x: x(t), y: r.top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: r.h - 2, class: 'width-loop again' }, plot);
+    }
+    el('rect', { x: x(from), y: r.top + 1, width: x(to) - x(from), height: r.h - 2, class: 'width-loop' }, plot);
+    el('text', { x: x(from) + 10, y: r.top + 12, class: 'width-repeat' }, plot).textContent = '↻ repeat';
+    const edge = el('g', { class: `width-loop-edge${dragging === 'loop' ? ' dragging' : ''}`, 'data-loop-edge': '' }, plot);
+    el('rect', { x: x(from) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, edge);
+    el('rect', { x: x(from) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'bar' }, edge);
+  }
   el('line', { x1: 0, x2: width, y1: widthY(SQUARE), y2: widthY(SQUARE), class: 'width-square' }, plot);
   const pts = pulseLine(s.pulse, TOTAL)
     .map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${widthY(p.w).toFixed(1)}`)
@@ -742,12 +758,10 @@ function drawWidth() {
     if (sp.wave & WAVE_PULSE) el('rect', { x: x(sp.start), y: r.top, width: x(sp.end ?? TOTAL) - x(sp.start), height: r.h }, clip);
   }
   el('polyline', { points: pts, class: 'width-line', 'clip-path': 'url(#pulse-heard)' }, plot);
-  const { points, loop } = s.pulse;
   points.forEach((p, i) => {
     const g = el('g', { class: `width-point${i === selectedPoint ? ' selected' : ''}`, 'data-point': i }, plot);
     el('circle', { cx: x(p.t), cy: widthY(p.w), r: 11, class: 'hit' }, g);
     el('circle', { cx: x(p.t), cy: widthY(p.w), r: 5, class: 'dot' }, g);
-    if (i === loop) el('text', { x: x(p.t) + 8, y: r.top + 12, class: 'width-repeat' }, g).textContent = '↻ repeat';
   });
 }
 
@@ -806,8 +820,6 @@ function pointReadout(box: HTMLElement) {
   box2.addEventListener('change', () => {
     before();
     pulse.loop = box2.checked ? i : null;
-    // Each time round ends where it began
-    if (pulse.loop !== null) pulse.points[last].w = pulse.points[i].w;
     changed();
   });
   repeat.append(box2, ' Repeat from here while the note is held');
@@ -912,6 +924,21 @@ plot.addEventListener('pointerdown', (e) => {
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
+  } else if (rows() && target.closest('[data-loop-edge]')) {
+    // Where the repeat starts: snapped to the nearest point before the last
+    const pulse = s.pulse;
+    before();
+    dragging = 'loop';
+    plot.style.cursor = 'ew-resize';
+    move = (e) => {
+      const pts = pulse.points;
+      const last = pts.length - 1;
+      const f = frameAt(e);
+      let best = 0;
+      for (let i = 1; i < last; i++) if (Math.abs(pts[i].t - f) < Math.abs(pts[best].t - f)) best = i;
+      pulse.loop = best;
+      render();
+    };
   } else if (rows() && (target.closest('[data-point]') || inWidthRow(e))) {
     // The pulse width line: drag a point, or add one where the row is clicked
     const pulse = s.pulse;
@@ -940,12 +967,6 @@ plot.addEventListener('pointerdown', (e) => {
       // The first point stays at the start; the others move between their neighbours
       if (i > 0) p.t = Math.max(pts[i - 1].t + 1, Math.min(i + 1 < pts.length ? pts[i + 1].t - 1 : TOTAL - 1, Math.round(frameAt(e))));
       p.w = widthAt(e);
-      // A repeat ends where it began: the loop point and the last move together
-      const last = pts.length - 1;
-      if (pulse.loop !== null) {
-        if (i === last) p.w = pts[pulse.loop].w;
-        else if (i === pulse.loop) pts[last].w = p.w;
-      }
       render();
     };
   } else if (rows() && barEl) {

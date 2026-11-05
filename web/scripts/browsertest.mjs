@@ -426,6 +426,15 @@ try {
   });
   report(steep === '100 800 f00 f00', 'maker2 steep pulse width follows the line', steep);
 
+  // A repeat that doesn't end where it began jumps back each time round, keeping its length
+  const saw = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    s.instruments[s.current].pulse = { points: [{ t: 0, w: 0x200 }, { t: 30, w: 0xe00 }], loop: 0 };
+    const p = window.maker2.trace(100).pulse;
+    return [0, 30, 31, 60, 61, 90].map((f) => p[f].toString(16)).join(' ');
+  });
+  report(saw === '200 e00 266 e00 266 e00', 'maker2 pulse repeat jumps back', saw);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

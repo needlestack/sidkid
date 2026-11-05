@@ -24,8 +24,9 @@ export interface PulsePoint {
 
 /**
  * Pulse width over the note: a line through points, holding after the
- * last one, or repeating from the `loop` point (the last point is kept at
- * the loop point's width, so each time round starts where it began).
+ * last one, or repeating from the `loop` point: from the last point it
+ * goes straight back to the loop point's width and on again, so a repeat
+ * can rise and fall back smoothly or jump.
  */
 export interface PulseShape {
   points: PulsePoint[];
@@ -133,12 +134,19 @@ export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Prog
   const pts = pulse.points;
   const steps: Step[] = [pulseStep({ type: 'width', width: pts[0].w })];
   const leaving: number[] = [];
+  const along = (i: number, f: number, frames: number) => pts[i].w + Math.round(((pts[i + 1].w - pts[i].w) * f) / frames);
   for (let i = 0; i + 1 < pts.length; i++) {
     leaving.push(steps.length);
-    const change = pts[i + 1].w - pts[i].w;
     const frames = Math.max(1, pts[i + 1].t - pts[i].t);
-    if (fastestSweep(change) <= frames) for (const sw of sweepRows(change, frames)) steps.push(pulseStep({ type: 'sweep', ...sw }));
-    else for (let f = 1; f <= frames; f++) steps.push(pulseStep({ type: 'width', width: pts[i].w + Math.round((change * f) / frames) }));
+    // The repeat jumps back here, wherever the width has got to, so this
+    // stretch starts by setting its first frame's width outright
+    const first = i === pulse.loop ? 1 : 0;
+    if (first) steps.push(pulseStep({ type: 'width', width: along(i, 1, frames) }));
+    const from = first ? along(i, 1, frames) : pts[i].w;
+    const change = pts[i + 1].w - from;
+    const rest = frames - first;
+    if (rest > 0 && fastestSweep(change) <= rest) for (const sw of sweepRows(change, rest)) steps.push(pulseStep({ type: 'sweep', ...sw }));
+    else for (let f = first + 1; f <= frames; f++) steps.push(pulseStep({ type: 'width', width: along(i, f, frames) }));
   }
   const program: Program = { name, steps, next: null };
   if (pulse.loop !== null && pulse.loop < pts.length - 1) program.next = { program, step: leaving[pulse.loop] };
@@ -151,7 +159,8 @@ export function pulseLine(pulse: PulseShape, frames: number): PulsePoint[] {
   const last = pts[pts.length - 1];
   const out = pts.map((p) => ({ ...p }));
   if (pulse.loop !== null && pulse.loop < pts.length - 1) {
-    const body = pts.slice(pulse.loop + 1);
+    // Each time round starts at the loop point's width (a jump if the last point isn't there)
+    const body = pts.slice(pulse.loop);
     const period = last.t - pts[pulse.loop].t;
     for (let n = 1; last.t + (n - 1) * period < frames; n++) for (const p of body) out.push({ t: p.t + n * period, w: p.w });
   } else out.push({ t: frames, w: last.w });
