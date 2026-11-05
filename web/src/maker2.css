@@ -90,7 +90,7 @@
   border-top: 1px solid var(--border);
 }
 
-.tl-gutter-row.heard {
+.tl-gutter-row.heard-label {
   font-size: 11px;
 }
 
@@ -270,14 +270,47 @@
   stroke: var(--border);
 }
 
+.heard {
+  cursor: pointer;
+}
+
+.heard:hover rect {
+  stroke: var(--accent);
+}
+
+.heard {
+  --c: var(--step-bar);
+}
+
+.heard.tri {
+  --c: var(--tri);
+}
+
+.heard.saw {
+  --c: var(--saw);
+}
+
+.heard.pulse {
+  --c: var(--pulse);
+}
+
+.heard.noise {
+  --c: var(--noise);
+}
+
 .heard rect {
-  fill: var(--surface-2);
-  stroke: var(--step-bar);
+  fill: var(--c);
+  fill-opacity: 0.22;
+  stroke: var(--c);
   stroke-width: 1;
 }
 
 .heard.none rect {
   fill: none;
+  stroke: var(--step-bar);
+}
+
+.heard.none rect {
   stroke-dasharray: 3 3;
 }
 

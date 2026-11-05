@@ -26,14 +26,16 @@ const TEST_INSTRUMENT = 1;
 const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
-const PLOT = 232;
+const PLOT = 256;
 const HEIGHT = RULER + PLOT;
 /** In the waveform tab, the strip above the rows showing what is heard */
 const HEARD = 24;
 const LANE_H = (PLOT - HEARD) / LANES.length;
 /** Room above full volume and below silence for the dots' labels */
 const PAD_TOP = 24;
-const PAD_BOTTOM = 32;
+const PAD_BOTTOM = 30 + HEARD;
+/** In the volume tab, the strip under silence showing what is heard */
+const VOLUME_HEARD = RULER + PLOT - HEARD;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 /**
@@ -345,8 +347,9 @@ function renderGutter() {
     add(plotY(1) - 8, 16, ['Full']);
     add(plotY(0.5) - 8, 16, ['Half']);
     add(plotY(0) - 8, 16, ['Silent']);
+    add(VOLUME_HEARD, HEARD, ['You hear'], 'heard-label');
   } else {
-    add(RULER, HEARD, ['You hear'], 'heard');
+    add(RULER, HEARD, ['You hear'], 'heard-label');
     LANES.forEach((w, i) => add(laneTop(i), LANE_H, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
   }
 }
@@ -381,6 +384,8 @@ function drawVolume(curve: Float32Array) {
   };
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
+  drawHeard(VOLUME_HEARD);
+
   // Attack, decay and release are times: dots that move sideways, labelled
   // above. Sustain is a level, its dot at the key going up: up and down
   // sets the level, sideways the key up; labelled below.
@@ -422,6 +427,23 @@ function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
   }
 }
 
+/**
+ * What is heard: the waveform each stretch of time adds up to, as a strip
+ * from `top`. Clicking a stretch picks its bar in the waveform tab.
+ */
+function drawHeard(top: number) {
+  for (const sp of spans(shape().bars)) {
+    const x1 = x(sp.start);
+    const x2 = x(sp.end ?? TOTAL);
+    // Coloured like its bars: a mix takes the colour of its first row's
+    const first = LANES.find((w) => sp.wave & w);
+    const g = el('g', { class: `heard ${first ? LANE_COLORS[first] : 'none'}`, 'data-span': sp.start }, plot);
+    el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
+    const t = el('text', { x: x1 + 6, y: top + HEARD / 2 + 4 }, g);
+    if (x2 - x1 > 60) t.textContent = sp.wave ? waveName(sp.wave) : 'Silent';
+  }
+}
+
 /** Where an envelope handle sits for some settings. */
 function handlePos(key: string, ad: number, sr: number): { f: number; v: number } {
   const [a, d, sus] = [ad >> 4, ad & 15, sr >> 4];
@@ -452,15 +474,7 @@ function drawWaves(curve: Float32Array) {
 
   LANES.forEach((_, i) => el('line', { x1: 0, x2: x(TOTAL), y1: laneTop(i), y2: laneTop(i), class: 'lane-line' }, plot));
 
-  // What is heard: the waveform each stretch of time adds up to
-  for (const sp of spans(s.bars)) {
-    const x1 = x(sp.start);
-    const x2 = x(sp.end ?? TOTAL);
-    const g = el('g', { class: `heard${sp.wave ? '' : ' none'}` }, plot);
-    el('rect', { x: x1 + 1, y: RULER + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
-    const t = el('text', { x: x1 + 6, y: RULER + HEARD / 2 + 4 }, g);
-    if (x2 - x1 > 60) t.textContent = sp.wave ? waveName(sp.wave) : 'Silent';
-  }
+  drawHeard(RULER);
 
   s.bars.forEach((b, i) => {
     const lane = LANES.indexOf(b.wave);
@@ -564,8 +578,17 @@ plot.addEventListener('pointerdown', (e) => {
   const marks = undoStack.length;
   let move: ((e: PointerEvent) => void) | null = null;
   let moved = false;
+  const span = target.closest<SVGGElement>('[data-span]');
 
-  if (handle) {
+  if (span) {
+    // A stretch of what is heard: its first bar, in the waveform tab
+    const at = Number(span.dataset.span);
+    selected = s.bars.findIndex((b) => b.start <= at && at < (b.end ?? Infinity));
+    state.tab = 'wave';
+    persist();
+    render();
+    return;
+  } else if (handle) {
     const key = handle.dataset.drag!;
     dragging = key;
     // Selected from the moment it is grabbed
