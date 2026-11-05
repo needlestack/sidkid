@@ -232,7 +232,7 @@
   pointer-events: none;
 }
 
-.env-grip circle {
+.env-grip .dot {
   fill: var(--accent);
   stroke: var(--accent);
   stroke-width: 2.5;

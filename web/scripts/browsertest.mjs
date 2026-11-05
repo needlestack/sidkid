@@ -443,6 +443,15 @@ try {
   const attack = await m2.evaluate(() => window.maker2.state().instruments[0].ad >> 4);
   report(attack === 10, 'maker2 drag the attack', `attack ${attack}`);
 
+  // Dragging the sustain capsule down lowers the level held, and leaves decay alone
+  const capsule = await m2.$eval('[data-drag=s] .dot', (e) => {
+    const r = e.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  });
+  await dragTo(capsule, [capsule[0], capsule[1] + 60]);
+  const env = await m2.evaluate(() => window.maker2.state().instruments[0]);
+  report(env.sr >> 4 < 10 && (env.ad & 15) === 9, 'maker2 drag the sustain', `sustain ${env.sr >> 4}, decay ${env.ad & 15}`);
+
   // Drawing along the triangle row adds a bar there
   await m2.click('#tabs [data-tab=wave]');
   await dragTo(await plotPoint(10, 24 + 24 + 24), await plotPoint(30, 24 + 24 + 24));

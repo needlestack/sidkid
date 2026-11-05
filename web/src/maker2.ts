@@ -33,7 +33,7 @@ const HEARD = 24;
 const LANE_H = (PLOT - HEARD) / LANES.length;
 /** Room above full volume and below silence for the dots' labels */
 const PAD_TOP = 24;
-const PAD_BOTTOM = 26;
+const PAD_BOTTOM = 32;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 /** Settings at least this many pixels apart show the other one, greyed out, while a dot is dragged between them */
@@ -389,60 +389,79 @@ function drawVolume(curve: Float32Array) {
       el('path', { d: areaPath(level(g.ad, g.sr, state.keyUp), 0, Math.min(TOTAL, releaseEnd(g.ad, g.sr, state.keyUp) + 2)), class: 'env-ghostline' }, plot);
       const p = handlePos(free.key, g.ad, g.sr);
       el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'env-ghostdot' }, plot);
-      // Decay and sustain show only the value they will land on
-      if (free.key !== 'ds') text(plot, x(p.f), below(p.v), handleText(free.key, g.ad, g.sr), 'env-ghostlabel');
+      text(plot, x(p.f), below(p.v), handleText(free.key, g.ad, g.sr), 'env-ghostlabel');
     }
   }
-  for (const key of ['a', 'ds', 'r']) {
+  // Attack, decay and release are times: dots that move sideways, labelled
+  // above. Sustain is a level: a capsule on its line that moves up and down,
+  // labelled below.
+  for (const key of ['a', 'd', 'r', 's']) {
     const p = handlePos(key, s.ad, s.sr);
     const label = handleText(key, s.ad, s.sr);
     const held = free?.key === key;
+    const upDown = key === 's';
     const g = el('g', { class: `env-handle${held ? ' held' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
-    el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
-    el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
-    if (!held) arrows(g, x(p.f), plotY(p.v), key === 'ds');
-    // Decay is a time, above the line; sustain a level, below it
-    if (key === 'ds') {
-      text(g, x(p.f), above(p.v), envText.d(s.ad & 15));
-      text(g, x(p.f), below(p.v), envText.s(s.sr >> 4));
-    } else text(g, x(p.f), above(p.v), label);
-    // The dot in hand stays selected under the pointer, with the ways it moves
+    if (upDown) {
+      el('rect', { x: x(p.f) - 22, y: plotY(p.v) - 11, width: 44, height: 22, class: 'hit' }, g);
+      capsule(g, x(p.f), plotY(p.v));
+    } else {
+      el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
+      el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
+    }
+    if (!held) arrows(g, x(p.f), plotY(p.v), upDown);
+    // Under the capsule, clear of its down arrow
+    text(g, x(p.f), upDown ? below(p.v) + 7 : above(p.v), label);
+    // The one in hand stays selected under the pointer, with the ways it moves
     if (held) {
       const grip = el('g', { class: 'env-grip' }, plot);
-      el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 6 }, grip);
-      arrows(grip, x(free!.f), plotY(free!.v), key === 'ds');
+      if (upDown) capsule(grip, x(free!.f), plotY(free!.v));
+      else el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 6, class: 'dot' }, grip);
+      arrows(grip, x(free!.f), plotY(free!.v), upDown);
     }
   }
 }
 
-/** Little arrows round a dot for the ways it moves: sideways, or all four ways. */
-function arrows(parent: Element, cx: number, cy: number, fourWay: boolean) {
+function capsule(parent: Element, cx: number, cy: number) {
+  el('rect', { x: cx - 14, y: cy - 5, width: 28, height: 10, rx: 5, class: 'dot' }, parent);
+}
+
+/** Little arrows either side of a handle for the way it moves: sideways, or up and down. */
+function arrows(parent: Element, cx: number, cy: number, upDown: boolean) {
   const g = el('g', { class: 'env-arrows' }, parent);
-  const at = (dx: number, dy: number) => {
-    // A small triangle 15px out, pointing away from the dot
-    const tip = [cx + dx * 19, cy + dy * 19];
-    const base = [cx + dx * 13, cy + dy * 13];
+  const at = (dx: number, dy: number, out: number) => {
+    // A small triangle pointing away from the handle
+    const tip = [cx + dx * (out + 6), cy + dy * (out + 6)];
+    const base = [cx + dx * out, cy + dy * out];
     const side = [dy * 4, dx * 4];
     el('path', { d: `M${tip[0]},${tip[1]}L${base[0] + side[0]},${base[1] + side[1]}L${base[0] - side[0]},${base[1] - side[1]}Z` }, g);
   };
-  at(-1, 0);
-  at(1, 0);
-  if (fourWay) {
-    at(0, -1);
-    at(0, 1);
+  if (upDown) {
+    at(0, -1, 9);
+    at(0, 1, 9);
+  } else {
+    at(-1, 0, 13);
+    at(1, 0, 13);
   }
 }
 
-/** Where an envelope dot sits for some settings. */
+/** Where an envelope handle sits for some settings. */
 function handlePos(key: string, ad: number, sr: number): { f: number; v: number } {
-  if (key === 'a') return { f: attackFrames(ad >> 4), v: 1 };
-  if (key === 'ds') return { f: decayEnd(ad >> 4, ad & 15, sr >> 4), v: (sr >> 4) / 15 };
+  const [a, d, sus] = [ad >> 4, ad & 15, sr >> 4];
+  if (key === 'a') return { f: attackFrames(a), v: 1 };
+  if (key === 'd') return { f: decayEnd(a, d, sus), v: sus / 15 };
+  if (key === 's') {
+    // Midway along the level held, from the end of the decay to the key going up
+    const from = decayEnd(a, d, sus);
+    const to = Math.max(state.keyUp, from + 80 / state.zoom);
+    return { f: (from + to) / 2, v: sus / 15 };
+  }
   return { f: releaseEnd(ad, sr, state.keyUp), v: 0 };
 }
 
 function handleText(key: string, ad: number, sr: number): string {
   if (key === 'a') return envText.a(ad >> 4);
-  if (key === 'ds') return `${envText.d(ad & 15)} · ${envText.s(sr >> 4)}`;
+  if (key === 'd') return envText.d(ad & 15);
+  if (key === 's') return envText.s(sr >> 4);
   return envText.r(sr & 15);
 }
 
@@ -567,6 +586,7 @@ plot.addEventListener('pointerdown', (e) => {
   const barEl = target.closest<SVGGElement>('[data-bar]');
   const s = shape();
   const start = frameAt(e);
+  const [downX, downY] = [e.clientX, e.clientY];
   const marks = undoStack.length;
   let move: ((e: PointerEvent) => void) | null = null;
   let moved = false;
@@ -642,7 +662,8 @@ plot.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   plot.setPointerCapture(e.pointerId);
   const onMove = (e: PointerEvent) => {
-    if (!moved && Math.abs(frameAt(e) - start) * state.zoom < 3) return;
+    // A drag starts once the pointer has moved a few pixels, any way
+    if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) < 3) return;
     moved = true;
     move!(e);
   };
@@ -704,23 +725,23 @@ function dragHandle(key: string, e: PointerEvent) {
     s.ad = (n << 4) | d;
     if (o !== null) ghosts.push({ ad: (o << 4) | d, sr: s.sr });
     v = 1;
-  } else if (key === 'ds') {
+  } else if (key === 'd') {
+    const [n, o] = between((dv) => decayEnd(a, dv, sus), f, aim.x);
+    s.ad = (a << 4) | n;
+    if (o !== null) ghosts.push({ ad: (a << 4) | o, sr: s.sr });
+    v = sus / 15;
+  } else if (key === 's') {
+    // Levels are close together: it goes to the nearest, nothing shown ahead
     v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD_TOP) / LEVEL_H));
-    // Sustain levels are evenly spaced, 1/15 apart
-    const [ns, os] = between((sv) => sv / 15, v, aim.y, LEVEL_H);
-    const decayAt = (dv: number) => decayEnd(a, dv, ns);
-    const [nd, od] = between(decayAt, f, aim.x);
-    s.ad = (a << 4) | nd;
-    s.sr = (ns << 4) | r;
-    if (od !== null) ghosts.push({ ad: (a << 4) | od, sr: s.sr });
-    if (os !== null) ghosts.push({ ad: s.ad, sr: (os << 4) | r });
+    s.sr = (Math.round(v * 15) << 4) | r;
   } else if (key === 'r') {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
     const [n, o] = between(releaseAt, f, aim.x);
     s.sr = (sus << 4) | n;
     if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
   }
-  free = key === 'keyup' ? null : { key, f: Math.max(0, f), v, ghosts };
+  // Sustain's capsule stays midway along its line, following only up and down
+  free = key === 'keyup' ? null : { key, f: key === 's' ? handlePos('s', s.ad, s.sr).f : Math.max(0, f), v, ghosts };
   render();
 }
 
@@ -737,8 +758,8 @@ plot.addEventListener('keydown', (e) => {
   before();
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, state.keyUp + dir * 5));
   else if (key === 'a') s.ad = (clamp((s.ad >> 4) + dir) << 4) | (s.ad & 15);
-  else if (key === 'ds' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) s.sr = (clamp((s.sr >> 4) + dir) << 4) | (s.sr & 15);
-  else if (key === 'ds') s.ad = (s.ad & 0xf0) | clamp((s.ad & 15) + dir);
+  else if (key === 'd') s.ad = (s.ad & 0xf0) | clamp((s.ad & 15) + dir);
+  else if (key === 's') s.sr = (clamp((s.sr >> 4) + dir) << 4) | (s.sr & 15);
   else if (key === 'r') s.sr = (s.sr & 0xf0) | clamp((s.sr & 15) + dir);
   changed();
   (plot.querySelector(`[data-drag="${key}"]`) as SVGGElement | null)?.focus();
