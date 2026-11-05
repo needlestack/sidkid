@@ -233,6 +233,18 @@ let dragging: string | null = null;
  * setting it will land on and, greyed out, the next one the other side.
  */
 let free: { key: string; f: number; v: number; ghosts: { ad: number; sr: number }[] } | null = null;
+
+/** For each way a dot moves: where the pointer was, which way it is heading, and the pair of settings it is between */
+interface Aim {
+  last: number;
+  heading: number;
+  near: number;
+  other: number;
+  /** Whether the other setting is shown, greyed out */
+  shown: boolean;
+}
+const NO_AIM: Aim = { last: 0, heading: 0, near: -1, other: -1, shown: false };
+const aim = { x: { ...NO_AIM }, y: { ...NO_AIM } };
 let playhead = -1;
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number> = {}, parent?: Element): SVGElementTagNameMap[K] {
@@ -555,6 +567,8 @@ plot.addEventListener('pointerdown', (e) => {
     dragging = key;
     // Selected from the moment it is grabbed
     if (key !== 'keyup') free = { key, ...handlePos(key, s.ad, s.sr), ghosts: [] };
+    aim.x = { ...NO_AIM, last: e.clientX };
+    aim.y = { ...NO_AIM, last: e.clientY };
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
@@ -648,9 +662,17 @@ function dragHandle(key: string, e: PointerEvent) {
   const s = shape();
   const f = frameAt(e);
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
-  // The settings either side of the pointer: the nearer it lands on, the
-  // other is shown greyed out. Right on a setting, there is only that one.
-  const between = (position: (v: number) => number, at: number, pixels = state.zoom): [number, number | null] => {
+  // Which way the pointer is moving, sideways and up or down
+  for (const [axis, now, sign] of [[aim.x, e.clientX, 1], [aim.y, e.clientY, -1]] as const) {
+    if (Math.abs(now - axis.last) < 1) continue;
+    axis.heading = Math.sign(now - axis.last) * sign;
+    axis.last = now;
+  }
+  // The settings either side of the pointer: the nearer it lands on, and
+  // the other greyed out. Right on a setting, there is only that one. Just
+  // past halfway the one left behind is hidden, until the pointer heads
+  // back towards it.
+  const between = (position: (v: number) => number, at: number, axis: Aim, pixels = state.zoom): [number, number | null] => {
     let lo = -1;
     for (let v = 0; v < 16; v++) if (position(v) <= at) lo = v;
     if (lo < 0) return [0, null];
@@ -660,29 +682,32 @@ function dragHandle(key: string, e: PointerEvent) {
     // Settings close together on screen follow the pointer well enough on
     // their own; only a long way to the next one needs it shown ahead
     const gap = (position(lo + 1) - position(lo)) * pixels;
-    return [near, gap < GHOST_GAP || Math.abs(position(near) - at) * pixels < 1 ? null : other];
+    if (gap < GHOST_GAP || Math.abs(position(near) - at) * pixels < 1) return [near, null];
+    if (near !== axis.near || other !== axis.other) Object.assign(axis, { near, other, shown: false });
+    if (axis.heading === Math.sign(position(other) - position(near))) axis.shown = true;
+    return [near, axis.shown ? other : null];
   };
   const ghosts: { ad: number; sr: number }[] = [];
   let v = 0;
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
   else if (key === 'a') {
-    const [n, o] = between(attackFrames, f);
+    const [n, o] = between(attackFrames, f, aim.x);
     s.ad = (n << 4) | d;
     if (o !== null) ghosts.push({ ad: (o << 4) | d, sr: s.sr });
     v = 1;
   } else if (key === 'ds') {
     v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD_TOP) / LEVEL_H));
     // Sustain levels are evenly spaced, 1/15 apart
-    const [ns, os] = between((sv) => sv / 15, v, LEVEL_H);
+    const [ns, os] = between((sv) => sv / 15, v, aim.y, LEVEL_H);
     const decayAt = (dv: number) => decayEnd(a, dv, ns);
-    const [nd, od] = between(decayAt, f);
+    const [nd, od] = between(decayAt, f, aim.x);
     s.ad = (a << 4) | nd;
     s.sr = (ns << 4) | r;
     if (od !== null) ghosts.push({ ad: (a << 4) | od, sr: s.sr });
     if (os !== null) ghosts.push({ ad: s.ad, sr: (os << 4) | r });
   } else if (key === 'r') {
     const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
-    const [n, o] = between(releaseAt, f);
+    const [n, o] = between(releaseAt, f, aim.x);
     s.sr = (sus << 4) | n;
     if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
   }
