@@ -1,9 +1,10 @@
 // Instruments as shapes on a timeline, for the second instrument maker:
 // waveforms are bars in time, one row per oscillator, and bars that overlap
-// in time play together as a combined waveform. The shape is turned into a
-// GoatTracker wave program for the player.
+// in time play together as a combined waveform; notes are bars at a pitch.
+// Both go into one GoatTracker wave program (each of its rows sets a
+// waveform and a pitch), and pulse width into a pulse program.
 
-import { fastestSweep, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
+import { fastestSweep, pitchRight, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
 
 /** The waveform rows, top to bottom: pulse last, so its width row sits under everything */
 export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_NOISE, WAVE_PULSE];
@@ -12,9 +13,20 @@ export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_NOISE, WAVE_PULSE];
 export interface Bar {
   wave: number;
   start: number;
-  /** The first frame after it, or null to keep going until the note ends. */
+  /** The first frame after it (null, from before holding was a setting of its own: until the note ends) */
   end: number | null;
 }
+
+/** A pitch for a while, in semitones from the note played. */
+export interface Note {
+  start: number;
+  end: number;
+  semis: number;
+}
+
+/** The range of the notes, in semitones from the note played */
+export const NOTE_LOW = -12;
+export const NOTE_HIGH = 24;
 
 /** A pulse width (0-4095) at a time, in frames from the start of the note. */
 export interface PulsePoint {
@@ -47,28 +59,80 @@ export interface Shape {
   sr: number;
   bars: Bar[];
   pulse: PulseShape;
-  /** Where the waveform repeats from (a frame where it changes), or null to play through once */
+  notes: Note[];
+  /** Where the waveform and notes repeat from (a frame where either changes), or null to play through once */
   waveLoop: number | null;
+  /** After the last bar or note, without a repeat: hold where it got to (true) or fall silent */
+  hold: boolean;
 }
 
-/** Where the waveform's repeat would end: the end of the last bar, or null if a bar keeps going. */
-export function loopEnd(bars: Bar[]): number | null {
-  if (!bars.length || bars.some((b) => b.end === null)) return null;
-  return Math.max(...bars.map((b) => b.end!));
+/** The parts of a shape that make its wave program */
+export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'>;
+
+/** Where the wave program's bars and notes end, or null if there are none. */
+export function programEnd(s: Pick<Shape, 'bars' | 'notes'>): number | null {
+  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...s.notes.map((n) => n.end)];
+  return ends.length ? Math.max(...ends) : null;
 }
 
-/** Whether a shape's waveform repeats: from its loop point to the end of its last bar. */
-export function waveLooping(shape: Pick<Shape, 'bars' | 'waveLoop'>): boolean {
-  const end = loopEnd(shape.bars);
-  return shape.waveLoop !== null && end !== null && shape.waveLoop < end;
+/** Whether the waveform and notes repeat: from the loop point to their end. */
+export function waveLooping(s: WaveParts): boolean {
+  const end = programEnd(s);
+  return s.waveLoop !== null && end !== null && s.waveLoop < end;
 }
 
-/** The times the waveform changes before its end, where a repeat can start. */
-export function waveChanges(bars: Bar[]): number[] {
-  const end = loopEnd(bars) ?? Infinity;
-  return spans(bars)
-    .map((s) => s.start)
-    .filter((t) => t < end);
+/** The times the waveform or pitch changes before the end, where a repeat can start. */
+export function waveChanges(s: WaveParts): number[] {
+  return stretches(s).map((st) => st.start);
+}
+
+/** The pitch at a time: the note playing then, or the last one before it (a pitch holds), or the note played. */
+export function pitchAt(notes: Note[], t: number): number {
+  let pitch = 0;
+  let from = -1;
+  for (const n of notes) {
+    if (n.start <= t && t < n.end) return n.semis;
+    if (n.end <= t && n.end > from) {
+      pitch = n.semis;
+      from = n.end;
+    }
+  }
+  return pitch;
+}
+
+/** A stretch of time with one waveform and one pitch: a row of the wave program. */
+export interface Stretch {
+  start: number;
+  end: number | null;
+  wave: number;
+  pitch: number;
+}
+
+/** The stretches from the start of the note to the end of the last bar or note. */
+export function stretches(s: Pick<Shape, 'bars' | 'notes'>): Stretch[] {
+  const end = programEnd(s);
+  if (end === null) return [];
+  const cuts = new Set([0, end]);
+  for (const b of s.bars) {
+    cuts.add(Math.max(0, b.start));
+    if (b.end !== null) cuts.add(b.end);
+  }
+  for (const n of s.notes) {
+    cuts.add(Math.max(0, n.start));
+    cuts.add(n.end);
+  }
+  const times = [...cuts].filter((t) => t <= end).sort((a, b) => a - b);
+  const out: Stretch[] = [];
+  for (let i = 0; i + 1 < times.length; i++) {
+    const t = times[i];
+    let wave = 0;
+    for (const b of s.bars) if (b.start <= t && t < endOf(b)) wave |= b.wave;
+    const pitch = pitchAt(s.notes, t);
+    const last = out[out.length - 1];
+    if (last && last.wave === wave && last.pitch === pitch) last.end = times[i + 1];
+    else out.push({ start: t, end: times[i + 1], wave, pitch });
+  }
+  return out;
 }
 
 /** A stretch of time with one waveform (oscillator bits, 0 for none). */
@@ -110,26 +174,37 @@ export function storable(bars: Bar[]): boolean {
 export const DELAY_FRAMES = (left: number) => left + 1;
 const LONGEST_DELAY = 15;
 const PITCH_KEEP = 0x80;
-/** Relative pitch 0: the note played */
-const PITCH_NOTE = 0x00;
+const WAVE_KEEP = 0;
 
 /**
- * The wave program for a shape: each span sets its waveform (with the gate
- * on) and waits out its time; the program then stops on the last one, or
- * with a repeat, jumps back to the rows of the span it repeats from.
+ * The wave program for a shape: a row for each stretch, setting what
+ * changes (the waveform, with the gate on, and the pitch), then waiting out
+ * its time. After the last: with a repeat, a jump back to the stretch it
+ * repeats from (which sets both outright, as anything may have changed
+ * since); holding, the program just stops, leaving the pitch free for
+ * effects; or a silent waveform, then stop.
  */
-export function waveProgram(bars: Bar[], name: string, loop: number | null = null): Program {
+export function waveProgram(s: WaveParts, name: string): Program {
   const steps: Step[] = [];
-  const looping = waveLooping({ bars, waveLoop: loop });
-  const end = looping ? loopEnd(bars)! : Infinity;
+  const looping = waveLooping(s);
+  const list = stretches(s);
   let back = 0;
-  for (const s of spans(bars)) {
-    if (s.start >= end) break;
-    if (looping && s.start <= loop!) back = steps.length;
-    // The first row plays the note's pitch: the player sets the pitch only from here
-    steps.push({ left: waveLeft({ type: 'wave', wave: s.wave | WAVE_GATE }), right: steps.length ? PITCH_KEEP : PITCH_NOTE });
-    if (s.end === null) break;
-    let rest = s.end - s.start - 1;
+  let wave = -1;
+  let pitch: number | null = null;
+  list.forEach((st, i) => {
+    const target = looping && st.start === s.waveLoop;
+    if (looping && st.start <= s.waveLoop!) back = steps.length;
+    // The first row always sets both: the player sets the pitch only from the program
+    const all = i === 0 || target;
+    steps.push({
+      left: all || st.wave !== wave ? waveLeft({ type: 'wave', wave: st.wave | WAVE_GATE }) : WAVE_KEEP,
+      right: all || st.pitch !== pitch ? pitchRight({ type: 'relative', semitones: st.pitch }) : PITCH_KEEP,
+    });
+    wave = st.wave;
+    pitch = st.pitch;
+    // Holding, the last stretch lasts as long as the note
+    if (i === list.length - 1 && !looping && s.hold) return;
+    let rest = st.end! - st.start - 1;
     while (rest > 0) {
       if (rest === 1) {
         // A row that changes nothing takes a single frame
@@ -141,7 +216,9 @@ export function waveProgram(bars: Bar[], name: string, loop: number | null = nul
         rest -= DELAY_FRAMES(left);
       }
     }
-  }
+  });
+  if (!list.length) steps.push({ left: waveLeft({ type: 'wave', wave: WAVE_GATE }), right: pitchRight({ type: 'relative', semitones: 0 }) });
+  else if (!looping && !s.hold) steps.push({ left: waveLeft({ type: 'wave', wave: WAVE_GATE }), right: PITCH_KEEP });
   const program: Program = { name, steps, next: null };
   if (looping) program.next = { program, step: back };
   return program;
@@ -231,21 +308,43 @@ export function widthOn(line: PulsePoint[], t: number): number {
 }
 
 /** A stretch of what is heard; `again` marks a repeat's copies, `from` where each began first time round. */
-export interface HeardSpan extends Span {
+export interface HeardSpan extends Stretch {
   again?: boolean;
   from: number;
 }
 
-/** What is heard up to `frames`: the spans, with a repeat's copied on after its end. */
-export function heardSpans(bars: Bar[], loop: number | null, frames: number): HeardSpan[] {
-  const base = spans(bars);
-  if (!waveLooping({ bars, waveLoop: loop })) return base.map((s) => ({ ...s, from: s.start }));
-  const end = loopEnd(bars)!;
-  const out: HeardSpan[] = base.filter((s) => s.start < end).map((s) => ({ ...s, end: Math.min(s.end ?? end, end), from: s.start }));
-  const body = out.filter((s) => s.end! > loop!).map((s) => ({ ...s, start: Math.max(s.start, loop!) }));
-  const period = end - loop!;
-  for (let n = 1; end + (n - 1) * period < frames; n++) {
-    for (const s of body) out.push({ start: s.start + n * period, end: s.end! + n * period, wave: s.wave, again: true, from: s.from });
-  }
+/**
+ * What is heard up to `frames`: the stretches, then a repeat's copied on
+ * after the end, the last held on, or silence (at the last pitch).
+ */
+export function heardSpans(s: WaveParts, frames: number): HeardSpan[] {
+  const out: HeardSpan[] = stretches(s).map((st) => ({ ...st, from: st.start }));
+  const end = programEnd(s);
+  if (end === null) return out;
+  if (waveLooping(s)) {
+    const loop = s.waveLoop!;
+    const body = out.filter((st) => st.end! > loop).map((st) => ({ ...st, start: Math.max(st.start, loop) }));
+    const period = end - loop;
+    for (let n = 1; end + (n - 1) * period < frames; n++) {
+      for (const st of body) out.push({ ...st, start: st.start + n * period, end: st.end! + n * period, again: true });
+    }
+  } else if (s.hold) out[out.length - 1].end = null;
+  else out.push({ start: end, end: null, wave: 0, pitch: out[out.length - 1].pitch, from: end });
   return out;
+}
+
+/** Puts a note in place: one pitch at a time, so notes it lands on are cut back or removed. */
+export function placeNote(notes: Note[], note: Note): Note[] {
+  const out: Note[] = [];
+  for (const n of notes) {
+    if (n === note) continue;
+    if (n.end <= note.start || n.start >= note.end) {
+      out.push(n);
+      continue;
+    }
+    if (n.start < note.start) out.push({ ...n, end: note.start });
+    if (n.end > note.end) out.push({ ...n, start: note.end });
+  }
+  out.push(note);
+  return out.sort((a, b) => a.start - b.start);
 }

@@ -389,9 +389,10 @@ try {
       { wave: 0x20, start: 3, end: 18 },
       { wave: 0x10, start: 18, end: 34 },
       { wave: 0x40, start: 40, end: 71 },
-      { wave: 0x10, start: 60, end: null },
+      { wave: 0x10, start: 60, end: 80 },
     ];
     s.instruments[s.current].bars = bars;
+    s.instruments[s.current].notes = [];
     const frames = 80;
     const got = window.maker2.trace(frames).control;
     for (let f = 0; f < frames; f++) {
@@ -446,6 +447,35 @@ try {
     return letters;
   });
   report(waveRepeat === 'NNPPPSSSSPPPSSSSPPPSSSS', 'maker2 waveform repeats', waveRepeat);
+
+  // Notes: a chord arpeggio of 0, +4, +7 a frame each, repeating with the waveform
+  const arp = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    ins.bars = [{ wave: 0x40, start: 0, end: 3 }];
+    ins.notes = [{ start: 0, end: 1, semis: 0 }, { start: 1, end: 2, semis: 4 }, { start: 2, end: 3, semis: 7 }];
+    ins.waveLoop = 0;
+    const t = window.maker2.trace(9);
+    const out = Array.from(t.freq).map((f) => Math.round(12 * Math.log2(f / t.freq[0]))).join(' ');
+    ins.waveLoop = null;
+    ins.notes = [];
+    return out;
+  });
+  report(arp === '0 4 7 0 4 7 0 4 7', 'maker2 notes arpeggio', arp);
+
+  // After the last bar: holding keeps the waveform, otherwise it falls silent (gate still on)
+  const ending = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    ins.bars = [{ wave: 0x20, start: 0, end: 4 }];
+    ins.hold = true;
+    const held = Array.from(window.maker2.trace(6).control).map((v) => v.toString(16)).join(' ');
+    ins.hold = false;
+    const silent = Array.from(window.maker2.trace(6).control).map((v) => v.toString(16)).join(' ');
+    ins.hold = true;
+    return `${held} / ${silent}`;
+  });
+  report(ending === '21 21 21 21 21 21 / 21 21 21 21 1 1', 'maker2 hold or fall silent', ending);
 
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');

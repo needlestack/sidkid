@@ -16,7 +16,7 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
-import { defaultPulse, heardSpans, LANES, loopEnd, place, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type Shape } from './shape';
+import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -68,6 +68,8 @@ interface State {
   volumeOpen: boolean;
   /** Whether the waveform rows are open under the volume envelope */
   waveOpen: boolean;
+  /** Whether the notes are open, under the waveform */
+  notesOpen: boolean;
 }
 
 function defaults(): State {
@@ -77,7 +79,9 @@ function defaults(): State {
         name: 'Lead',
         ad: 0x09,
         sr: 0xa9,
-        bars: [{ wave: WAVE_PULSE, start: 0, end: null }],
+        bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }],
+        notes: [],
+        hold: true,
         // The classic sweep: narrow to wide and back, over and over
         pulse: {
           points: [
@@ -95,8 +99,10 @@ function defaults(): State {
         sr: 0x88,
         bars: [
           { wave: WAVE_PULSE, start: 0, end: 3 },
-          { wave: WAVE_SAW, start: 3, end: null },
+          { wave: WAVE_SAW, start: 3, end: 13 },
         ],
+        notes: [],
+        hold: true,
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -107,8 +113,10 @@ function defaults(): State {
         bars: [
           { wave: WAVE_NOISE, start: 0, end: 1 },
           { wave: WAVE_PULSE, start: 1, end: 3 },
-          { wave: WAVE_NOISE, start: 3, end: null },
+          { wave: WAVE_NOISE, start: 3, end: 13 },
         ],
+        notes: [],
+        hold: true,
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -118,6 +126,7 @@ function defaults(): State {
     keyUp: 50,
     volumeOpen: true,
     waveOpen: false,
+    notesOpen: false,
   };
 }
 
@@ -135,6 +144,14 @@ function load(): State {
         // Saved before pulse width had a shape: a square, as they played
         ins.pulse ??= defaultPulse();
         ins.waveLoop ??= null;
+        ins.notes ??= [];
+        // Bars that kept going until the note ended: now the waveform holds after its last bar
+        const open = ins.bars.some((b) => b.end === null);
+        if (ins.hold === undefined) ins.hold = open;
+        if (open) {
+          const end = Math.max(0, ...ins.bars.map((b) => b.end ?? b.start + 10));
+          ins.bars = ins.bars.map((b) => (b.end === null ? { ...b, end: Math.max(end, b.start + 1) } : b));
+        }
       }
       return { ...defaults(), ...saved };
     }
@@ -174,6 +191,7 @@ function undo(redo = false) {
   Object.assign(state, JSON.parse(s));
   selected = -1;
   selectedPoint = -1;
+  selectedNote = -1;
   changed();
   renderInstruments();
 }
@@ -194,7 +212,7 @@ interface Audition {
 
 function audition(): Audition {
   const s = shape();
-  const wave = waveProgram(s.bars, s.name, s.waveLoop);
+  const wave = waveProgram(s, s.name);
   const pulse = pulseProgram(s.bars, s.pulse, s.name);
   const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
   return {
@@ -282,6 +300,8 @@ const scroller = $('scroll');
 let selected = -1;
 /** The selected pulse width point, or -1 */
 let selectedPoint = -1;
+/** The selected note, or -1 */
+let selectedNote = -1;
 /** What is being dragged, for its look and the readout */
 let dragging: string | null = null;
 /** While an envelope handle is dragged it follows the pointer, and the setting it will land on is drawn */
@@ -343,10 +363,33 @@ function rows(): Row[] | null {
 
 const rowOf = (wave: number | null) => rows()!.find((r) => r.wave === wave)!;
 
-/** The timeline's height: taller with the waveform rows open under the volume */
-function height(): number {
+/** Each semitone's height in the notes, and the room above and below them */
+const SEMI = 6;
+const ROLL_PAD = 6;
+const ROLL_H = (NOTE_HIGH - NOTE_LOW + 1) * SEMI + 2 * ROLL_PAD;
+
+/** The notes' band: under the waveform's band and its rows */
+function notesTop(): number {
   const r = rows();
   return r ? r[r.length - 1].top + r[r.length - 1].h : floor() + PAD_BOTTOM;
+}
+
+const rollTop = () => notesTop() + PAD_BOTTOM;
+/** The top of a semitone's row in the notes */
+const noteY = (semis: number) => rollTop() + ROLL_PAD + (NOTE_HIGH - semis) * SEMI;
+
+function semiAt(e: PointerEvent): number {
+  const s = NOTE_HIGH - Math.floor((yAt(e) - rollTop() - ROLL_PAD) / SEMI);
+  return Math.max(NOTE_LOW, Math.min(NOTE_HIGH, s));
+}
+
+function inRoll(e: PointerEvent): boolean {
+  return state.notesOpen && yAt(e) >= rollTop() && yAt(e) < rollTop() + ROLL_H;
+}
+
+/** The timeline's height: taller with sections open */
+function height(): number {
+  return notesTop() + PAD_BOTTOM + (state.notesOpen ? ROLL_H : 0);
 }
 
 /** The line at silence, under the envelope or its preview, with the waveform strip below */
@@ -362,7 +405,7 @@ function dataEnd(volume = true, waves = true): number {
   const s = shape();
   let end = 0;
   if (volume) end = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
-  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10));
+  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.end));
   return Math.min(TOTAL, Math.max(5, end));
 }
 
@@ -423,9 +466,10 @@ function render() {
     [
       state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
       state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them; bars that overlap play together.' : '',
+      state.notesOpen ? 'Draw notes in semitones from the key played; a pitch holds until the next note.' : '',
     ]
       .join(' ')
-      .trim() || 'Click Volume or Waveform to open them.';
+      .trim() || 'Click Volume, Waveform or Notes to open them.';
 
   const width = x(TOTAL) + ORIGIN;
   const HEIGHT = height();
@@ -512,6 +556,10 @@ function renderGutter() {
     if (row.wave !== null) add(row.top, row.h, [waveIcon(row.wave, 26, 14), waveName(row.wave)], 'lane');
     else add(row.top, row.h, ['Width'], 'lane width');
   }
+  toggle(notesTop(), PAD_BOTTOM, 'Notes', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
+  if (state.notesOpen) {
+    for (const semis of [24, 12, 0, -12]) add(noteY(semis) + SEMI / 2 - 7, 14, [semis === 0 ? 'played' : semitoneText(semis)], 'semi');
+  }
 }
 
 /** Opens or folds the volume envelope. */
@@ -521,11 +569,24 @@ function openVolume(open: boolean) {
   render();
 }
 
+/** Opens or closes the notes, selecting a note or none. */
+function openNotes(open: boolean, note = -1) {
+  state.notesOpen = open;
+  selected = -1;
+  selectedPoint = -1;
+  selectedNote = open ? note : -1;
+  persist();
+  render();
+}
+
+const semitoneText = (semis: number) => (semis > 0 ? `+${semis}` : semis < 0 ? `−${-semis}` : '0');
+
 /** Opens or closes the waveform rows under the volume envelope, selecting a bar or none. */
 function openWaves(open: boolean, bar = -1) {
   state.waveOpen = open;
   selected = open ? bar : -1;
   selectedPoint = -1;
+  selectedNote = -1;
   persist();
   render();
 }
@@ -634,6 +695,59 @@ function drawWaveBand() {
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
   drawHeard(top + (PAD_BOTTOM - HEARD) / 2);
   if (state.waveOpen) drawBars();
+  drawNotes();
+}
+
+const LINE_PAD = 6;
+
+/**
+ * The notes: their band shows the pitch over time as a thin line (and
+ * opens or closes them); open, a roll of semitones from the note played,
+ * with the notes as bars to draw, move and resize like the waveform's.
+ */
+function drawNotes() {
+  const s = shape();
+  const top = notesTop();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
+  el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
+  const py = (semis: number) => top + LINE_PAD + ((NOTE_HIGH - semis) / (NOTE_HIGH - NOTE_LOW)) * (PAD_BOTTOM - 2 * LINE_PAD);
+  el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);
+  for (const sp of heardSpans(s, TOTAL)) {
+    el('line', { x1: x(sp.start), x2: x(sp.end ?? TOTAL), y1: py(sp.pitch), y2: py(sp.pitch), class: `notes-line${sp.again ? ' again' : ''}` }, plot);
+  }
+  if (!state.notesOpen) return;
+
+  const roll = rollTop();
+  for (let semis = NOTE_LOW; semis <= NOTE_HIGH; semis += 12) {
+    el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: noteY(semis) + SEMI / 2, y2: noteY(semis) + SEMI / 2, class: `roll-line${semis === 0 ? ' zero' : ''}` }, plot);
+  }
+  // The shared repeat runs through the notes too (its ↻ here when the waveform rows are closed)
+  const icon = drawWaveRepeat(roll, roll + ROLL_H, !state.waveOpen, false);
+  const end = programEnd(s);
+  if (end !== null && waveLooping(s)) {
+    const from = s.waveLoop!;
+    const period = end - from;
+    for (let n = 1; end + (n - 1) * period < TOTAL; n++) {
+      for (const note of s.notes) {
+        const a = Math.max(note.start, from);
+        const z = Math.min(note.end, end);
+        if (z > a) el('rect', { x: x(a + n * period), y: noteY(note.semis) + 0.5, width: x(z + n * period) - x(a + n * period), height: SEMI - 1, rx: 2, class: 'note ghost' }, plot);
+      }
+    }
+  }
+  s.notes.forEach((note, i) => {
+    const x1 = x(note.start);
+    const x2 = x(note.end);
+    const y = noteY(note.semis);
+    const g = el('g', { class: `note-bar${i === selectedNote ? ' selected' : ''}`, 'data-note': i }, plot);
+    el('rect', { x: x1, y: y - 3, width: Math.max(2, x2 - x1), height: SEMI + 6, class: 'hit' }, g);
+    el('rect', { x: x1, y: y + 0.5, width: Math.max(2, x2 - x1), height: SEMI - 1, rx: 2, class: 'note' }, g);
+    const grip = Math.min(EDGE, (x2 - x1) / 3);
+    el('rect', { x: x1 - 2, y: y - 3, width: grip + 2, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'start' }, g);
+    el('rect', { x: x2 - grip, y: y - 3, width: grip + 2, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'end' }, g);
+    el('text', { x: x2 + 4, y: y + SEMI - 0.5, class: 'note-label' }, g).textContent = semitoneText(note.semis);
+  });
+  icon();
 }
 
 /**
@@ -645,7 +759,14 @@ function drawHeard(top: number) {
   // Pulse drawn at its width at each moment
   const line = pulseLine(shape().pulse, TOTAL);
   const pulseWidth = (px: number) => widthOn(line, (px - ORIGIN) / state.zoom) / PULSE_MAX;
-  for (const sp of heardSpans(shape().bars, shape().waveLoop, TOTAL)) {
+  // One piece per waveform: changes of pitch alone don't split it
+  const pieces: HeardSpan[] = [];
+  for (const sp of heardSpans(shape(), TOTAL)) {
+    const last = pieces[pieces.length - 1];
+    if (last && last.wave === sp.wave && !!last.again === !!sp.again && last.end === sp.start) last.end = sp.end;
+    else pieces.push({ ...sp });
+  }
+  for (const sp of pieces) {
     // Silence shows as nothing
     if (!sp.wave) continue;
     const x1 = x(sp.start);
@@ -693,23 +814,18 @@ function drawBars() {
   const s = shape();
   for (const row of rows()!) el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: row.top, y2: row.top, class: 'lane-line' }, plot);
   if (usesPulse()) drawWidth();
-  const icon = drawWaveRepeat();
+  // The waveform rows run together from the top, the width row below them
+  const waveRows = rows()!.filter((r) => r.wave !== null);
+  const icon = drawWaveRepeat(waveRows[0].top, waveRows[waveRows.length - 1].top + waveRows[waveRows.length - 1].h, true);
   s.bars.forEach((b, i) => {
     const r = rowOf(b.wave);
     const x1 = x(b.start);
     const x2 = x(b.end ?? TOTAL);
     const y = r.top + 5;
     const h = r.h - 10;
-    const g = el('g', { class: `bar ${LANE_COLORS[b.wave]}${i === selected ? ' selected' : ''}${b.end === null ? ' open' : ''}`, 'data-bar': i }, plot);
+    const g = el('g', { class: `bar ${LANE_COLORS[b.wave]}${i === selected ? ' selected' : ''}`, 'data-bar': i }, plot);
     el('rect', { x: x1, y, width: Math.max(2, x2 - x1), height: h, rx: 5, class: 'bar-body' }, g);
-    if (b.end === null) {
-      // It keeps going: an arrow at the far end
-      el('path', { d: `M${x2 - 14},${y + h / 2 - 5}l6,5l-6,5`, class: 'bar-arrow' }, g);
-    }
-    if (x2 - x1 > 44) {
-      const t = el('text', { x: x1 + 8, y: y + h / 2 + 4, class: 'bar-label' }, g);
-      t.textContent = b.end === null ? `${waveName(b.wave)} on` : timeText(b.end - b.start);
-    }
+    if (x2 - x1 > 44) el('text', { x: x1 + 8, y: y + h / 2 + 4, class: 'bar-label' }, g).textContent = timeText((b.end ?? TOTAL) - b.start);
     el('rect', { x: x1 - 2, y, width: Math.min(EDGE, (x2 - x1) / 3) + 2, height: h, class: 'bar-edge', 'data-edge': 'start' }, g);
     if (b.end !== null) el('rect', { x: x2 - Math.min(EDGE, (x2 - x1) / 3), y, width: Math.min(EDGE, (x2 - x1) / 3) + 2, height: h, class: 'bar-edge', 'data-edge': 'end' }, g);
   });
@@ -717,10 +833,6 @@ function drawBars() {
   icon();
 }
 
-/** Where a repeat would end if pulled out now: the end of the last bar, counting those that keep going a grid step past their start. */
-function pullEnd(bars: Bar[]): number {
-  return loopEnd(bars) ?? Math.min(TOTAL, Math.max(...bars.map((b) => b.end ?? b.start + tickStep())));
-}
 
 /**
  * The waveform's repeat, under the bars: the section that repeats shaded in
@@ -728,35 +840,38 @@ function pullEnd(bars: Bar[]): number {
  * to drag; or with no repeat, its start waiting at the end to be pulled
  * back. Returns a function that draws the ↻ over the bars.
  */
-function drawWaveRepeat(): () => void {
+function drawWaveRepeat(top: number, bottom: number, withIcons: boolean, ghostBars = true): () => void {
   const s = shape();
-  if (!s.bars.length) return () => {};
-  // The waveform rows run together from the top, the width row below them
-  const waveRows = rows()!.filter((r) => r.wave !== null);
-  const top = waveRows[0].top;
-  const bottom = waveRows[waveRows.length - 1].top + waveRows[waveRows.length - 1].h;
+  const end = programEnd(s);
+  if (end === null) return () => {};
   const edge = (at: number, which: string, cls = '') => {
     const g = el('g', { class: `width-loop-edge wave ${cls}${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
     el('rect', { x: x(at) - 6, y: top, width: 12, height: bottom - top, class: 'hit' }, g);
     el('rect', { x: x(at) - 1.5, y: top + 2, width: 3, height: bottom - top - 4, rx: 1.5, class: 'edge-bar' }, g);
   };
-  const icon = (at: number, which: string, label: string) => () => {
-    const g = el('g', { class: 'width-loop-edge wave icon', [`data-${which}-edge`]: '' }, plot);
-    el('rect', { x: x(at) - 18, y: top, width: 16, height: 16, class: 'hit' }, g);
-    el('text', { x: x(at) - 4, y: top + 12, 'text-anchor': 'end', class: 'wave-repeat' }, g).textContent = label;
-  };
   if (!waveLooping(s)) {
-    const at = pullEnd(s.bars);
-    edge(at, 'wave-loop', 'pull');
-    return icon(at, 'wave-loop', '↻');
+    // At the end: ↻ to pull a repeat out, and → to hold there or not
+    edge(end, 'wave-loop', 'pull');
+    if (s.hold) {
+      el('rect', { x: x(end), y: top + 1, width: x(TOTAL) - x(end), height: bottom - top - 2, class: 'wave-hold' }, plot);
+    }
+    return () => {
+      if (!withIcons) return;
+      const g = el('g', { class: 'width-loop-edge wave icon', 'data-wave-loop-edge': '' }, plot);
+      el('rect', { x: x(end) - 18, y: top, width: 16, height: 16, class: 'hit' }, g);
+      el('text', { x: x(end) - 4, y: top + 12, 'text-anchor': 'end', class: 'wave-repeat' }, g).textContent = '↻';
+      const h = el('g', { class: `wave-hold-toggle${s.hold ? ' on' : ''}`, 'data-hold': '' }, plot);
+      el('rect', { x: x(end) + 2, y: top, width: 18, height: 16, class: 'hit' }, h);
+      el('text', { x: x(end) + 5, y: top + 12, class: 'wave-repeat' }, h).textContent = '→';
+      el('title', {}, h).textContent = s.hold ? 'Holds where it got to until the note ends: click to fall silent instead' : 'Falls silent here: click to hold where it got to until the note ends';
+    };
   }
   const from = s.waveLoop!;
-  const end = loopEnd(s.bars)!;
   const period = end - from;
   for (let t = end; t < TOTAL; t += period) el('rect', { x: x(t), y: top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: bottom - top - 2, class: 'wave-loop again' }, plot);
   el('rect', { x: x(from), y: top + 1, width: x(end) - x(from), height: bottom - top - 2, class: 'wave-loop' }, plot);
-  // The bars as they come round again, faint
-  for (let n = 1; end + (n - 1) * period < TOTAL; n++) {
+  // The bars and notes as they come round again, faint
+  for (let n = 1; ghostBars && end + (n - 1) * period < TOTAL; n++) {
     for (const b of s.bars) {
       const a = Math.max(b.start, from);
       const z = Math.min(b.end!, end);
@@ -765,7 +880,7 @@ function drawWaveRepeat(): () => void {
       el('rect', { x: x(a + n * period), y: r.top + 5, width: x(z + n * period) - x(a + n * period), height: r.h - 10, rx: 5, class: `bar-body ghost ${LANE_COLORS[b.wave]}` }, plot);
     }
   }
-  el('text', { x: x(from) + 10, y: top + 12, class: 'wave-repeat' }, plot).textContent = '↻ repeat';
+  if (withIcons) el('text', { x: x(from) + 10, y: top + 12, class: 'wave-repeat' }, plot).textContent = '↻ repeat';
   edge(from, 'wave-loop');
   edge(end, 'wave-loop-end');
   return () => {};
@@ -848,6 +963,17 @@ function renderReadout() {
   const box = $('readout');
   box.replaceChildren();
   const s = shape();
+  if (state.notesOpen && s.notes[selectedNote]) {
+    const n = s.notes[selectedNote];
+    const text = document.createElement('span');
+    text.textContent = `${n.semis ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}` : 'The note played'} from ${timeText(n.start)} for ${timeText(n.end - n.start)}`;
+    const del = document.createElement('button');
+    del.className = 'mini danger';
+    del.textContent = 'Delete';
+    del.addEventListener('click', deleteNote);
+    box.append(text, del);
+    return;
+  }
   if (state.waveOpen && usesPulse() && s.pulse.points[selectedPoint]) {
     pointReadout(box);
     return;
@@ -860,27 +986,12 @@ function renderReadout() {
     return;
   }
   const text = document.createElement('span');
-  text.textContent = `${waveName(b.wave)} from ${timeText(b.start)}${b.end === null ? ', until the note ends' : ` for ${timeText(b.end - b.start)}`}`;
-  const keep = document.createElement('label');
-  keep.className = 'check';
-  const box2 = document.createElement('input');
-  box2.type = 'checkbox';
-  box2.checked = b.end === null;
-  box2.addEventListener('change', () => {
-    before();
-    const later = s.bars.filter((o) => o.wave === b.wave && o.start > b.start);
-    const bar: Bar = { ...b, end: box2.checked ? null : Math.min(TOTAL, Math.max(b.start + 1, state.keyUp)) };
-    s.bars = commit(s.bars.filter((o) => !box2.checked || !later.includes(o)), b, bar);
-    // A bar that keeps going leaves nothing to repeat
-    if (box2.checked) s.waveLoop = null;
-    changed();
-  });
-  keep.append(box2, ' Keeps going until the note ends');
+  text.textContent = `${waveName(b.wave)} from ${timeText(b.start)} for ${timeText((b.end ?? TOTAL) - b.start)}`;
   const del = document.createElement('button');
   del.className = 'mini danger';
   del.textContent = 'Delete';
   del.addEventListener('click', deleteSelected);
-  box.append(text, keep, del);
+  box.append(text, del);
 }
 
 /** The selected pulse width point: its width and time, and deleting it. */
@@ -911,6 +1022,7 @@ function deletePoint() {
     else if (pulse.loop > i) pulse.loop--;
   }
   selectedPoint = -1;
+  selectedNote = -1;
   changed();
 }
 
@@ -972,7 +1084,17 @@ plot.addEventListener('pointerdown', (e) => {
   const span = target.closest<SVGGElement>('[data-span]');
 
   const strip = target.closest('[data-strip]');
-  if (target.closest('[data-volume-strip]')) {
+  if (target.closest('[data-hold]')) {
+    // After the end: hold where it got to, or fall silent
+    before();
+    s.hold = !s.hold;
+    changed();
+    playShape();
+    return;
+  } else if (target.closest('[data-notes-strip]')) {
+    openNotes(!state.notesOpen);
+    return;
+  } else if (target.closest('[data-volume-strip]')) {
     openVolume(true);
     return;
   } else if (span || strip) {
@@ -990,16 +1112,12 @@ plot.addEventListener('pointerdown', (e) => {
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
-  } else if (rows() && target.closest('[data-wave-loop-edge]')) {
+  } else if (target.closest('[data-wave-loop-edge]')) {
     // Where the waveform repeats from: on a place it changes, settling there
     // as the envelope's dots do. Pulled out from the end it makes a repeat
     // (and bars that kept going end there); pushed back onto the end, none.
     before();
-    if (!waveLooping(s)) {
-      const end = pullEnd(s.bars);
-      s.bars = s.bars.map((b) => (b.end === null ? { ...b, end: Math.max(end, b.start + 1) } : b));
-    }
-    const places = () => [...waveChanges(s.bars), loopEnd(s.bars)!];
+    const places = () => [...waveChanges(s), programEnd(s)!];
     const from = waveLooping(s) ? places().indexOf(s.waveLoop!) : places().length - 1;
     dragging = 'wave-loop';
     plot.style.cursor = 'ew-resize';
@@ -1009,20 +1127,75 @@ plot.addEventListener('pointerdown', (e) => {
       s.waveLoop = at < p.length - 1 ? p[at] : null;
       render();
     };
-  } else if (rows() && target.closest('[data-wave-loop-end-edge]')) {
+  } else if (target.closest('[data-wave-loop-end-edge]')) {
     // Where the waveform repeat ends: the bars ending there end with it,
     // never before the last change ahead of it
     before();
-    let end = loopEnd(s.bars)!;
-    const floor = Math.max(s.waveLoop!, ...waveChanges(s.bars).filter((t) => t < end)) + 1;
+    let end = programEnd(s)!;
+    const floor = Math.max(s.waveLoop!, ...waveChanges(s).filter((t) => t < end)) + 1;
     dragging = 'wave-loop-end';
     plot.style.cursor = 'ew-resize';
     move = (e) => {
       const to = Math.max(floor, Math.min(TOTAL, Math.round(frameAt(e))));
       s.bars = s.bars.map((b) => (b.end === end ? { ...b, end: to } : b));
+      s.notes = s.notes.map((n) => (n.end === end ? { ...n, end: to } : n));
       end = to;
       render();
     };
+  } else if (target.closest('[data-note]')) {
+    // A note: moved in time and pitch, or an end dragged
+    const noteEl = target.closest<SVGGElement>('[data-note]')!;
+    const i = Number(noteEl.dataset.note);
+    const original = s.notes;
+    const note = original[i];
+    const edge = target.getAttribute('data-note-edge');
+    selectedNote = i;
+    selected = -1;
+    selectedPoint = -1;
+    before();
+    dragging = 'note';
+    plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
+    move = (e) => {
+      const df = Math.round(frameAt(e) - start);
+      let next: Note;
+      if (edge === 'start') next = { ...note, start: Math.max(0, Math.min(note.end - 1, note.start + df)) };
+      else if (edge === 'end') next = { ...note, end: Math.max(note.start + 1, Math.min(TOTAL, Math.round(frameAt(e)))) };
+      else {
+        const len = note.end - note.start;
+        const from = Math.max(0, Math.min(TOTAL - len, note.start + df));
+        next = { start: from, end: from + len, semis: semiAt(e) };
+      }
+      s.notes = placeNote(
+        original.filter((o) => o !== note),
+        next,
+      );
+      selectedNote = s.notes.indexOf(next);
+      render();
+    };
+  } else if (inRoll(e)) {
+    const double = e.timeStamp - lastPress.time < 400 && Math.hypot(e.clientX - lastPress.x, e.clientY - lastPress.y) < 6;
+    lastPress = double ? { time: 0, x: 0, y: 0 } : { time: e.timeStamp, x: e.clientX, y: e.clientY };
+    if (double) {
+      addGridNote(e);
+      return;
+    }
+    // Drawing a new note along a semitone
+    const semis = semiAt(e);
+    const original = s.notes;
+    const from = Math.max(0, Math.round(start));
+    before();
+    dragging = 'note';
+    move = (e) => {
+      const to = Math.max(0, Math.min(TOTAL, Math.round(frameAt(e))));
+      const next: Note = { start: Math.min(from, to), end: Math.max(Math.min(from, to) + 1, Math.max(from, to)), semis };
+      s.notes = placeNote(original, next);
+      selectedNote = s.notes.indexOf(next);
+      render();
+    };
+    // A click without dragging just clears the selection
+    selected = -1;
+    selectedPoint = -1;
+    selectedNote = -1;
   } else if (rows() && target.closest('[data-loop-end-edge]')) {
     // Where the repeat ends: the last point, moved in time only, and never
     // past the point before it
@@ -1075,6 +1248,7 @@ plot.addEventListener('pointerdown', (e) => {
     }
     selectedPoint = i;
     selected = -1;
+    selectedNote = -1;
     dragging = 'point';
     plot.style.cursor = 'grabbing';
     move = (e) => {
@@ -1092,6 +1266,7 @@ plot.addEventListener('pointerdown', (e) => {
     const edge = target.getAttribute('data-edge');
     selected = i;
     selectedPoint = -1;
+    selectedNote = -1;
     before();
     dragging = 'bar';
     // The pointer keeps the look it had over the bar or its end while dragging
@@ -1103,9 +1278,7 @@ plot.addEventListener('pointerdown', (e) => {
         const end = bar.end ?? TOTAL;
         next = { ...bar, start: Math.max(0, Math.min(end - 1, bar.start + df)) };
       } else if (edge === 'end') {
-        const end = Math.round(frameAt(e));
-        // Pulled to the far end, it keeps going
-        next = { ...bar, end: end >= TOTAL - 2 ? null : Math.max(bar.start + 1, end) };
+        next = { ...bar, end: Math.max(bar.start + 1, Math.min(TOTAL, Math.round(frameAt(e)))) };
       } else {
         const len = bar.end === null ? null : bar.end - bar.start;
         const from = Math.max(0, Math.min(TOTAL - 1, bar.start + df));
@@ -1138,7 +1311,6 @@ plot.addEventListener('pointerdown', (e) => {
       // Not before the note starts, nor past the end
       const to = Math.max(0, Math.min(TOTAL, Math.round(frameAt(e))));
       const next: Bar = { wave, start: Math.min(from, to), end: Math.max(from, to) === Math.min(from, to) ? Math.min(from, to) + 1 : Math.max(from, to) };
-      if (next.end! >= TOTAL - 1) next.end = null;
       const bars = place(original, next);
       if (!storable(bars)) return;
       s.bars = bars;
@@ -1148,9 +1320,11 @@ plot.addEventListener('pointerdown', (e) => {
     // A click without dragging just clears the selection
     selected = -1;
     selectedPoint = -1;
+    selectedNote = -1;
   } else {
     selected = -1;
     selectedPoint = -1;
+    selectedNote = -1;
     render();
     return;
   }
@@ -1249,6 +1423,30 @@ function addGridBar(e: PointerEvent) {
   playShape();
 }
 
+/** Adds a note one grid step long at the semitone under the pointer: what double-clicking the notes does. */
+function addGridNote(e: PointerEvent) {
+  const s = shape();
+  const step = tickStep();
+  const from = Math.max(0, Math.floor(frameAt(e) / step) * step);
+  const note: Note = { start: from, end: Math.min(TOTAL, from + step), semis: semiAt(e) };
+  before();
+  s.notes = placeNote(s.notes, note);
+  selectedNote = s.notes.indexOf(note);
+  selected = -1;
+  selectedPoint = -1;
+  changed();
+  playShape();
+}
+
+function deleteNote() {
+  const s = shape();
+  if (!s.notes[selectedNote]) return;
+  before();
+  s.notes.splice(selectedNote, 1);
+  selectedNote = -1;
+  changed();
+}
+
 /** The last press on an empty spot in a row, to tell a double-click (the page redraws between the clicks, so the browser can't) */
 let lastPress = { time: 0, x: 0, y: 0 };
 
@@ -1287,8 +1485,8 @@ $('zoom-in').addEventListener('click', () => setZoom(state.zoom * 1.5));
 $('zoom-out').addEventListener('click', () => setZoom(state.zoom / 1.5));
 $('zoom-fit').addEventListener('click', () => {
   // What is open, or with both folded, everything
-  const both = !state.volumeOpen && !state.waveOpen;
-  const frames = dataEnd(state.volumeOpen || both, state.waveOpen || both);
+  const none = !state.volumeOpen && !state.waveOpen && !state.notesOpen;
+  const frames = dataEnd(state.volumeOpen || none, state.waveOpen || state.notesOpen || none);
   setZoom(viewWidth() / Math.min(TOTAL, frames * 1.08 + 2));
   scroller.scrollLeft = 0;
 });
@@ -1339,6 +1537,7 @@ function pick(i: number) {
   state.current = i;
   selected = -1;
   selectedPoint = -1;
+  selectedNote = -1;
   renderInstruments();
   changed();
 }
@@ -1346,13 +1545,13 @@ function pick(i: number) {
 $<HTMLSelectElement>('instrument').addEventListener('change', (e) => pick(Number((e.target as HTMLSelectElement).value)));
 $('new-instrument').addEventListener('click', () => {
   before();
-  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: null }], pulse: defaultPulse(), waveLoop: null });
+  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, pulse: defaultPulse(), waveLoop: null });
   pick(state.instruments.length - 1);
 });
 $('duplicate-instrument').addEventListener('click', () => {
   before();
   const s = shape();
-  state.instruments.splice(state.current + 1, 0, { ...s, name: `${s.name} copy`, bars: s.bars.map((b) => ({ ...b })), pulse: JSON.parse(JSON.stringify(s.pulse)) });
+  state.instruments.splice(state.current + 1, 0, { ...s, name: `${s.name} copy`, bars: s.bars.map((b) => ({ ...b })), notes: s.notes.map((n) => ({ ...n })), pulse: JSON.parse(JSON.stringify(s.pulse)) });
   pick(state.current + 1);
 });
 $('delete-instrument').addEventListener('click', () => {
@@ -1529,6 +1728,7 @@ window.addEventListener('keydown', (e) => {
     if (selected >= 0 || selectedPoint >= 0) {
       selected = -1;
       selectedPoint = -1;
+      selectedNote = -1;
       render();
     }
     if (typing(e)) (e.target as HTMLElement).blur();
@@ -1539,6 +1739,11 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || typing(e) || e.repeat) return;
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.notesOpen && selectedNote >= 0) {
+    e.preventDefault();
+    deleteNote();
+    return;
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && rows() && selectedPoint > 0) {
     e.preventDefault();
     deletePoint();

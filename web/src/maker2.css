@@ -583,3 +583,94 @@
 .heard.again {
   opacity: 0.45;
 }
+
+/* Holding after the end */
+.wave-hold {
+  fill: var(--accent);
+  fill-opacity: 0.05;
+  pointer-events: none;
+}
+
+.wave-hold-toggle {
+  cursor: pointer;
+}
+
+.wave-hold-toggle .hit {
+  fill: transparent;
+}
+
+.wave-hold-toggle .wave-repeat {
+  pointer-events: auto;
+  font-size: 13px;
+  opacity: 0.4;
+}
+
+.wave-hold-toggle.on .wave-repeat,
+.wave-hold-toggle:hover .wave-repeat {
+  opacity: 1;
+}
+
+/* Notes */
+.notes-zero {
+  stroke: var(--step-bar);
+  stroke-dasharray: 2 4;
+  pointer-events: none;
+}
+
+.notes-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.notes-line.again {
+  opacity: 0.4;
+}
+
+.roll-line {
+  stroke: var(--border);
+  pointer-events: none;
+}
+
+.roll-line.zero {
+  stroke: var(--step-bar);
+  stroke-dasharray: 2 4;
+}
+
+.tl-gutter-row.semi {
+  justify-content: flex-end;
+  font-size: 10.5px;
+}
+
+.note-bar {
+  cursor: grab;
+}
+
+.note-bar .hit {
+  fill: transparent;
+}
+
+.note {
+  fill: var(--accent);
+  fill-opacity: 0.45;
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+
+.note-bar.selected .note {
+  fill-opacity: 0.85;
+  stroke: var(--text);
+}
+
+.note.ghost {
+  fill-opacity: 0.15;
+  stroke-opacity: 0.35;
+  pointer-events: none;
+}
+
+.note-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  pointer-events: none;
+}
