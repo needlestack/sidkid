@@ -56,8 +56,12 @@ zoomable timeline, aiming for a GarageBand feel.
   line just after the loop point each time (a set-width row starts that stretch), so it
   can be smooth or sawtooth-like; drawn as a shaded band with a draggable start edge. Stretches steeper than the player's sweeps (127 up/128 down a
   frame, a GoatTracker limit, not the SID's) become one set-width row per frame.
+- Waveform repeat (`waveLoop`, a frame where the sound changes): from there to the end
+  of the last bar, as a jump back in the wave program (no extra frame). Same pull-out ↻
+  and draggable ends as pulse; needs every bar to end (pulling one out ends open bars).
+  The wave table also carries pitch, so Pitch must share this repeat.
 - Still missing from Volume/Waveform: an instrument that lets go by itself (gate-off
-  rows), Note start (hard restart, first wave, legato), sync/ring mod, waveform loops.
+  rows), Note start (hard restart, first wave, legato), sync/ring mod.
 - Timeline is 32 s (slowest attack 8 s + decay 24 s). Zooming out stops when everything
   fills a quarter of the view; zooming never jumps (it can stay further out than a
   tightened limit), and the slider's range is frozen during a drag. Pinch zooms around

@@ -528,3 +528,58 @@
   pointer-events: auto;
   font-size: 13px;
 }
+
+/* The waveform's repeat, across the waveform rows */
+.wave-loop {
+  fill: var(--accent);
+  fill-opacity: 0.1;
+  pointer-events: none;
+}
+
+.wave-loop.again {
+  fill-opacity: 0.035;
+}
+
+.bar-body.ghost {
+  fill: var(--c);
+  fill-opacity: 0.12;
+  stroke: var(--c);
+  stroke-opacity: 0.35;
+  pointer-events: none;
+}
+
+.bar-body.ghost.tri {
+  --c: var(--tri);
+}
+
+.bar-body.ghost.saw {
+  --c: var(--saw);
+}
+
+.bar-body.ghost.pulse {
+  --c: var(--pulse);
+}
+
+.bar-body.ghost.noise {
+  --c: var(--noise);
+}
+
+.width-loop-edge.wave .edge-bar {
+  fill: var(--accent);
+}
+
+.wave-repeat {
+  fill: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.width-loop-edge.wave.icon .wave-repeat {
+  pointer-events: auto;
+  font-size: 13px;
+}
+
+.heard.again {
+  opacity: 0.45;
+}

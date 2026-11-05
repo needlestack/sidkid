@@ -435,6 +435,18 @@ try {
   });
   report(saw === '200 e00 266 e00 266 e00', 'maker2 pulse repeat jumps back', saw);
 
+  // The waveform repeats from its loop point to the end of its last bar, at exactly that length
+  const waveRepeat = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    ins.bars = [{ wave: 0x80, start: 0, end: 2 }, { wave: 0x40, start: 2, end: 5 }, { wave: 0x20, start: 5, end: 9 }];
+    ins.waveLoop = 2;
+    const letters = Array.from(window.maker2.trace(23).control).map((v) => ({ 0x81: 'N', 0x41: 'P', 0x21: 'S' })[v] ?? '?').join('');
+    ins.waveLoop = null;
+    return letters;
+  });
+  report(waveRepeat === 'NNPPPSSSSPPPSSSSPPPSSSS', 'maker2 waveform repeats', waveRepeat);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

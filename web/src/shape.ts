@@ -47,6 +47,28 @@ export interface Shape {
   sr: number;
   bars: Bar[];
   pulse: PulseShape;
+  /** Where the waveform repeats from (a frame where it changes), or null to play through once */
+  waveLoop: number | null;
+}
+
+/** Where the waveform's repeat would end: the end of the last bar, or null if a bar keeps going. */
+export function loopEnd(bars: Bar[]): number | null {
+  if (!bars.length || bars.some((b) => b.end === null)) return null;
+  return Math.max(...bars.map((b) => b.end!));
+}
+
+/** Whether a shape's waveform repeats: from its loop point to the end of its last bar. */
+export function waveLooping(shape: Pick<Shape, 'bars' | 'waveLoop'>): boolean {
+  const end = loopEnd(shape.bars);
+  return shape.waveLoop !== null && end !== null && shape.waveLoop < end;
+}
+
+/** The times the waveform changes before its end, where a repeat can start. */
+export function waveChanges(bars: Bar[]): number[] {
+  const end = loopEnd(bars) ?? Infinity;
+  return spans(bars)
+    .map((s) => s.start)
+    .filter((t) => t < end);
 }
 
 /** A stretch of time with one waveform (oscillator bits, 0 for none). */
@@ -93,11 +115,17 @@ const PITCH_NOTE = 0x00;
 
 /**
  * The wave program for a shape: each span sets its waveform (with the gate
- * on) and waits out its time; the program then stops on the last one.
+ * on) and waits out its time; the program then stops on the last one, or
+ * with a repeat, jumps back to the rows of the span it repeats from.
  */
-export function waveProgram(bars: Bar[], name: string): Program {
+export function waveProgram(bars: Bar[], name: string, loop: number | null = null): Program {
   const steps: Step[] = [];
+  const looping = waveLooping({ bars, waveLoop: loop });
+  const end = looping ? loopEnd(bars)! : Infinity;
+  let back = 0;
   for (const s of spans(bars)) {
+    if (s.start >= end) break;
+    if (looping && s.start <= loop!) back = steps.length;
     // The first row plays the note's pitch: the player sets the pitch only from here
     steps.push({ left: waveLeft({ type: 'wave', wave: s.wave | WAVE_GATE }), right: steps.length ? PITCH_KEEP : PITCH_NOTE });
     if (s.end === null) break;
@@ -114,7 +142,9 @@ export function waveProgram(bars: Bar[], name: string): Program {
       }
     }
   }
-  return { name, steps, next: null };
+  const program: Program = { name, steps, next: null };
+  if (looping) program.next = { program, step: back };
+  return program;
 }
 
 /**
@@ -198,4 +228,24 @@ export function widthOn(line: PulsePoint[], t: number): number {
     return a.w + ((b.w - a.w) * (t - a.t)) / (b.t - a.t);
   }
   return line[0].w;
+}
+
+/** A stretch of what is heard; `again` marks a repeat's copies, `from` where each began first time round. */
+export interface HeardSpan extends Span {
+  again?: boolean;
+  from: number;
+}
+
+/** What is heard up to `frames`: the spans, with a repeat's copied on after its end. */
+export function heardSpans(bars: Bar[], loop: number | null, frames: number): HeardSpan[] {
+  const base = spans(bars);
+  if (!waveLooping({ bars, waveLoop: loop })) return base.map((s) => ({ ...s, from: s.start }));
+  const end = loopEnd(bars)!;
+  const out: HeardSpan[] = base.filter((s) => s.start < end).map((s) => ({ ...s, end: Math.min(s.end ?? end, end), from: s.start }));
+  const body = out.filter((s) => s.end! > loop!).map((s) => ({ ...s, start: Math.max(s.start, loop!) }));
+  const period = end - loop!;
+  for (let n = 1; end + (n - 1) * period < frames; n++) {
+    for (const s of body) out.push({ start: s.start + n * period, end: s.end! + n * period, wave: s.wave, again: true, from: s.from });
+  }
+  return out;
 }

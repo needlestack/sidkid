@@ -16,7 +16,7 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
 import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
-import { defaultPulse, LANES, place, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveProgram, widthOn, type Bar, type Shape } from './shape';
+import { defaultPulse, heardSpans, LANES, loopEnd, place, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -87,6 +87,7 @@ function defaults(): State {
           ],
           loop: 0,
         },
+        waveLoop: null,
       },
       {
         name: 'Bass',
@@ -97,6 +98,7 @@ function defaults(): State {
           { wave: WAVE_SAW, start: 3, end: null },
         ],
         pulse: defaultPulse(),
+        waveLoop: null,
       },
       {
         name: 'Snare',
@@ -108,6 +110,7 @@ function defaults(): State {
           { wave: WAVE_NOISE, start: 3, end: null },
         ],
         pulse: defaultPulse(),
+        waveLoop: null,
       },
     ],
     current: 0,
@@ -131,6 +134,7 @@ function load(): State {
         ins.bars = ins.bars.filter((b) => b.end === null || b.end > 0).map((b) => ({ ...b, start: Math.max(0, b.start) }));
         // Saved before pulse width had a shape: a square, as they played
         ins.pulse ??= defaultPulse();
+        ins.waveLoop ??= null;
       }
       return { ...defaults(), ...saved };
     }
@@ -190,7 +194,7 @@ interface Audition {
 
 function audition(): Audition {
   const s = shape();
-  const wave = waveProgram(s.bars, s.name);
+  const wave = waveProgram(s.bars, s.name, s.waveLoop);
   const pulse = pulseProgram(s.bars, s.pulse, s.name);
   const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
   return {
@@ -641,7 +645,7 @@ function drawHeard(top: number) {
   // Pulse drawn at its width at each moment
   const line = pulseLine(shape().pulse, TOTAL);
   const pulseWidth = (px: number) => widthOn(line, (px - ORIGIN) / state.zoom) / PULSE_MAX;
-  for (const sp of spans(shape().bars)) {
+  for (const sp of heardSpans(shape().bars, shape().waveLoop, TOTAL)) {
     // Silence shows as nothing
     if (!sp.wave) continue;
     const x1 = x(sp.start);
@@ -649,7 +653,7 @@ function drawHeard(top: number) {
     // Coloured like its bars; a mix shades from one row's colour to the
     // next, top to bottom, as the rows are stacked
     const waves = LANES.filter((w) => sp.wave & w);
-    const g = el('g', { class: `heard ${LANE_COLORS[waves[0]]}`, 'data-span': sp.start }, plot);
+    const g = el('g', { class: `heard ${LANE_COLORS[waves[0]]}${sp.again ? ' again' : ''}`, 'data-span': sp.from }, plot);
     const rect = el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
     // The waveform drawn along it, start to finish
     const line = x2 - x1 > 8 ? el('polyline', { points: waveRun(sp.wave, x1 + 4, top + 7, x2 - x1 - 8, HEARD - 14, 12, pulseWidth), class: 'heard-wave' }, g) : null;
@@ -689,6 +693,7 @@ function drawBars() {
   const s = shape();
   for (const row of rows()!) el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: row.top, y2: row.top, class: 'lane-line' }, plot);
   if (usesPulse()) drawWidth();
+  const icon = drawWaveRepeat();
   s.bars.forEach((b, i) => {
     const r = rowOf(b.wave);
     const x1 = x(b.start);
@@ -708,6 +713,64 @@ function drawBars() {
     el('rect', { x: x1 - 2, y, width: Math.min(EDGE, (x2 - x1) / 3) + 2, height: h, class: 'bar-edge', 'data-edge': 'start' }, g);
     if (b.end !== null) el('rect', { x: x2 - Math.min(EDGE, (x2 - x1) / 3), y, width: Math.min(EDGE, (x2 - x1) / 3) + 2, height: h, class: 'bar-edge', 'data-edge': 'end' }, g);
   });
+  // The repeat's ↻ goes over the bars, so it can always be grabbed
+  icon();
+}
+
+/** Where a repeat would end if pulled out now: the end of the last bar, counting those that keep going a grid step past their start. */
+function pullEnd(bars: Bar[]): number {
+  return loopEnd(bars) ?? Math.min(TOTAL, Math.max(...bars.map((b) => b.end ?? b.start + tickStep())));
+}
+
+/**
+ * The waveform's repeat, under the bars: the section that repeats shaded in
+ * each waveform row, its repeats faint after it, and its two ends as bars
+ * to drag; or with no repeat, its start waiting at the end to be pulled
+ * back. Returns a function that draws the ↻ over the bars.
+ */
+function drawWaveRepeat(): () => void {
+  const s = shape();
+  if (!s.bars.length) return () => {};
+  const waveRows = rows()!.filter((r) => r.wave !== null);
+  const top = waveRows[0].top;
+  const edge = (at: number, which: string, cls = '') => {
+    const g = el('g', { class: `width-loop-edge wave ${cls}${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
+    for (const r of waveRows) {
+      el('rect', { x: x(at) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, g);
+      el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, g);
+    }
+  };
+  const icon = (at: number, which: string, label: string) => () => {
+    const g = el('g', { class: 'width-loop-edge wave icon', [`data-${which}-edge`]: '' }, plot);
+    el('rect', { x: x(at) - 18, y: top, width: 16, height: 16, class: 'hit' }, g);
+    el('text', { x: x(at) - 4, y: top + 12, 'text-anchor': 'end', class: 'wave-repeat' }, g).textContent = label;
+  };
+  if (!waveLooping(s)) {
+    const at = pullEnd(s.bars);
+    edge(at, 'wave-loop', 'pull');
+    return icon(at, 'wave-loop', '↻');
+  }
+  const from = s.waveLoop!;
+  const end = loopEnd(s.bars)!;
+  const period = end - from;
+  for (const r of waveRows) {
+    for (let t = end; t < TOTAL; t += period) el('rect', { x: x(t), y: r.top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: r.h - 2, class: 'wave-loop again' }, plot);
+    el('rect', { x: x(from), y: r.top + 1, width: x(end) - x(from), height: r.h - 2, class: 'wave-loop' }, plot);
+  }
+  // The bars as they come round again, faint
+  for (let n = 1; end + (n - 1) * period < TOTAL; n++) {
+    for (const b of s.bars) {
+      const a = Math.max(b.start, from);
+      const z = Math.min(b.end!, end);
+      if (z <= a) continue;
+      const r = rowOf(b.wave);
+      el('rect', { x: x(a + n * period), y: r.top + 5, width: x(z + n * period) - x(a + n * period), height: r.h - 10, rx: 5, class: `bar-body ghost ${LANE_COLORS[b.wave]}` }, plot);
+    }
+  }
+  el('text', { x: x(from) + 10, y: top + 12, class: 'wave-repeat' }, plot).textContent = '↻ repeat';
+  edge(from, 'wave-loop');
+  edge(end, 'wave-loop-end');
+  return () => {};
 }
 
 const WIDTH_PAD = 7;
@@ -810,6 +873,8 @@ function renderReadout() {
     const later = s.bars.filter((o) => o.wave === b.wave && o.start > b.start);
     const bar: Bar = { ...b, end: box2.checked ? null : Math.min(TOTAL, Math.max(b.start + 1, state.keyUp)) };
     s.bars = commit(s.bars.filter((o) => !box2.checked || !later.includes(o)), b, bar);
+    // A bar that keeps going leaves nothing to repeat
+    if (box2.checked) s.waveLoop = null;
     changed();
   });
   keep.append(box2, ' Keeps going until the note ends');
@@ -927,6 +992,39 @@ plot.addEventListener('pointerdown', (e) => {
     // Where the key goes up is a view setting, not part of the instrument
     if (key !== 'keyup') before();
     move = (e) => dragHandle(key, e);
+  } else if (rows() && target.closest('[data-wave-loop-edge]')) {
+    // Where the waveform repeats from: on a place it changes, settling there
+    // as the envelope's dots do. Pulled out from the end it makes a repeat
+    // (and bars that kept going end there); pushed back onto the end, none.
+    before();
+    if (!waveLooping(s)) {
+      const end = pullEnd(s.bars);
+      s.bars = s.bars.map((b) => (b.end === null ? { ...b, end: Math.max(end, b.start + 1) } : b));
+    }
+    const places = () => [...waveChanges(s.bars), loopEnd(s.bars)!];
+    const from = waveLooping(s) ? places().indexOf(s.waveLoop!) : places().length - 1;
+    dragging = 'wave-loop';
+    plot.style.cursor = 'ew-resize';
+    move = (e) => {
+      const p = places();
+      const at = settleAt(p, frameAt(e), from < 0 ? p.length - 1 : from);
+      s.waveLoop = at < p.length - 1 ? p[at] : null;
+      render();
+    };
+  } else if (rows() && target.closest('[data-wave-loop-end-edge]')) {
+    // Where the waveform repeat ends: the bars ending there end with it,
+    // never before the last change ahead of it
+    before();
+    let end = loopEnd(s.bars)!;
+    const floor = Math.max(s.waveLoop!, ...waveChanges(s.bars).filter((t) => t < end)) + 1;
+    dragging = 'wave-loop-end';
+    plot.style.cursor = 'ew-resize';
+    move = (e) => {
+      const to = Math.max(floor, Math.min(TOTAL, Math.round(frameAt(e))));
+      s.bars = s.bars.map((b) => (b.end === end ? { ...b, end: to } : b));
+      end = to;
+      render();
+    };
   } else if (rows() && target.closest('[data-loop-end-edge]')) {
     // Where the repeat ends: the last point, moved in time only, and never
     // past the point before it
@@ -1250,7 +1348,7 @@ function pick(i: number) {
 $<HTMLSelectElement>('instrument').addEventListener('change', (e) => pick(Number((e.target as HTMLSelectElement).value)));
 $('new-instrument').addEventListener('click', () => {
   before();
-  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: null }], pulse: defaultPulse() });
+  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: null }], pulse: defaultPulse(), waveLoop: null });
   pick(state.instruments.length - 1);
 });
 $('duplicate-instrument').addEventListener('click', () => {
