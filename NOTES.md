@@ -40,9 +40,12 @@ The owner wants to nail instruments before the song editor, and is trying a
 second approach next to the first (keep both): no step list, just shaping on a
 zoomable timeline, aiming for a GarageBand feel.
 
-- Tabs: Volume (ADSR handles on the timeline) and Waveform (bars in rows for
-  Triangle/Saw/Pulse/Noise, moved and resized like clips; overlapping bars play
-  together; a dropped bar overwrites what it lands on). Next: **Pitch**, then **Filter**.
+- One timeline with folding sections (the owner preferred this to tabs, which
+  were disorienting): **Volume** (ADSR handles; folded, a thin picture of the
+  envelope) and **Waveform** (a coloured strip of what is heard; open, rows for
+  Triangle/Saw/Pulse/Noise with bars moved and resized like clips; overlapping
+  bars play together; a dropped bar overwrites what it lands on; double-click adds
+  one grid step). Pitch and Filter should be further folding sections, not tabs.
 - `web/src/shape.ts`: the model (`Shape`, `Bar`) and `waveProgram()`, which turns
   bars into a wave program. A delay row of N lasts N+1 frames (checked against the engine).
 - `web/src/maker2.ts`: the page. Own storage (`sidkid.maker2.v1`), not shared with

@@ -1,7 +1,8 @@
 // The second instrument maker: an instrument shaped on a timeline rather
-// than written as program steps. Each tab draws one side of the sound
-// against the same time axis: the volume envelope with handles to drag, and
-// the waveform as bars in rows, moved and resized like clips.
+// than written as program steps. Each side of the sound is a section on the
+// same time axis that folds open and closed: the volume envelope with
+// handles to drag, and the waveform as bars in rows, moved and resized like
+// clips.
 
 import './style.css';
 import './instrumentmaker.css';
@@ -27,14 +28,13 @@ const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
 const PLOT = 196;
-/** In the waveform tab, the strip above the rows showing what is heard */
+/** The waveform strip showing what is heard */
 const HEARD = 24;
 /** Each waveform row's height when the rows open under the volume envelope */
 const OPEN_LANE_H = 40;
 /** Room above full volume and below silence for the dots' labels */
 const PAD_TOP = 40;
 const PAD_BOTTOM = 8 + HEARD;
-/** In the volume tab, the strip under silence showing what is heard */
 /** The volume envelope's height when folded into a preview */
 const VOLUME_PREVIEW = 36;
 /** Pixels from a bar's end that grab the end rather than the bar */
@@ -46,12 +46,10 @@ const EDGE = 7;
  */
 const STEP_GAP = 40;
 
-type Tab = 'volume' | 'wave';
 
 interface State {
   instruments: Shape[];
   current: number;
-  tab: Tab;
   /** Pixels per frame */
   zoom: number;
   /** When the key goes up in the picture and when Play lets go, in frames */
@@ -87,7 +85,6 @@ function defaults(): State {
       },
     ],
     current: 0,
-    tab: 'volume',
     zoom: 0,
     keyUp: 50,
     volumeOpen: true,
@@ -278,18 +275,16 @@ const plotY = (v: number) => RULER + PAD_TOP + (1 - v) * LEVEL_H;
 
 /** Where the waveform rows are, if they are shown: their top and each row's height. */
 function rows(): { top: number; h: number } | null {
-  if (state.tab === 'wave') return { top: RULER + HEARD, h: (PLOT - HEARD) / LANES.length };
   return state.waveOpen ? { top: floor() + PAD_BOTTOM, h: OPEN_LANE_H } : null;
 }
 
 /** The timeline's height: taller with the waveform rows open under the volume */
 function height(): number {
   const r = rows();
-  if (state.tab !== 'volume') return RULER + PLOT;
   return r ? r.top + r.h * LANES.length : floor() + PAD_BOTTOM;
 }
 
-/** In the volume tab, the line at silence, under the envelope or its preview, with the waveform strip below */
+/** The line at silence, under the envelope or its preview, with the waveform strip below */
 function floor(): number {
   return state.volumeOpen ? RULER + PLOT - PAD_BOTTOM : RULER + VOLUME_PREVIEW;
 }
@@ -317,16 +312,15 @@ function render() {
   if (!state.zoom) state.zoom = Math.max(minZoom(), scroller.clientWidth / 100);
   const s = shape();
   $<HTMLInputElement>('name').value = document.activeElement === $('name') ? $<HTMLInputElement>('name').value : s.name;
-  for (const b of $('tabs').querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('on', b.dataset.tab === state.tab);
   $('zoom-label').textContent = `${timeText(scroller.clientWidth / state.zoom)} shown`;
   if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
   $('tab-hint').textContent =
-    state.tab === 'volume'
-      ? [
-          state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
-          state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them.' : '',
-        ].join(' ').trim() || 'Click Volume or Waveform to open them.'
-      : 'Drag along a row to draw a waveform; drag bars to move them, or their ends to resize. Bars that overlap play together.';
+    [
+      state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
+      state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them; bars that overlap play together.' : '',
+    ]
+      .join(' ')
+      .trim() || 'Click Volume or Waveform to open them.';
 
   const width = x(TOTAL) + ORIGIN;
   const HEIGHT = height();
@@ -335,7 +329,6 @@ function render() {
   plot.setAttribute('viewBox', `0 0 ${width} ${HEIGHT}`);
   playheadLine.setAttribute('y2', String(HEIGHT));
   plot.replaceChildren();
-  plot.dataset.tab = state.tab;
 
   // Ruler and grid
   const step = tickStep();
@@ -348,15 +341,14 @@ function render() {
   }
 
   const curve = level(s.ad, s.sr, state.keyUp);
-  if (state.tab === 'volume') drawVolume(curve);
-  else drawWaves(curve);
+  drawVolume(curve);
 
   // The key going up, with a tab just under the ruler to drag it by,
   // pointing up at its time
   const ku = x(state.keyUp);
   el('line', { x1: ku, x2: ku, y1: RULER, y2: HEIGHT, class: 'tl-keyup' }, plot);
   // (Over the folded volume preview there is no room for it)
-  if (state.tab === 'wave' || state.volumeOpen) {
+  if (state.volumeOpen) {
     const tab = el('g', { class: `tl-keyup-tab${dragging === 'keyup' ? ' dragging' : ''}`, 'data-drag': 'keyup', tabindex: 0, role: 'slider', 'aria-label': `Key up at ${timeText(state.keyUp)}` }, plot);
     const tabTop = RULER + 6;
     el('rect', { x: ku - 28, y: tabTop, width: 56, height: 16, rx: 6 }, tab);
@@ -404,14 +396,12 @@ function renderGutter() {
       flip();
     });
   };
-  if (state.tab === 'volume') {
-    if (state.volumeOpen) {
-      toggle(RULER, 22, 'Volume', true, () => openVolume(false), 'rule');
-      // Each level's number sits just above its line
-      for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-    } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'rule');
-    toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
-  } else add(RULER, HEARD, ['You hear'], 'heard-label');
+  if (state.volumeOpen) {
+    toggle(RULER, 22, 'Volume', true, () => openVolume(false), 'rule');
+    // Each level's number sits just above its line
+    for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
+  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'rule');
+  toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
   const r = rows();
   if (r) LANES.forEach((w, i) => add(laneTop(i), r.h, [waveIcon(w, 26, 14), waveName(w)], 'lane'));
 }
@@ -539,7 +529,7 @@ function drawWaveBand() {
 
 /**
  * What is heard: the waveform each stretch of time adds up to, as a strip
- * from `top`. Clicking a stretch picks its bar in the waveform tab.
+ * from `top`. Clicking a stretch opens the rows with its bar picked.
  */
 function drawHeard(top: number) {
   const defs = el('defs', {}, plot);
@@ -586,20 +576,7 @@ function handleText(key: string, ad: number, sr: number): string {
 
 const LANE_COLORS: Record<number, string> = { [WAVE_TRI]: 'tri', [WAVE_SAW]: 'saw', [WAVE_PULSE]: 'pulse', [WAVE_NOISE]: 'noise' };
 
-function drawWaves(curve: Float32Array) {
-  const s = shape();
-  // The volume, faintly, so the waveform can be placed against it
-  const ghost = areaPath(curve, 0, TOTAL);
-  const gy = (v: number) => RULER + HEARD + (1 - v) * (PLOT - HEARD);
-  const pts: string[] = [];
-  for (let i = 0; i < curve.length; i += 2) pts.push(`${x(i / ENV_STEPS).toFixed(1)},${gy(curve[i]).toFixed(1)}`);
-  if (ghost) el('path', { d: `M${pts.join('L')}L${x(TOTAL)},${gy(0)}L${x(0)},${gy(0)}Z`, class: 'env-ghost' }, plot);
-
-  drawHeard(RULER);
-  drawBars();
-}
-
-/** The waveform rows, and the bars in them, wherever the rows are. */
+/** The waveform rows, and the bars in them. */
 function drawBars() {
   const s = shape();
   const r = rows()!;
@@ -630,7 +607,7 @@ function renderReadout() {
   box.replaceChildren();
   const s = shape();
   // The envelope's settings are on it already: only a selected bar has more to say
-  if (state.tab === 'volume' && !(state.waveOpen && s.bars[selected])) return;
+  if (!(state.waveOpen && s.bars[selected])) return;
   const b = s.bars[selected];
   if (!b) {
     box.textContent = s.bars.length ? 'Click a bar to change it.' : 'No waveform yet: the note is silent. Drag along a row to draw one.';
@@ -711,15 +688,9 @@ plot.addEventListener('pointerdown', (e) => {
     openVolume(true);
     return;
   } else if (span || strip) {
-    // The waveform strip under the volume opens the rows (picking the bar
-    // clicked) or closes them; in the waveform tab it picks the bar
+    // The waveform strip opens the rows (picking the bar clicked) or closes them
     const at = span ? Number(span.dataset.span) : -1;
-    const bar = s.bars.findIndex((b) => b.start <= at && at < (b.end ?? Infinity));
-    if (state.tab === 'volume') openWaves(!state.waveOpen, bar);
-    else {
-      selected = bar;
-      render();
-    }
+    openWaves(!state.waveOpen, s.bars.findIndex((b) => b.start <= at && at < (b.end ?? Infinity)));
     return;
   } else if (handle) {
     const key = handle.dataset.drag!;
@@ -924,15 +895,13 @@ scroller.addEventListener(
 $('zoom-in').addEventListener('click', () => setZoom(state.zoom * 1.5));
 $('zoom-out').addEventListener('click', () => setZoom(state.zoom / 1.5));
 $('zoom-fit').addEventListener('click', () => {
-  // What the tab is about: the sound until it has faded, or the bars
+  // What is open: the sound until it has faded, and the bars (those that
+  // keep going shown a little way past where they start)
   const s = shape();
-  let frames: number;
-  if (state.tab === 'volume') frames = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
-  else {
-    // Bars that keep going are shown a little way past where they start
-    frames = Math.max(0, ...s.bars.map((b) => b.end ?? b.start + 10));
-    if (frames <= 10 && s.bars.every((b) => b.end === null)) frames = state.keyUp;
-  }
+  let frames = 0;
+  if (state.volumeOpen) frames = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
+  if (state.waveOpen) frames = Math.max(frames, ...s.bars.map((b) => b.end ?? b.start + 10));
+  if (frames <= 10) frames = state.keyUp;
   setZoom((scroller.clientWidth - 2 * ORIGIN) / Math.min(TOTAL, Math.max(5, frames * 1.08 + 2)), 0);
   scroller.scrollLeft = 0;
 });
@@ -953,14 +922,6 @@ new ResizeObserver(() => {
   state.zoom = Math.max(minZoom(), state.zoom);
   render();
 }).observe(scroller);
-
-for (const b of $('tabs').querySelectorAll<HTMLButtonElement>('button')) {
-  b.addEventListener('click', () => {
-    state.tab = b.dataset.tab as Tab;
-    persist();
-    render();
-  });
-}
 
 $<HTMLInputElement>('name').addEventListener('input', (e) => {
   before();

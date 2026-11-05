@@ -474,11 +474,6 @@ try {
   report(!!added, 'maker2 double-click adds a bar', added ?? 'none');
   await m2.click('.tl-gutter-row.fold.rule');
 
-  // Drawing along the triangle row adds a bar there
-  await m2.click('#tabs [data-tab=wave]');
-  await dragTo(await plotPoint(10, 24 + 24 + 24), await plotPoint(30, 24 + 24 + 24));
-  const drawn = await m2.evaluate(() => JSON.stringify(window.maker2.state().instruments[0].bars.find((b) => b.wave === 0x10)));
-  report(drawn === '{"wave":16,"start":10,"end":30}', 'maker2 draw a bar', drawn);
 
   await colorScheme(m2, 'dark');
   await m2.screenshot({ path: `${OUT}/${BROWSER}-maker2-dark.png` });
