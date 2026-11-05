@@ -26,7 +26,7 @@ const TEST_INSTRUMENT = 1;
 const TOTAL = 750;
 const MAX_ZOOM = 24;
 const RULER = 24;
-const PLOT = 260;
+const PLOT = 196;
 /** In the waveform tab, the strip above the rows showing what is heard */
 const HEARD = 24;
 /** Each waveform row's height when the rows open under the volume envelope */
@@ -400,10 +400,10 @@ function renderGutter() {
   };
   if (state.tab === 'volume') {
     if (state.volumeOpen) {
-      toggle(RULER, 22, 'Volume', true, () => openVolume(false));
+      toggle(RULER, 22, 'Volume', true, () => openVolume(false), 'rule');
       // Each level's number sits just above its line
       for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-    } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true));
+    } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'rule');
     toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
   } else add(RULER, HEARD, ['You hear'], 'heard-label');
   const r = rows();
@@ -536,17 +536,28 @@ function drawWaveBand() {
  * from `top`. Clicking a stretch picks its bar in the waveform tab.
  */
 function drawHeard(top: number) {
+  const defs = el('defs', {}, plot);
   for (const sp of spans(shape().bars)) {
     // Silence shows as nothing
     if (!sp.wave) continue;
     const x1 = x(sp.start);
     const x2 = x(sp.end ?? TOTAL);
-    // Coloured like its bars: a mix takes the colour of its first row's
-    const first = LANES.find((w) => sp.wave & w)!;
-    const g = el('g', { class: `heard ${LANE_COLORS[first]}`, 'data-span': sp.start }, plot);
-    el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
+    // Coloured like its bars; a mix shades from one row's colour to the
+    // next, top to bottom, as the rows are stacked
+    const waves = LANES.filter((w) => sp.wave & w);
+    const g = el('g', { class: `heard ${LANE_COLORS[waves[0]]}`, 'data-span': sp.start }, plot);
+    const rect = el('rect', { x: x1 + 1, y: top + 4, width: Math.max(1, x2 - x1 - 2), height: HEARD - 8, rx: 4 }, g);
     // The waveform drawn along it, start to finish
-    if (x2 - x1 > 8) el('polyline', { points: waveRun(sp.wave, x1 + 4, top + 7, x2 - x1 - 8, HEARD - 14, 12), class: 'heard-wave' }, g);
+    const line = x2 - x1 > 8 ? el('polyline', { points: waveRun(sp.wave, x1 + 4, top + 7, x2 - x1 - 8, HEARD - 14, 12), class: 'heard-wave' }, g) : null;
+    if (waves.length > 1) {
+      const id = `mix-${top}-${sp.wave}`;
+      if (!defs.querySelector(`#${id}`)) {
+        const grad = el('linearGradient', { id, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+        waves.forEach((w, i) => el('stop', { offset: i / (waves.length - 1), style: `stop-color: var(--${LANE_COLORS[w]})` }, grad));
+      }
+      rect.setAttribute('style', `fill: url(#${id}); stroke: url(#${id})`);
+      line?.setAttribute('style', `stroke: url(#${id})`);
+    }
   }
 }
 
