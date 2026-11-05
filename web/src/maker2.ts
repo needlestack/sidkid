@@ -231,6 +231,11 @@ const scroller = $('scroll');
 let selected = -1;
 /** What is being dragged, for its look and the readout */
 let dragging: string | null = null;
+/**
+ * While an envelope dot is dragged it follows the pointer, between the
+ * setting it will land on and, greyed out, the next one the other side.
+ */
+let free: { key: string; f: number; v: number; ghosts: { ad: number; sr: number }[] } | null = null;
 let playhead = -1;
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number> = {}, parent?: Element): SVGElementTagNameMap[K] {
@@ -269,6 +274,7 @@ function render() {
   $<HTMLInputElement>('name').value = document.activeElement === $('name') ? $<HTMLInputElement>('name').value : s.name;
   for (const b of $('tabs').querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('on', b.dataset.tab === state.tab);
   $('zoom-label').textContent = `${timeText(scroller.clientWidth / state.zoom)} shown`;
+  if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
   $('tab-hint').textContent =
     state.tab === 'volume'
       ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up. Drag “key up” to hold the note longer.'
@@ -339,7 +345,7 @@ function areaPath(curve: Float32Array, from: number, to: number): string {
 
 function drawVolume(curve: Float32Array) {
   const s = shape();
-  const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
+  const [a, d, sus] = [s.ad >> 4, s.ad & 15, s.sr >> 4];
   const end = releaseEnd(s.ad, s.sr, state.keyUp);
   const line = areaPath(curve, 0, Math.min(TOTAL, end + 2));
   el('path', { d: `${line}L${x(Math.min(TOTAL, end + 2))},${plotY(0)}L${x(0)},${plotY(0)}Z`, class: 'env-area' }, plot);
@@ -349,16 +355,40 @@ function drawVolume(curve: Float32Array) {
   if (dEnd > state.keyUp) el('path', { d: areaPath(held, state.keyUp, Math.min(TOTAL, dEnd + 4)), class: 'env-held' }, plot);
   el('path', { d: line, class: 'env-line' }, plot);
 
-  const handle = (key: string, f: number, v: number, label: string, anchor: 'start' | 'end' | 'middle', dy: number) => {
-    const g = el('g', { class: `env-handle${dragging === key ? ' dragging' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
-    el('circle', { cx: x(f), cy: plotY(v), r: 13, class: 'hit' }, g);
-    el('circle', { cx: x(f), cy: plotY(v), r: 6 }, g);
-    const t = el('text', { x: x(f) + (anchor === 'start' ? 10 : anchor === 'end' ? -10 : 0), y: plotY(v) + dy, 'text-anchor': anchor }, g);
-    t.textContent = label;
-  };
-  handle('a', attackFrames(a), 1, envText.a(a), 'start', -10);
-  handle('ds', dEnd, sus / 15, `${envText.d(d)} · ${envText.s(sus)}`, 'start', sus > 12 ? 20 : -10);
-  handle('r', end, 0, envText.r(r), 'start', -10);
+  const labelY = (key: string, v: number) => plotY(v) + (key === 'ds' && v > 0.8 ? 20 : -10);
+  // The settings the other side of a dragged dot, greyed out
+  if (free) {
+    for (const g of free.ghosts) {
+      el('path', { d: areaPath(level(g.ad, g.sr, state.keyUp), 0, Math.min(TOTAL, releaseEnd(g.ad, g.sr, state.keyUp) + 2)), class: 'env-ghostline' }, plot);
+      const p = handlePos(free.key, g.ad, g.sr);
+      el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'env-ghostdot' }, plot);
+      el('text', { x: x(p.f) + 10, y: labelY(free.key, p.v), class: 'env-ghostlabel' }, plot).textContent = handleText(free.key, g.ad, g.sr);
+    }
+  }
+  for (const key of ['a', 'ds', 'r']) {
+    const p = handlePos(key, s.ad, s.sr);
+    const label = handleText(key, s.ad, s.sr);
+    const held = free?.key === key;
+    const g = el('g', { class: `env-handle${held ? ' dragging' : ''}`, 'data-drag': key, tabindex: 0, role: 'slider', 'aria-label': label }, plot);
+    el('circle', { cx: x(p.f), cy: plotY(p.v), r: 13, class: 'hit' }, g);
+    el('circle', { cx: x(p.f), cy: plotY(p.v), r: 6, class: 'dot' }, g);
+    el('text', { x: x(p.f) + 10, y: labelY(key, p.v) }, g).textContent = label;
+    // The dot in hand, under the pointer
+    if (held) el('circle', { cx: x(free!.f), cy: plotY(free!.v), r: 7, class: 'env-grip' }, plot);
+  }
+}
+
+/** Where an envelope dot sits for some settings. */
+function handlePos(key: string, ad: number, sr: number): { f: number; v: number } {
+  if (key === 'a') return { f: attackFrames(ad >> 4), v: 1 };
+  if (key === 'ds') return { f: decayEnd(ad >> 4, ad & 15, sr >> 4), v: (sr >> 4) / 15 };
+  return { f: releaseEnd(ad, sr, state.keyUp), v: 0 };
+}
+
+function handleText(key: string, ad: number, sr: number): string {
+  if (key === 'a') return envText.a(ad >> 4);
+  if (key === 'ds') return `${envText.d(ad & 15)} · ${envText.s(sr >> 4)}`;
+  return envText.r(sr & 15);
 }
 
 const LANE_COLORS: Record<number, string> = { [WAVE_TRI]: 'tri', [WAVE_SAW]: 'saw', [WAVE_PULSE]: 'pulse', [WAVE_NOISE]: 'noise' };
@@ -562,6 +592,7 @@ plot.addEventListener('pointerdown', (e) => {
     plot.removeEventListener('pointerup', onUp);
     plot.removeEventListener('pointercancel', onUp);
     dragging = null;
+    free = null;
     if (moved) {
       changed();
       playShape();
@@ -581,15 +612,42 @@ function dragHandle(key: string, e: PointerEvent) {
   const s = shape();
   const f = frameAt(e);
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
+  // The setting past the pointer from the nearest one, if the pointer is off it
+  const beyond = (position: (v: number) => number, n: number, at: number): number | null => {
+    if (Math.abs(position(n) - at) * state.zoom < 3) return null;
+    const o = n + (at > position(n) ? 1 : -1);
+    return o >= 0 && o < 16 ? o : null;
+  };
+  const ghosts: { ad: number; sr: number }[] = [];
+  let v = 0;
   if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
-  else if (key === 'a') s.ad = (nearest(attackFrames, f) << 4) | d;
-  else if (key === 'ds') {
-    const v = 1 - (yAt(e) - RULER - PAD) / (PLOT - 2 * PAD);
-    const ns = Math.max(0, Math.min(15, Math.round(v * 15)));
-    const nd = nearest((v) => decayEnd(a, v, ns), f);
+  else if (key === 'a') {
+    const n = nearest(attackFrames, f);
+    s.ad = (n << 4) | d;
+    const o = beyond(attackFrames, n, f);
+    if (o !== null) ghosts.push({ ad: (o << 4) | d, sr: s.sr });
+    v = 1;
+  } else if (key === 'ds') {
+    v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD) / (PLOT - 2 * PAD)));
+    const ns = Math.round(v * 15);
+    const decayAt = (dv: number) => decayEnd(a, dv, ns);
+    const nd = nearest(decayAt, f);
     s.ad = (a << 4) | nd;
     s.sr = (ns << 4) | r;
-  } else if (key === 'r') s.sr = (sus << 4) | nearest((v) => releaseEnd(s.ad, (sus << 4) | v, state.keyUp), f);
+    const od = beyond(decayAt, nd, f);
+    if (od !== null) ghosts.push({ ad: (a << 4) | od, sr: s.sr });
+    // Sustain is a level: its next step up or down, once the pointer leaves it
+    const off = v * 15 - ns;
+    const os = ns + Math.sign(off);
+    if (Math.abs(off) * ((PLOT - 2 * PAD) / 15) >= 3 && os >= 0 && os < 16) ghosts.push({ ad: s.ad, sr: (os << 4) | r });
+  } else if (key === 'r') {
+    const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
+    const n = nearest(releaseAt, f);
+    s.sr = (sus << 4) | n;
+    const o = beyond(releaseAt, n, f);
+    if (o !== null) ghosts.push({ ad: s.ad, sr: (sus << 4) | o });
+  }
+  free = key === 'keyup' ? null : { key, f: Math.max(0, f), v, ghosts };
   render();
 }
 
@@ -626,12 +684,30 @@ scroller.addEventListener(
 $('zoom-in').addEventListener('click', () => setZoom(state.zoom * 1.5));
 $('zoom-out').addEventListener('click', () => setZoom(state.zoom / 1.5));
 $('zoom-fit').addEventListener('click', () => {
-  // The whole sound, until it has faded after the key goes up, and every bar's end
+  // What the tab is about: the sound until it has faded, or the bars
   const s = shape();
-  const ends = s.bars.map((b) => b.end ?? 0);
-  const frames = Math.min(TOTAL, Math.max(releaseEnd(s.ad, s.sr, state.keyUp), ...ends) * 1.08 + 2);
-  setZoom((scroller.clientWidth - 2 * ORIGIN) / frames, 0);
+  let frames: number;
+  if (state.tab === 'volume') frames = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
+  else {
+    // Bars that keep going are shown a little way past where they start
+    frames = Math.max(0, ...s.bars.map((b) => b.end ?? b.start + 10));
+    if (frames <= 10 && s.bars.every((b) => b.end === null)) frames = state.keyUp;
+  }
+  setZoom((scroller.clientWidth - 2 * ORIGIN) / Math.min(TOTAL, Math.max(5, frames * 1.08 + 2)), 0);
   scroller.scrollLeft = 0;
+});
+
+// The zoom slider runs evenly from the whole timeline to the closest view
+const zoomSlider = $<HTMLInputElement>('zoom-slider');
+const SLIDER_STEPS = 1000;
+function sliderValue() {
+  const lo = Math.log(minZoom());
+  return Math.round(((Math.log(state.zoom) - lo) / (Math.log(MAX_ZOOM) - lo)) * SLIDER_STEPS);
+}
+zoomSlider.max = String(SLIDER_STEPS);
+zoomSlider.addEventListener('input', () => {
+  const lo = Math.log(minZoom());
+  setZoom(Math.exp(lo + (Number(zoomSlider.value) / SLIDER_STEPS) * (Math.log(MAX_ZOOM) - lo)));
 });
 new ResizeObserver(() => {
   state.zoom = Math.max(minZoom(), state.zoom);

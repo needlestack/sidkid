@@ -34,12 +34,15 @@
           </div>
           <div class="view-tools">
             <button class="button secondary" id="play" title="Play a note held until the key-up line (Space)">▶ Play</button>
-            <span class="zoom">
-              <button class="mini" id="zoom-out" aria-label="Zoom out" title="Zoom out (or pinch, or ⌘/Ctrl + scroll)">−</button>
-              <span id="zoom-label" class="hint"></span>
-              <button class="mini" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
-              <button class="mini" id="zoom-fit" title="Show the whole sound, until it fades away">Fit</button>
-            </span>
+            <div class="zoom">
+              <div class="zoom-buttons">
+                <button class="mini" id="zoom-out" aria-label="Zoom out" title="Zoom out (or pinch, or ⌘/Ctrl + scroll)">−</button>
+                <span id="zoom-label" class="hint"></span>
+                <button class="mini" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+                <button class="mini" id="zoom-fit" title="Fit what this tab shows: the whole sound, or all the waveform bars">Fit</button>
+              </div>
+              <input type="range" id="zoom-slider" min="0" aria-label="Zoom" title="Zoom the timeline" />
+            </div>
           </div>
         </header>
         <p class="hint tab-hint" id="tab-hint"></p>

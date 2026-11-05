@@ -31,9 +31,20 @@
 }
 
 .zoom {
-  display: inline-flex;
+  display: grid;
+  gap: 4px;
+}
+
+.zoom-buttons {
+  display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.zoom input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .zoom .hint {
@@ -187,20 +198,56 @@
   fill: transparent;
 }
 
-.env-handle circle:not(.hit) {
+.env-handle .dot {
   fill: var(--surface);
   stroke: var(--accent);
   stroke-width: 2.5;
 }
 
-.env-handle:hover circle:not(.hit),
-.env-handle.dragging circle:not(.hit),
-.env-handle:focus-visible circle:not(.hit) {
+.env-handle:hover .dot,
+.env-handle:focus-visible .dot {
   fill: var(--accent);
 }
 
 .env-handle.dragging {
   cursor: grabbing;
+}
+
+/* The dot in hand follows the pointer; the setting it will land on stays in
+   colour and the next one past it is greyed out */
+.env-grip {
+  fill: var(--accent);
+  fill-opacity: 0.35;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.env-ghostline {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.env-ghostdot {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 2;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.env-ghostlabel {
+  fill: var(--muted);
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .env-handle text {
