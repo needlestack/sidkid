@@ -4,7 +4,7 @@
 // Both go into one GoatTracker wave program (each of its rows sets a
 // waveform and a pitch), and pulse width into a pulse program.
 
-import { fastestSweep, pitchRight, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
+import { fastestSweep, filterStep, pitchRight, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
 
 /** The waveform rows, top to bottom: pulse last, so its width row sits under everything */
 export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_NOISE, WAVE_PULSE];
@@ -72,7 +72,21 @@ export interface Shape {
    * effects, so not quite frames)
    */
   vibrato: { delay: number; turn: number; even: boolean; depth: number } | null;
+  /** The filter this instrument sets going (null: it leaves the filter alone) */
+  filter: FilterShape | null;
 }
+
+/**
+ * The filter as an instrument sets it: its passband (low, band, high bits),
+ * resonance (0-15) and cutoff (0-255) over time, as a line like pulse width.
+ */
+export interface FilterShape {
+  passband: number;
+  resonance: number;
+  cutoff: PulseShape;
+}
+
+export const CUTOFF_MAX = 0xff;
 
 /** The parts of a shape that make its wave program */
 export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'>;
@@ -242,25 +256,45 @@ export function waveProgram(s: WaveParts, name: string): Program {
  */
 export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Program | null {
   if (!bars.some((b) => b.wave & WAVE_PULSE)) return null;
-  const pts = pulse.points;
-  const steps: Step[] = [pulseStep({ type: 'width', width: pts[0].w })];
+  return lineProgram(pulse, name, [pulseStep({ type: 'width', width: pulse.points[0].w })], (width) => pulseStep({ type: 'width', width }), (sw) =>
+    pulseStep({ type: 'sweep', ...sw }),
+  );
+}
+
+/**
+ * The filter program: set the filter up (passband, resonance, the voice it
+ * filters) with its first cutoff, both in the first frame, then the cutoff
+ * line, as pulse width's.
+ */
+export function filterProgram(filter: FilterShape, name: string, voices = 1): Program {
+  const first = [
+    filterStep({ type: 'setup', passband: filter.passband, resonance: filter.resonance, voices }),
+    filterStep({ type: 'cutoff', cutoff: filter.cutoff.points[0].w }),
+  ];
+  return lineProgram(filter.cutoff, name, first, (cutoff) => filterStep({ type: 'cutoff', cutoff }), (sw) => filterStep({ type: 'sweep', ...sw }));
+}
+
+/** A line of points as program rows: `first` sets the start, then a set or sweep rows for each stretch. */
+function lineProgram(line: PulseShape, name: string, first: Step[], set: (v: number) => Step, sweep: (sw: { frames: number; speed: number }) => Step): Program {
+  const pts = line.points;
+  const steps: Step[] = [...first];
   const leaving: number[] = [];
   const along = (i: number, f: number, frames: number) => pts[i].w + Math.round(((pts[i + 1].w - pts[i].w) * f) / frames);
   for (let i = 0; i + 1 < pts.length; i++) {
     leaving.push(steps.length);
     const frames = Math.max(1, pts[i + 1].t - pts[i].t);
-    // The repeat jumps back here, wherever the width has got to, so this
-    // stretch starts by setting its first frame's width outright
-    const first = i === pulse.loop ? 1 : 0;
-    if (first) steps.push(pulseStep({ type: 'width', width: along(i, 1, frames) }));
+    // The repeat jumps back here, wherever the line has got to, so this
+    // stretch starts by setting its first frame's value outright
+    const first = i === line.loop ? 1 : 0;
+    if (first) steps.push(set(along(i, 1, frames)));
     const from = first ? along(i, 1, frames) : pts[i].w;
     const change = pts[i + 1].w - from;
     const rest = frames - first;
-    if (rest > 0 && fastestSweep(change) <= rest) for (const sw of sweepRows(change, rest)) steps.push(pulseStep({ type: 'sweep', ...sw }));
-    else for (let f = first + 1; f <= frames; f++) steps.push(pulseStep({ type: 'width', width: along(i, f, frames) }));
+    if (rest > 0 && fastestSweep(change) <= rest) for (const sw of sweepRows(change, rest)) steps.push(sweep(sw));
+    else for (let f = first + 1; f <= frames; f++) steps.push(set(along(i, f, frames)));
   }
   const program: Program = { name, steps, next: null };
-  if (pulse.loop !== null && pulse.loop < pts.length - 1) program.next = { program, step: leaving[pulse.loop] };
+  if (line.loop !== null && line.loop < pts.length - 1) program.next = { program, step: leaving[line.loop] };
   return program;
 }
 

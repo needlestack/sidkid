@@ -14,10 +14,10 @@ import { DEFAULT_SETTINGS, type Settings, type Status } from './engine/protocol'
 import { ATTACK_MS, DECAY_MS } from './adsr';
 import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, type Instrument } from './song';
-import { layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
+import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
 import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { defaultPulse, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type Shape } from './shape';
+import { CUTOFF_MAX, defaultPulse, filterProgram, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type Note, type PulseShape, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -71,6 +71,8 @@ interface State {
   waveOpen: boolean;
   /** Whether the notes are open, under the waveform */
   notesOpen: boolean;
+  /** Whether the filter is open, at the bottom */
+  filterOpen: boolean;
 }
 
 function defaults(): State {
@@ -84,6 +86,7 @@ function defaults(): State {
         notes: [],
         hold: true,
         vibrato: null,
+        filter: null,
         // The classic sweep: narrow to wide and back, over and over
         pulse: {
           points: [
@@ -106,6 +109,8 @@ function defaults(): State {
         notes: [],
         hold: true,
         vibrato: null,
+        // A resonant low pass closing down: the classic bass pluck
+        filter: { passband: FILTER_LOW, resonance: 10, cutoff: { points: [{ t: 0, w: 0xd0 }, { t: 25, w: 0x28 }], loop: null } },
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -121,6 +126,7 @@ function defaults(): State {
         notes: [],
         hold: true,
         vibrato: null,
+        filter: null,
         pulse: defaultPulse(),
         waveLoop: null,
       },
@@ -131,6 +137,7 @@ function defaults(): State {
     volumeOpen: true,
     waveOpen: false,
     notesOpen: false,
+    filterOpen: false,
   };
 }
 
@@ -151,6 +158,7 @@ function load(): State {
         // Notes had ends, which the player never heard (a pitch holds): now just their starts
         ins.notes = (ins.notes ?? []).map((n) => ({ start: n.start, semis: n.semis }));
         ins.vibrato ??= null;
+        ins.filter ??= null;
         // Bars that kept going until the note ended: now the waveform holds after its last bar
         const open = ins.bars.some((b) => b.end === null);
         if (ins.hold === undefined) ins.hold = open;
@@ -225,9 +233,11 @@ function audition(): Audition {
   // Vibrato reads its speed from a row of the speed table
   const v = s.vibrato;
   const speed = v ? wobbleRow(v) : null;
+  // The test note plays on voice 1, so that is the voice it filters
+  const filter = s.filter ? filterProgram(s.filter, s.name, 1) : null;
   return {
-    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, empty, speed ? { left: new Uint8Array([speed[0]]), right: new Uint8Array([speed[1]]) } : empty],
-    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: 2, firstWave: 0x09 },
+    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, filter ? layOut([filter]).table : empty, speed ? { left: new Uint8Array([speed[0]]), right: new Uint8Array([speed[1]]) } : empty],
+    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, filter ? 1 : 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: 2, firstWave: 0x09 },
   };
 }
 
@@ -404,8 +414,14 @@ function inRoll(e: PointerEvent): boolean {
 
 /** The timeline's height: taller with sections open */
 function height(): number {
-  return notesTop() + PAD_BOTTOM + (state.notesOpen ? ROLL_H + VIB_H : 0);
+  return filterTop() + PAD_BOTTOM + (state.filterOpen && shape().filter ? CUTOFF_H : 0);
 }
+
+/** The filter's band: under the pitch and its rows */
+const filterTop = () => notesTop() + PAD_BOTTOM + (state.notesOpen ? ROLL_H + VIB_H : 0);
+/** The cutoff row's height, open */
+const CUTOFF_H = 80;
+const cutoffTop = () => filterTop() + PAD_BOTTOM;
 
 /** The vibrato lane, under the notes */
 const VIB_H = 34;
@@ -428,7 +444,7 @@ function dataEnd(volume = true, waves = true): number {
   const s = shape();
   let end = 0;
   if (volume) end = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
-  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.start + 1));
+  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.start + 1), ...(s.filter?.cutoff.points.map((p) => p.t + 10) ?? []));
   return Math.min(TOTAL, Math.max(5, end));
 }
 
@@ -491,9 +507,10 @@ function render(keepReadout = false) {
       state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
       state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them; bars that overlap play together.' : '',
       state.notesOpen ? 'Draw pitches in semitones from the key played; each holds until the next.' : '',
+      state.filterOpen ? (shape().filter ? 'Drag the cutoff line as you would pulse width; set the filter’s type and resonance below.' : 'This instrument leaves the filter alone: add one below.') : '',
     ]
       .join(' ')
-      .trim() || 'Click Volume, Waveform or Pitch to open them.';
+      .trim() || 'Click Volume, Waveform, Pitch or Filter to open them.';
 
   const width = x(TOTAL) + ORIGIN;
   const HEIGHT = height();
@@ -585,6 +602,8 @@ function renderGutter() {
     for (const semis of [24, 12, 0, -12]) add(noteY(semis) + SEMI / 2 - 7, 14, [semis === 0 ? 'played' : semitoneText(semis)], 'semi');
     add(vibTop(), VIB_H, ['Vibrato'], 'lane width rule-thin');
   }
+  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), 'rule');
+  if (state.filterOpen && shape().filter) add(cutoffTop(), CUTOFF_H, ['Cutoff'], 'lane width');
 }
 
 /** Opens or folds the volume envelope. */
@@ -595,6 +614,12 @@ function openVolume(open: boolean) {
 }
 
 /** Opens or closes the notes, selecting a note or none. */
+function openFilter(open: boolean) {
+  state.filterOpen = open;
+  persist();
+  render();
+}
+
 function openNotes(open: boolean, note = -1) {
   state.notesOpen = open;
   selected = -1;
@@ -723,9 +748,124 @@ function drawWaveBand() {
   drawHeard(top + (PAD_BOTTOM - HEARD) / 2);
   if (state.waveOpen) drawBars();
   drawNotes();
+  drawFilter();
 }
 
 const LINE_PAD = 6;
+
+/**
+ * The filter: its band shows the cutoff over time as a thin line (or that
+ * there is no filter), and opens or closes it; open, the cutoff as a line
+ * of points to drag, like pulse width.
+ */
+function drawFilter() {
+  const s = shape();
+  const top = filterTop();
+  el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
+  el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-filter-strip': '' }, plot);
+  if (!s.filter) {
+    el('text', { x: x(0) + 8, y: top + PAD_BOTTOM / 2 + 4, class: 'vib-hint' }, plot).textContent = 'No filter';
+  } else {
+    const py = (v: number) => top + LINE_PAD + (1 - v / CUTOFF_MAX) * (PAD_BOTTOM - 2 * LINE_PAD);
+    const pts = pulseLine(s.filter.cutoff, TOTAL).map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${py(p.w).toFixed(1)}`);
+    el('polyline', { points: pts.join(' '), class: 'cutoff-preview' }, plot);
+  }
+  const l = lane('cutoff');
+  if (l) {
+    el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: l.top, y2: l.top, class: 'lane-line' }, plot);
+    drawLine(l);
+  }
+  renderFilterControls();
+}
+
+const PASSBANDS: [number, string, string][] = [
+  [FILTER_LOW, 'Low', 'Low pass: lets the low end through, softening the top'],
+  [FILTER_BAND, 'Band', 'Band pass: just the frequencies around the cutoff'],
+  [FILTER_HIGH, 'High', 'High pass: lets the high end through, thinning the bottom'],
+];
+
+/** Under the timeline while the filter is open: its type and resonance, or adding one. */
+function renderFilterControls() {
+  const box = $('filter-controls');
+  const s = shape();
+  box.hidden = !state.filterOpen;
+  box.replaceChildren();
+  if (!state.filterOpen) return;
+  if (!s.filter) {
+    const add = document.createElement('button');
+    add.className = 'button secondary';
+    add.textContent = 'Use the filter';
+    add.title = 'Filter this instrument: a low pass closing down, to start with';
+    add.addEventListener('click', () => {
+      before();
+      s.filter = { passband: FILTER_LOW, resonance: 8, cutoff: { points: [{ t: 0, w: 0xc0 }, { t: 25, w: 0x40 }], loop: null } };
+      changed();
+      playShape();
+    });
+    const note = document.createElement('span');
+    note.className = 'hint';
+    note.textContent = 'There is one filter on the chip, shared by all three voices: an instrument with a filter takes it over when it plays.';
+    box.append(add, note);
+    return;
+  }
+  const f = s.filter;
+  const type = document.createElement('label');
+  type.className = 'vib-slider';
+  const types = document.createElement('div');
+  types.className = 'segmented small';
+  // Each passband switches on and off: mixed, they combine (low and high together make a notch)
+  for (const [bit, label, title] of PASSBANDS) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    b.classList.toggle('on', (f.passband & bit) !== 0);
+    b.addEventListener('click', () => {
+      const next = f.passband ^ bit;
+      if (!next) return;
+      before();
+      f.passband = next;
+      changed();
+      playShape();
+    });
+    types.append(b);
+  }
+  type.append('Type', types);
+  const res = document.createElement('label');
+  res.className = 'vib-slider';
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '15';
+  input.value = String(f.resonance);
+  const out = document.createElement('output');
+  const show = () => (out.textContent = f.resonance ? `${f.resonance} of 15` : 'None');
+  show();
+  let marked = false;
+  input.addEventListener('input', () => {
+    if (!marked) before();
+    marked = true;
+    f.resonance = Number(input.value);
+    show();
+    persist();
+    sendToPlayer();
+  });
+  input.addEventListener('change', () => {
+    marked = false;
+    playShape();
+  });
+  res.title = 'How much the filter rings at its cutoff';
+  res.append('Resonance', input, out);
+  const remove = document.createElement('button');
+  remove.className = 'mini danger';
+  remove.textContent = 'Remove filter';
+  remove.addEventListener('click', () => {
+    before();
+    s.filter = null;
+    selectedPoint = -1;
+    changed();
+  });
+  box.append(type, res, remove);
+}
 
 /**
  * The notes: their band shows the pitch over time as a thin line (and
@@ -948,7 +1088,8 @@ const LANE_COLORS: Record<number, string> = { [WAVE_TRI]: 'tri', [WAVE_SAW]: 'sa
 function drawBars() {
   const s = shape();
   for (const row of rows()!) el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: row.top, y2: row.top, class: 'lane-line' }, plot);
-  if (usesPulse()) drawWidth();
+  const widthLane = lane('pulse');
+  if (widthLane) drawLine(widthLane);
   // The waveform rows run together from the top, the width row below them
   const waveRows = rows()!.filter((r) => r.wave !== null);
   const icon = drawWaveRepeat(waveRows[0].top, waveRows[waveRows.length - 1].top + waveRows[waveRows.length - 1].h, true);
@@ -1032,30 +1173,64 @@ function drawWaveRepeat(top: number, bottom: number, withIcons: boolean, ghostBa
 }
 
 const WIDTH_PAD = 7;
-/** Where a pulse width (0-4095) sits in the width row */
-function widthY(w: number): number {
-  const r = rowOf(null);
-  return r.top + WIDTH_PAD + (1 - w / PULSE_MAX) * (r.h - 2 * WIDTH_PAD);
+
+/** The two lines of points over time: pulse width (under the pulse row) and the filter's cutoff. */
+type LineKey = 'pulse' | 'cutoff';
+
+interface LineLane {
+  key: LineKey;
+  top: number;
+  h: number;
+  max: number;
+  line: PulseShape;
+  /** What a value is called, e.g. "Pulse width 50%" */
+  text: (v: number) => string;
+  /** A level marked across it (a square wave's width) */
+  mid: number | null;
 }
 
-function widthAt(e: PointerEvent): number {
-  const r = rowOf(null);
-  const v = 1 - (yAt(e) - r.top - WIDTH_PAD) / (r.h - 2 * WIDTH_PAD);
-  return Math.round(Math.max(0, Math.min(1, v)) * PULSE_MAX);
+const percentText = (v: number, max: number) => `${Math.round((v / max) * 100)}%`;
+
+/** A line's row, if it is shown. */
+function lane(key: LineKey): LineLane | null {
+  const s = shape();
+  if (key === 'pulse') {
+    const r = rows()?.find((row) => row.wave === null);
+    return r ? { key, top: r.top, h: r.h, max: PULSE_MAX, line: s.pulse, text: (v) => `Pulse width ${percentText(v, PULSE_MAX)}`, mid: SQUARE } : null;
+  }
+  if (!state.filterOpen || !s.filter) return null;
+  return { key, top: cutoffTop(), h: CUTOFF_H, max: CUTOFF_MAX, line: s.filter.cutoff, text: (v) => `Cutoff ${percentText(v, CUTOFF_MAX)}`, mid: null };
 }
 
-const percentText = (w: number) => `${Math.round((w / PULSE_MAX) * 100)}%`;
+const laneY = (l: LineLane, v: number) => l.top + WIDTH_PAD + (1 - v / l.max) * (l.h - 2 * WIDTH_PAD);
+
+function laneValue(l: LineLane, e: PointerEvent): number {
+  const v = 1 - (yAt(e) - l.top - WIDTH_PAD) / (l.h - 2 * WIDTH_PAD);
+  return Math.round(Math.max(0, Math.min(1, v)) * l.max);
+}
+
+/** The line under the pointer, or whose handle was grabbed */
+function laneUnder(target: Element, e: PointerEvent): LineLane | null {
+  const key = target.closest<SVGElement>('[data-line]')?.dataset.line as LineKey | undefined;
+  if (key) return lane(key);
+  for (const k of ['pulse', 'cutoff'] as const) {
+    const l = lane(k);
+    if (l && yAt(e) >= l.top && yAt(e) < l.top + l.h) return l;
+  }
+  return null;
+}
+
+/** Which line the selected point is on */
+let selectedLine: LineKey = 'pulse';
 
 /**
- * The pulse width line under the pulse row: strong where pulse is heard,
- * faint where it isn't (the width carries on changing all the same), with
- * the points to drag and the repeat marked.
+ * A line of points (pulse width or cutoff): strong up to its last point,
+ * its repeats light, with the points to drag and the repeat marked.
  */
-function drawWidth() {
-  const s = shape();
-  const r = rowOf(null);
+function drawLine(r: LineLane) {
+  const plot = el('g', { class: `line-${r.key}` }, document.getElementById('plot')!);
   const width = x(TOTAL) + ORIGIN;
-  const { points, loop } = s.pulse;
+  const { points, loop } = r.line;
   // The repeat: the section that repeats shaded, its repeats fainter after
   // it, and its start an edge to drag from point to point
   if (loop !== null && loop < points.length - 1) {
@@ -1072,22 +1247,22 @@ function drawWidth() {
       [from, 'loop'],
       [to, 'loop-end'],
     ] as const) {
-      const edge = el('g', { class: `width-loop-edge${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
+      const edge = el('g', { class: `width-loop-edge${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '', 'data-line': r.key }, plot);
       el('rect', { x: x(at) - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, edge);
       el('rect', { x: x(at) - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, edge);
     }
   }
-  el('line', { x1: 0, x2: width, y1: widthY(SQUARE), y2: widthY(SQUARE), class: 'width-square' }, plot);
-  const line = (corners: { t: number; w: number }[]) => corners.map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${widthY(p.w).toFixed(1)}`).join(' ');
+  if (r.mid !== null) el('line', { x1: 0, x2: width, y1: laneY(r, r.mid), y2: laneY(r, r.mid), class: 'width-square' }, plot);
+  const line = (corners: { t: number; w: number }[]) => corners.map((p) => `${x(Math.min(TOTAL, p.t)).toFixed(1)},${laneY(r, p.w).toFixed(1)}`).join(' ');
   // The line as drawn, strong, holding after its last point; with a repeat,
   // the repeats after it light
   const looping = loop !== null && loop < points.length - 1;
-  if (looping) el('polyline', { points: line(pulseLine(s.pulse, TOTAL)), class: 'width-line faint' }, plot);
-  el('polyline', { points: line(looping ? points : pulseLine(s.pulse, TOTAL)), class: 'width-line' }, plot);
+  if (looping) el('polyline', { points: line(pulseLine(r.line, TOTAL)), class: 'width-line faint' }, plot);
+  el('polyline', { points: line(looping ? points : pulseLine(r.line, TOTAL)), class: 'width-line' }, plot);
   if (!looping && points.length > 1) {
     // No repeat yet: its start waits at the end, to be pulled back from there
     const at = x(points[points.length - 1].t);
-    const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '' }, plot);
+    const pull = el('g', { class: 'width-loop-edge pull', 'data-loop-edge': '', 'data-line': r.key }, plot);
     // The bar and the ↻ at its top left both pull it (the last point on the bar is drawn over it)
     el('rect', { x: at - 6, y: r.top, width: 12, height: r.h, class: 'hit' }, pull);
     el('rect', { x: at - 1.5, y: r.top + 2, width: 3, height: r.h - 4, rx: 1.5, class: 'edge-bar' }, pull);
@@ -1096,11 +1271,11 @@ function drawWidth() {
     el('title', {}, pull).textContent = 'Drag left to repeat part of the line while the note is held';
   }
   points.forEach((p, i) => {
-    const g = el('g', { class: `width-point${i === selectedPoint ? ' selected' : ''}`, 'data-point': i }, plot);
+    const g = el('g', { class: `width-point${i === selectedPoint && selectedLine === r.key ? ' selected' : ''}`, 'data-point': i, 'data-line': r.key }, plot);
     // The last point sits on the repeat's bar: it takes hold only right on
     // it, so the bar around it can be grabbed
-    el('circle', { cx: x(p.t), cy: widthY(p.w), r: i === points.length - 1 ? 7 : 11, class: 'hit' }, g);
-    el('circle', { cx: x(p.t), cy: widthY(p.w), r: 5, class: 'dot' }, g);
+    el('circle', { cx: x(p.t), cy: laneY(r, p.w), r: i === points.length - 1 ? 7 : 11, class: 'hit' }, g);
+    el('circle', { cx: x(p.t), cy: laneY(r, p.w), r: 5, class: 'dot' }, g);
   });
 }
 
@@ -1123,7 +1298,7 @@ function renderReadout() {
     box.append(text, del);
     return;
   }
-  if (state.waveOpen && usesPulse() && s.pulse.points[selectedPoint]) {
+  if (lane(selectedLine)?.line.points[selectedPoint]) {
     pointReadout(box);
     return;
   }
@@ -1238,13 +1413,13 @@ function deleteVibrato() {
   changed();
 }
 
-/** The selected pulse width point: its width and time, and deleting it. */
+/** The selected point on a line: its value and time, and deleting it. */
 function pointReadout(box: HTMLElement) {
-  const pulse = shape().pulse;
+  const l = lane(selectedLine)!;
   const i = selectedPoint;
-  const p = pulse.points[i];
+  const p = l.line.points[i];
   const text = document.createElement('span');
-  text.textContent = `Pulse width ${percentText(p.w)} at ${timeText(p.t)}`;
+  text.textContent = `${l.text(p.w)} at ${timeText(p.t)}`;
   box.append(text);
   if (i > 0) {
     const del = document.createElement('button');
@@ -1256,8 +1431,9 @@ function pointReadout(box: HTMLElement) {
 }
 
 function deletePoint() {
-  const pulse = shape().pulse;
+  const pulse = lane(selectedLine)?.line;
   const i = selectedPoint;
+  if (!pulse) return;
   if (i <= 0 || i >= pulse.points.length) return;
   before();
   pulse.points.splice(i, 1);
@@ -1309,11 +1485,6 @@ function laneAt(e: PointerEvent): number {
   return waves.reduce((a, b) => (near(b) < near(a) ? b : a)).wave!;
 }
 
-/** Whether the pointer is in the pulse width row */
-function inWidthRow(e: PointerEvent): boolean {
-  const r = rows()?.find((row) => row.wave === null);
-  return !!r && yAt(e) >= r.top && yAt(e) < r.top + r.h;
-}
 
 plot.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
@@ -1338,6 +1509,9 @@ plot.addEventListener('pointerdown', (e) => {
     return;
   } else if (target.closest('[data-notes-strip]')) {
     openNotes(!state.notesOpen);
+    return;
+  } else if (target.closest('[data-filter-strip]')) {
+    openFilter(!state.filterOpen);
     return;
   } else if (target.closest('[data-volume-strip]')) {
     openVolume(true);
@@ -1472,10 +1646,10 @@ plot.addEventListener('pointerdown', (e) => {
     selectedPoint = -1;
     selectedNote = -1;
     selectedVibrato = false;
-  } else if (rows() && target.closest('[data-loop-end-edge]')) {
+  } else if (target.closest('[data-loop-end-edge]') && laneUnder(target, e)) {
     // Where the repeat ends: the last point, moved in time only, and never
     // past the point before it
-    const pts = s.pulse.points;
+    const pts = laneUnder(target, e)!.line.points;
     before();
     dragging = 'loop-end';
     plot.style.cursor = 'ew-resize';
@@ -1484,11 +1658,11 @@ plot.addEventListener('pointerdown', (e) => {
       last.t = Math.max(pts[pts.length - 2].t + 1, Math.min(TOTAL - 1, Math.round(frameAt(e))));
       render();
     };
-  } else if (rows() && target.closest('[data-loop-edge]')) {
+  } else if (target.closest('[data-loop-edge]') && laneUnder(target, e)) {
     // Where the repeat starts: on a point, settling there as the envelope's
     // dots do. Pulled out from the end it makes one; pushed back onto the
     // end, there is none.
-    const pulse = s.pulse;
+    const pulse = laneUnder(target, e)!.line;
     const from = pulse.loop ?? pulse.points.length - 1;
     before();
     dragging = 'loop';
@@ -1504,9 +1678,12 @@ plot.addEventListener('pointerdown', (e) => {
       pulse.loop = at < last ? at : null;
       render();
     };
-  } else if (rows() && (target.closest('[data-point]') || inWidthRow(e))) {
-    // The pulse width line: drag a point, or add one where the row is clicked
-    const pulse = s.pulse;
+  } else if (laneUnder(target, e) && (target.closest('[data-point]') || !target.closest('[data-line]'))) {
+    // A line (pulse width or cutoff): drag a point, or add one where the row is clicked
+    const l = laneUnder(target, e)!;
+    const pulse = l.line;
+    const widthAt = (e: PointerEvent) => laneValue(l, e);
+    selectedLine = l.key;
     const pointEl = target.closest<SVGGElement>('[data-point]');
     before();
     let i: number;
@@ -1766,8 +1943,8 @@ $('zoom-in').addEventListener('click', () => setZoom(state.zoom * 1.5));
 $('zoom-out').addEventListener('click', () => setZoom(state.zoom / 1.5));
 $('zoom-fit').addEventListener('click', () => {
   // What is open, or with both folded, everything
-  const none = !state.volumeOpen && !state.waveOpen && !state.notesOpen;
-  const frames = dataEnd(state.volumeOpen || none, state.waveOpen || state.notesOpen || none);
+  const none = !state.volumeOpen && !state.waveOpen && !state.notesOpen && !state.filterOpen;
+  const frames = dataEnd(state.volumeOpen || none, state.waveOpen || state.notesOpen || state.filterOpen || none);
   setZoom(viewWidth() / Math.min(TOTAL, frames * 1.08 + 2));
   scroller.scrollLeft = 0;
 });
@@ -1827,13 +2004,13 @@ function pick(i: number) {
 $<HTMLSelectElement>('instrument').addEventListener('change', (e) => pick(Number((e.target as HTMLSelectElement).value)));
 $('new-instrument').addEventListener('click', () => {
   before();
-  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, pulse: defaultPulse(), waveLoop: null });
+  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, filter: null, pulse: defaultPulse(), waveLoop: null });
   pick(state.instruments.length - 1);
 });
 $('duplicate-instrument').addEventListener('click', () => {
   before();
   const s = shape();
-  state.instruments.splice(state.current + 1, 0, { ...s, name: `${s.name} copy`, bars: s.bars.map((b) => ({ ...b })), notes: s.notes.map((n) => ({ ...n })), vibrato: s.vibrato && { ...s.vibrato }, pulse: JSON.parse(JSON.stringify(s.pulse)) });
+  state.instruments.splice(state.current + 1, 0, { ...s, name: `${s.name} copy`, bars: s.bars.map((b) => ({ ...b })), notes: s.notes.map((n) => ({ ...n })), vibrato: s.vibrato && { ...s.vibrato }, filter: s.filter && JSON.parse(JSON.stringify(s.filter)), pulse: JSON.parse(JSON.stringify(s.pulse)) });
   pick(state.current + 1);
 });
 $('delete-instrument').addEventListener('click', () => {
@@ -2032,7 +2209,7 @@ window.addEventListener('keydown', (e) => {
     deleteNote();
     return;
   }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && rows() && selectedPoint > 0) {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && lane(selectedLine) && selectedPoint > 0) {
     e.preventDefault();
     deletePoint();
     return;

@@ -492,6 +492,17 @@ try {
   });
   report(vib === 'waits, wobbles', 'maker2 vibrato', vib);
 
+  // The filter: set up on the first frame (band pass, resonance, voice 1), its cutoff following the line
+  const filt = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    ins.filter = { passband: 0x20, resonance: 12, cutoff: { points: [{ t: 0, w: 0x10 }, { t: 20, w: 0xf0 }], loop: 0 } };
+    const t = window.maker2.trace(50);
+    ins.filter = null;
+    return `${t.routing[0].toString(16)} ${(t.mode[0] >> 4).toString(16)} ${[0, 20, 21, 40].map((f) => t.cutoff[f].toString(16)).join(' ')}`;
+  });
+  report(filt === 'c1 2 10 f0 1b f0', 'maker2 filter', filt);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

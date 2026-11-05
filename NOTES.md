@@ -72,6 +72,11 @@ zoomable timeline, aiming for a GarageBand feel.
   The player counts the delay only on frames it runs effects (not a song row's first
   tick, nor rows that set the pitch), so the start is measured by tracing with and
   without; dragging picks the delay that lands nearest. Repeating pitches override it.
+- Filter: a fourth fold. Cutoff (0-255) is a line like pulse width (the two share one
+  editor, `LineLane`/`drawLine`, and one program builder, `lineProgram`); Type (low/band/
+  high bits, combinable) and Resonance sit under the timeline. The setup row routes voice 1
+  for the preview; the song editor must set the instrument's actual voice (and own the
+  shared filter: see the song editor plan).
 - Still missing from Volume/Waveform: an instrument that lets go by itself (gate-off
   rows), Note start (hard restart, first wave, legato), sync/ring mod.
 - Timeline is 32 s (slowest attack 8 s + decay 24 s). Zooming out stops when everything
@@ -113,7 +118,8 @@ zoomable timeline, aiming for a GarageBand feel.
 
 ## Next ideas
 
-1. Instrument maker 2: the Pitch tab, then Filter.
+1. Instrument maker 2: loading instruments from songs; Note start (hard restart, legato);
+   releasing by itself; sync/ring mod.
 2. Drag handles on the first maker's graph to move sweep end points.
 3. The song editor (plan above).
 4. Saving to .sng.

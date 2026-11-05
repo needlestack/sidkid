@@ -751,6 +751,14 @@
   pointer-events: none;
 }
 
+.filter-controls .vib-slider,
+.readout .vib-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-controls .vib-slider input,
 .readout .vib-slider input {
   accent-color: var(--accent);
 }
@@ -773,4 +781,50 @@
   stroke: var(--text);
   stroke-width: 1.5;
   pointer-events: none;
+}
+
+/* The filter */
+.cutoff-preview {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 1.6;
+  pointer-events: none;
+}
+
+.line-cutoff .width-line {
+  stroke: var(--live);
+}
+
+.line-cutoff .width-point .dot {
+  stroke: var(--live);
+}
+
+.line-cutoff .width-point:hover .dot,
+.line-cutoff .width-point.selected .dot {
+  fill: var(--live);
+}
+
+.line-cutoff .width-loop {
+  fill: var(--live);
+}
+
+.line-cutoff .width-repeat,
+.line-cutoff .width-loop-edge .edge-bar {
+  fill: var(--live);
+}
+
+.filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  font-size: 13px;
+}
+
+.filter-controls[hidden] {
+  display: none;
+}
+
+.filter-controls .hint {
+  max-width: 60ch;
 }
