@@ -291,15 +291,33 @@ function floor(): number {
 
 const laneTop = (i: number) => rows()!.top + i * rows()!.h;
 
-function minZoom() {
-  return Math.max(0.5, (scroller.clientWidth - 2 * ORIGIN) / TOTAL);
+const viewWidth = () => scroller.clientWidth - 2 * ORIGIN;
+
+/** Where the instrument reaches: the sound until it has faded, the key going up, and the bars (those that keep going counted a little past their start). */
+function dataEnd(volume = true, waves = true): number {
+  const s = shape();
+  let end = 0;
+  if (volume) end = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
+  if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10));
+  return Math.min(TOTAL, Math.max(5, end));
 }
 
-function setZoom(z: number, around = scroller.clientWidth / 2) {
-  const frame = (scroller.scrollLeft + around - ORIGIN) / state.zoom;
+/** Zoomed right out, everything there is fills half the view (and never more than the whole timeline shows). */
+function minZoom() {
+  return Math.min(MAX_ZOOM, Math.max(0.5, viewWidth() / TOTAL, viewWidth() / (2 * dataEnd())));
+}
+
+/**
+ * Zooms around the middle of the instrument: it stays where it is on
+ * screen, or comes to the middle of the view if it was out of sight.
+ */
+function setZoom(z: number) {
+  const mid = dataEnd() / 2;
+  let at = x(mid) - scroller.scrollLeft;
+  if (at < 0 || at > scroller.clientWidth) at = scroller.clientWidth / 2;
   state.zoom = Math.max(minZoom(), Math.min(MAX_ZOOM, z));
   render();
-  scroller.scrollLeft = x(frame) - around;
+  scroller.scrollLeft = x(mid) - at;
   persist();
 }
 
@@ -888,21 +906,17 @@ scroller.addEventListener(
     // Pinching, or scrolling with ⌘/Ctrl, zooms around the pointer
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    setZoom(state.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - scroller.getBoundingClientRect().left);
+    setZoom(state.zoom * Math.exp(-e.deltaY * 0.01));
   },
   { passive: false },
 );
 $('zoom-in').addEventListener('click', () => setZoom(state.zoom * 1.5));
 $('zoom-out').addEventListener('click', () => setZoom(state.zoom / 1.5));
 $('zoom-fit').addEventListener('click', () => {
-  // What is open: the sound until it has faded, and the bars (those that
-  // keep going shown a little way past where they start)
-  const s = shape();
-  let frames = 0;
-  if (state.volumeOpen) frames = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
-  if (state.waveOpen) frames = Math.max(frames, ...s.bars.map((b) => b.end ?? b.start + 10));
-  if (frames <= 10) frames = state.keyUp;
-  setZoom((scroller.clientWidth - 2 * ORIGIN) / Math.min(TOTAL, Math.max(5, frames * 1.08 + 2)), 0);
+  // What is open, or with both folded, everything
+  const both = !state.volumeOpen && !state.waveOpen;
+  const frames = dataEnd(state.volumeOpen || both, state.waveOpen || both);
+  setZoom(viewWidth() / Math.min(TOTAL, frames * 1.08 + 2));
   scroller.scrollLeft = 0;
 });
 
