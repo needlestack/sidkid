@@ -187,6 +187,23 @@
   border-top: 1px solid var(--border);
 }
 
+/* An open section's header row: shaded from its top down to the rows under it */
+.tl-gutter-row.head {
+  background: linear-gradient(var(--head-top), var(--surface));
+}
+
+.head-fade-top {
+  stop-color: var(--head-top);
+}
+
+.head-fade-bottom {
+  stop-color: var(--surface);
+}
+
+.timeline {
+  --head-top: color-mix(in srgb, var(--surface-2), var(--text) 10%);
+}
+
 .tl-gutter-row svg {
   flex: none;
 }

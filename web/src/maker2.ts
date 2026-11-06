@@ -740,7 +740,7 @@ function renderGutter() {
     }
     add(vibTop(), VIB_H, ['Vibrato'], 'lane width rule-thin');
   }
-  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), 'rule');
+  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), `rule${state.filterOpen ? ' head' : ''}`);
   if (state.filterOpen) {
     add(typeTop(), TYPE_H, ['Type'], 'lane sub');
     add(cutoffTop(), CUTOFF_H, ['Cutoff'], 'lane sub');
@@ -906,6 +906,13 @@ function drawFilter() {
   const s = shape();
   const top = filterTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
+  // Open, the band is the section's header, shaded across like its name beside it (and over the grid)
+  if (state.filterOpen) {
+    const fade = el('linearGradient', { id: 'head-fade', x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', {}, plot));
+    el('stop', { offset: 0, class: 'head-fade-top' }, fade);
+    el('stop', { offset: 1, class: 'head-fade-bottom' }, fade);
+    el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, fill: 'url(#head-fade)' }, plot);
+  }
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-filter-strip': '' }, plot);
   // Folded, the band previews the cutoff (open, its rows show it)
   if (!state.filterOpen && !s.filter.types.length) {
