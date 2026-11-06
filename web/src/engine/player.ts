@@ -190,9 +190,9 @@ export class Player {
     this.send({ type: 'noteOff', voice });
   }
 
-  /** Plays notes on time (see Sequencer); null stops. `keep` swaps in an edit without restarting. */
-  sequence(sequence: Sequence | null, keep = false) {
-    this.send({ type: 'sequence', sequence, keep });
+  /** Plays notes on time (see Sequencer); null stops. `keep` swaps in an edit without restarting (going on from frame `at`, if given). */
+  sequence(sequence: Sequence | null, keep = false, at?: number) {
+    this.send({ type: 'sequence', sequence, keep, ...(at !== undefined ? { at } : {}) });
   }
 
   /** Stops everything at once, including notes still fading out. */

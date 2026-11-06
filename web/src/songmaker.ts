@@ -243,9 +243,10 @@ window.addEventListener('storage', (e) => {
 const transport = {
   playing: false,
   recording: false,
-  /** Where this play started, and the cycle it goes round (frames) */
+  /** Where this play started, and the cycle it goes round (frames); and the song's timing they're by */
   from: 0,
   cycle: null as { start: number; end: number } | null,
+  timing: '',
   seq: null as Sequence | null,
   /** The latest frame the player said it was at, and when */
   at: null as number | null,
@@ -268,14 +269,43 @@ function playRange(): { from: number; cycle: { start: number; end: number } | nu
 /** How long playing goes on past a song's end, with nothing there (a blank song) or recording on past it: till stopped, in effect */
 const PLAY_ON_SECONDS = 30 * 60;
 
+/** What the frames of a play are by: the song's tempo, and its cycle */
+const timingOf = (s: SongDoc) => JSON.stringify([s.bpm, s.tempo ?? [], s.stepsPerBeat, s.cycling && s.cycle]);
+
 function restartSequence(keep: boolean) {
+  // The tempo or cycle changed while playing: the frames are made again, going on from the step playing has got to
+  let at: number | undefined;
+  if (keep && transport.timing !== timingOf(song())) {
+    const old = transport.seq!;
+    const [bpm, tempo, stepsPerBeat] = JSON.parse(transport.timing) as [number, SongDoc['tempo'], number];
+    const before = { ...song(), bpm, tempo, stepsPerBeat };
+    // (the frame the player has got to: a little ahead of the one heard)
+    let f = transport.at === null ? -old.preroll : transport.at + ((performance.now() - transport.atTime) / 1000) * FPS;
+    const looping = old.loopFrom !== null && f >= old.loopFrom;
+    if (old.loopFrom !== null && f >= old.length) f = old.loopFrom + ((f - old.loopFrom) % (old.length - old.loopFrom));
+    const step = stepOfFrame(before, songFrame(Math.max(0, f), transport.from, transport.cycle, old), FPS);
+    const range = playRange();
+    transport.from = toFrame(stepOfFrame(before, transport.from, FPS));
+    transport.cycle = range.cycle;
+    const now = toFrame(step);
+    const c = transport.cycle;
+    if (transport.at === null) keep = false;
+    else {
+      // Round the cycle: as far into it (its start, if the step is now outside it); else as far from the start
+      const into = c && looping ? (now >= c.start && now < c.end ? now - c.start : 0) : null;
+      at = Math.round(c && into !== null ? Math.max(0, c.end - transport.from) + into : now - transport.from);
+      transport.at = at;
+      transport.atTime = performance.now();
+    }
+  }
+  transport.timing = timingOf(song());
   const on = !transport.cycle && (transport.recording || songEnd(song()) === 0);
   const plan = songPlan(transport.from, transport.cycle, { click: view.metronome, countIn: transport.countIn, ...(on ? { until: transport.from + PLAY_ON_SECONDS * FPS } : {}) });
   trackSound = plan.trackSound;
   player.setTables(plan.tables);
   plan.instruments.forEach((ins, i) => player.setInstrument(i + 1, ins));
   transport.seq = plan.seq;
-  player.sequence(plan.seq, keep);
+  player.sequence(plan.seq, keep, at);
 }
 
 /** GoatTracker's limits: instruments 1-63, and tables of 255 rows */
@@ -2562,6 +2592,12 @@ Object.assign(window, {
     openClip: () => openClip,
     selectedNotes: () => [...selectedNotes],
     playhead: () => playhead,
+    /** The cycle as playing goes round it, and as the song's tempo has it now (frames) */
+    cycleFrames: () => {
+      const seq = transport.seq;
+      const s = song();
+      return { playing: transport.cycle && seq?.loopFrom != null ? seq.length - seq.loopFrom : null, song: toFrame(s.cycle.end) - toFrame(s.cycle.start) };
+    },
     setPlayhead: (step: number) => {
       playhead = step;
       render();

@@ -1010,6 +1010,32 @@ try {
   });
   report(pasted === '[[3,3],[8,3],[15,3]] 32/32 15', 'song copies and pastes notes', pasted);
 
+  // The tempo changed while playing round the cycle: the cycle goes round at the new tempo, from where playing had got to
+  await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.bpm = 88;
+    s.cycle = { start: 16, end: 48 };
+    s.cycling = true;
+    window.songMaker.render();
+  });
+  await sm.keyboard.press(' ');
+  await sm.waitForFunction(() => window.songMaker.liveFrame() > window.songMaker.cycleFrames().song / 2, { timeout: 8000 });
+  const beforeChange = await sm.evaluate(() => window.songMaker.liveFrame());
+  await sm.evaluate(() => (document.getElementById('tempo').value = ''));
+  await sm.type('#tempo', '95');
+  await sm.keyboard.press('Enter');
+  const afterChange = await sm.evaluate(() => ({ ...window.songMaker.cycleFrames(), at: window.songMaker.liveFrame() }));
+  await sm.keyboard.press(' ');
+  await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.cycling = false;
+    s.bpm = 125;
+    window.songMaker.render();
+  });
+  // (the spot played is the same step: its frame scaled by the tempo, about)
+  const scaled = (beforeChange * 88) / 95;
+  report(afterChange.playing === afterChange.song && Math.abs(afterChange.at - scaled) < 12, 'song tempo change while playing', `${afterChange.playing}/${afterChange.song} frames round; at ${Math.round(afterChange.at)}, from ${Math.round(beforeChange)} (${Math.round(scaled)} at 95)`);
+
   // Z goes back to the start (of the cycle, when it's on)
   await sm.evaluate(() => window.songMaker.setPlayhead(24));
   await sm.keyboard.press('z');

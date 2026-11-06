@@ -123,7 +123,7 @@ class SidKidProcessor extends AudioWorkletProcessor {
         sk._sk_reset();
         break;
       case 'sequence':
-        if (cmd.sequence) this.sequencer.load(cmd.sequence, cmd.keep);
+        if (cmd.sequence) this.sequencer.load(cmd.sequence, cmd.keep, cmd.at);
         else this.sequencer.stop();
         break;
     }

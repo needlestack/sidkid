@@ -58,8 +58,8 @@ export class Sequencer {
     return this.seq !== null;
   }
 
-  /** Starts a sequence, or (keep) swaps in an edited one where playing has got to */
-  load(seq: Sequence, keep = false) {
+  /** Starts a sequence, or (keep) swaps in an edited one where playing has got to (or at frame `at` of it: its timing changed) */
+  load(seq: Sequence, keep = false, at?: number) {
     const playing = this.seq !== null;
     this.seq = seq;
     this.byFrame.clear();
@@ -72,7 +72,8 @@ export class Sequencer {
     for (const f of seq.beats ?? []) this.clicks.set(f, BEAT);
     for (const f of seq.bars ?? []) this.clicks.set(f, BAR);
     if (!keep || !playing) this.frame = -seq.preroll;
-    else if (this.frame >= seq.length) this.frame = seq.loopFrom ?? seq.length;
+    else if (at !== undefined) this.frame = at;
+    if (keep && playing && this.frame >= seq.length) this.frame = seq.loopFrom ?? seq.length;
   }
 
   stop() {
