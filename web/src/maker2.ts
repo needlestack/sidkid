@@ -52,6 +52,8 @@ const PAD_TOP = 40;
 const PAD_BOTTOM = 8 + HEARD;
 /** The volume envelope's height when folded into a preview */
 const VOLUME_PREVIEW = 36;
+/** The open volume envelope's header, over its top */
+const VOLUME_HEAD = 22;
 /** Pixels from a bar's end that grab the end rather than the bar */
 const EDGE = 7;
 /**
@@ -635,6 +637,7 @@ function render(keepReadout = false) {
   }
 
   const curve = level(s.ad, s.sr, keyUp());
+  drawHead(RULER, state.volumeOpen ? VOLUME_HEAD : VOLUME_PREVIEW);
   drawVolume(curve);
 
   // The key going up, with a tab just under the ruler to drag it by,
@@ -697,11 +700,11 @@ function renderGutter() {
     });
   };
   if (state.volumeOpen) {
-    toggle(RULER, 22, 'Volume', true, () => openVolume(false));
+    toggle(RULER, VOLUME_HEAD, 'Volume', true, () => openVolume(false), 'head');
     // Each level's number sits just above its line
     for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true));
-  toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen));
+  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'head');
+  toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'head');
   const r = rows();
   for (const row of r ?? []) {
     if (row.wave !== null) add(row.top, row.h, [waveIcon(row.wave, 26, 14), waveName(row.wave)], 'lane');
@@ -888,6 +891,7 @@ function drawVolumePreview(curve: Float32Array) {
 function drawWaveBand() {
   const top = floor();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
+  drawHead(top);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-strip': '' }, plot);
   drawHeard(top + (PAD_BOTTOM - HEARD) / 2);
   if (state.waveOpen) drawBars();
@@ -898,13 +902,13 @@ function drawWaveBand() {
 const LINE_PAD = 6;
 
 /** A section's band: its header, shaded across like its name beside it (and over the grid) */
-function drawHead(top: number) {
+function drawHead(top: number, h = PAD_BOTTOM) {
   if (!plot.querySelector('#head-fade')) {
     const fade = el('linearGradient', { id: 'head-fade', x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', {}, plot));
     el('stop', { offset: 0, class: 'head-fade-top' }, fade);
     el('stop', { offset: 1, class: 'head-fade-bottom' }, fade);
   }
-  el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, fill: 'url(#head-fade)' }, plot);
+  el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: h, fill: 'url(#head-fade)' }, plot);
 }
 
 /**
