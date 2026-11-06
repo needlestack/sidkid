@@ -21,13 +21,22 @@ export interface Sequence {
   /** Frames from 0 to here, then it stops, or jumps back to loopFrom */
   length: number;
   loopFrom: number | null;
-  /** Frames before 0 it starts at, for notes that start on 0 to get their lead */
+  /** Frames before 0 it starts at, for notes that start on 0 to get their lead (and for a count-in) */
   preroll: number;
+  /** Metronome clicks: frames of beats, and of the first beats of bars */
+  beats?: number[];
+  bars?: number[];
 }
+
+/** What a frame's metronome does */
+export const NO_CLICK = 0;
+export const BEAT = 1;
+export const BAR = 2;
 
 export class Sequencer {
   private seq: Sequence | null = null;
   private byFrame = new Map<number, SeqEvent[]>();
+  private clicks = new Map<number, number>();
   /** The frame about to play; meaningful while playing */
   frame = 0;
 
@@ -45,6 +54,9 @@ export class Sequencer {
       if (list) list.push(e);
       else this.byFrame.set(e.frame, [e]);
     }
+    this.clicks.clear();
+    for (const f of seq.beats ?? []) this.clicks.set(f, BEAT);
+    for (const f of seq.bars ?? []) this.clicks.set(f, BAR);
     if (!keep || !playing) this.frame = -seq.preroll;
     else if (this.frame >= seq.length) this.frame = seq.loopFrom ?? seq.length;
   }
@@ -53,11 +65,12 @@ export class Sequencer {
     this.seq = null;
   }
 
-  /** Call before each frame the engine plays */
-  tick(sk: SidKidModule) {
+  /** Call before each frame the engine plays. Returns the metronome's click for the frame. */
+  tick(sk: SidKidModule): number {
     const seq = this.seq;
-    if (!seq) return;
+    if (!seq) return NO_CLICK;
     const f = this.frame;
+    const click = this.clicks.get(f) ?? NO_CLICK;
     for (const e of this.byFrame.get(f) ?? []) play(sk, e);
     // Coming up to the jump back: the repeat's first notes start now
     if (seq.loopFrom !== null && f >= seq.length - seq.preroll) {
@@ -68,6 +81,7 @@ export class Sequencer {
       if (seq.loopFrom !== null) this.frame = seq.loopFrom;
       else this.seq = null;
     }
+    return click;
   }
 }
 

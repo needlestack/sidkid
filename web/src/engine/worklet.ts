@@ -6,7 +6,7 @@
 import createSidKid, { type SidKidModule } from '@engine/sidkid.js';
 import { configure, writeInstrument, writeTables } from './configure';
 import type { Command, Event, ProcessorOptions } from './protocol';
-import { Sequencer } from './sequencer';
+import { BAR, NO_CLICK, Sequencer } from './sequencer';
 
 // AudioWorkletGlobalScope is not in TypeScript's DOM lib
 declare const sampleRate: number;
@@ -18,6 +18,7 @@ declare function registerProcessor(name: string, ctor: new (options: { processor
 
 const BLOCK = 128;
 const SONG_PATH = '/song.sng';
+const CLICK_SECONDS = 0.06;
 const STATUS_INTERVAL = Math.round(sampleRate / 30);
 
 class SidKidProcessor extends AudioWorkletProcessor {
@@ -27,6 +28,10 @@ class SidKidProcessor extends AudioWorkletProcessor {
   private path = 0;
   private sinceStatus = 0;
   private sequencer = new Sequencer();
+  /** The metronome's click: where it started in this block (or -1), its pitch, and samples since */
+  private clickAt = -1;
+  private clickHz = 0;
+  private clickAge = Infinity;
 
   constructor(options: { processorOptions: ProcessorOptions }) {
     super();
@@ -119,6 +124,15 @@ class SidKidProcessor extends AudioWorkletProcessor {
     }
   }
 
+  /** The metronome: a short, quickly fading tick beside the chip (it takes none of its voices) */
+  private click(): number {
+    const age = this.clickAge;
+    if (age > sampleRate * CLICK_SECONDS) return 0;
+    this.clickAge++;
+    const t = age / sampleRate;
+    return 0.28 * Math.exp(-t * 90) * Math.sin(2 * Math.PI * this.clickHz * t);
+  }
+
   // Song texts are 32-byte Latin-1 fields; TextDecoder is not available in
   // every browser's worklet scope, so decode by hand.
   private string(ptr: number): string {
@@ -136,15 +150,25 @@ class SidKidProcessor extends AudioWorkletProcessor {
     const n = out[0].length;
     // Rendered a frame at a time where a new one starts, so a sequence's
     // notes go in just before their frame
+    this.clickAt = -1;
     for (let done = 0; done < n; ) {
-      if (sk._sk_frame_left() <= 0) this.sequencer.tick(sk);
+      if (sk._sk_frame_left() <= 0) {
+        const click = this.sequencer.tick(sk);
+        if (click !== NO_CLICK) {
+          this.clickAt = done;
+          this.clickHz = click === BAR ? 1760 : 1320;
+        }
+      }
       const left = sk._sk_frame_left();
       const amount = left > 0 ? Math.min(left, n - done) : 1;
       sk._sk_render(this.buffer + done * 2, amount);
       done += amount;
     }
     const samples = sk.HEAP16.subarray(this.buffer >> 1, (this.buffer >> 1) + n);
-    for (let i = 0; i < n; i++) out[0][i] = samples[i] / 32768;
+    for (let i = 0; i < n; i++) {
+      if (i === this.clickAt) this.clickAge = 0;
+      out[0][i] = samples[i] / 32768 + this.click();
+    }
     for (let c = 1; c < out.length; c++) out[c].set(out[0]);
 
     this.sinceStatus += n;

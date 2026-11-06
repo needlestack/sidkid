@@ -152,13 +152,23 @@ export const leadOf = (s: Shape) => (s.gateFrames & 0x3f) + 1;
  * end, or with a cycle (frames), on to the cycle's end and then round it.
  * Frame 0 of the sequence is `from`; songFrame() maps back.
  */
-export function songSequence(song: SongDoc, sounds: SongSound[], trackSound: number[], from: number, cycle: { start: number; end: number } | null): Sequence {
+export function songSequence(
+  song: SongDoc,
+  sounds: SongSound[],
+  trackSound: number[],
+  from: number,
+  cycle: { start: number; end: number } | null,
+  /** Clicks on the beats, and a bar of them first (count-in) */
+  metronome: { click: boolean; countIn: boolean } = { click: false, countIn: false },
+): Sequence {
   const end = cycle ? cycle.end : songEnd(song) * song.stepFrames;
   // The first pass, from where playing starts; then the cycle, round and round
   const firstLength = Math.max(0, end - from);
   const loopFrom = cycle ? firstLength : null;
   const length = cycle ? firstLength + (cycle.end - cycle.start) : firstLength + 1;
-  const preroll = Math.max(1, ...sounds.map((s) => leadOf(s.shape)));
+  const beat = song.stepsPerBeat * song.stepFrames;
+  const bar = beat * song.beatsPerBar;
+  const preroll = Math.max(1, ...sounds.map((s) => leadOf(s.shape)), metronome.countIn ? bar : 0);
   const events: SeqEvent[] = [];
   for (let voice = 0; voice < VOICES; voice++) {
     const all = voiceSegments(song, voice).filter((s) => trackSound[s.track] > 0);
@@ -183,7 +193,19 @@ export function songSequence(song: SongDoc, sounds: SongSound[], trackSound: num
     });
   }
   events.sort((a, b) => a.frame - b.frame || (a.note < 0 ? 0 : 1) - (b.note < 0 ? 0 : 1));
-  return { events, length, loopFrom, preroll };
+  // The metronome on the song's beats: the count-in's bar before `from`, the first pass, the cycle
+  const beats: number[] = [];
+  const bars: number[] = [];
+  const clicks = (a: number, b: number, shift: number) => {
+    for (let t = Math.ceil(a / beat) * beat; t < b; t += beat) (t % bar === 0 ? bars : beats).push(t + shift);
+  };
+  // A bar of the song's beats before playing starts
+  if (metronome.countIn) clicks(from - bar, from, -from);
+  if (metronome.click) {
+    clicks(from, end, -from);
+    if (cycle) clicks(cycle.start, cycle.end, firstLength - cycle.start);
+  }
+  return { events, length, loopFrom, preroll, beats, bars };
 }
 
 /** The song frame a sequence made by songSequence() has got to */

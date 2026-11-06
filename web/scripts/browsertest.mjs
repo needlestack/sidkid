@@ -785,6 +785,15 @@ try {
   const passes = [0, 1, 2].map((n) => cycled.slice(n * 96 + 8, (n + 1) * 96).join(' '));
   report(passes[0] === passes[1] && passes[1] === passes[2] && cycled[96] === cycled[192], 'song cycle repeats exactly', `${cycled[0]} / ${cycled[96]} / ${cycled[192]}`);
 
+  // The metronome clicks on the song's beats, high on bars; counting in, a bar of them first
+  const clicks = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.tracks[0].clips = [{ start: 0, length: 32, span: 32, notes: [] }];
+    const c = window.songMaker.clicks(6, true);
+    return `${c.bars.join(',')} / ${c.beats.join(',')} / ${c.preroll}`;
+  });
+  report(clicks === '-36,60 / -84,-60,-12,12,36,84,108,132 / 96', 'song metronome and count-in', clicks);
+
   // Double-click in a lane makes a clip; double-click in the editor adds a note
   await sm.evaluate(() => {
     const s = window.songMaker.song();
@@ -818,7 +827,8 @@ try {
   const repeated = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks[1].clips.map((c) => [c.start, c.length, c.span])));
   report(repeated === '[[16,16,32]]', 'song clip repeats', repeated);
 
-  // Recording: R plays, a held key becomes a note on the selected track
+  // Recording: R plays, a held key becomes a note on the selected track (no count-in here)
+  await sm.click('#count-in');
   await sm.mouse.click(arrBox.x - 100, arrBox.y + 32 + 20);
   await sm.keyboard.press('r');
   await sm.waitForFunction(() => window.songMaker.playing());

@@ -189,6 +189,10 @@ zoomable timeline, aiming for a GarageBand feel.
   track; R records (quantized to steps, into the clip under it or a take clip growing by
   bars), C cycle, Space play, Return to start, Z/X octave. Double-clicks are detected from
   press timing (the first press redraws the SVG). Stored in `sidkid.song2.v1`, one song.
+- Metronome (M) and count-in: `Sequence.beats/bars` frames, returned by `Sequencer.tick`, a
+  short sine tick mixed in the worklet after the chip (no SID voice). Count-in is a bar of the
+  song's beats before the playhead (preroll grows to a bar). ⏮/Return goes to the cycle's
+  start when cycling.
 - Not yet: voice priority settings, filter sharing, several songs, .sng export, tempo
   changes, copy/paste, selecting several clips.
 

@@ -44,6 +44,9 @@ interface Saved {
   /** Pixels a step, in the arrangement and in the editor */
   zoom: number;
   rollZoom: number;
+  /** Clicks on the beats while playing; a bar of them before recording */
+  metronome: boolean;
+  countIn: boolean;
 }
 
 function defaultSong(): SongDoc {
@@ -64,11 +67,11 @@ let byId = new Map(instruments.map((s) => [s.id!, s]));
 function load(): Saved {
   try {
     const saved = JSON.parse(localStorage.getItem(SONG_KEY) ?? 'null') as Saved | null;
-    if (saved?.song?.tracks) return { ...saved, zoom: saved.zoom ?? 6, rollZoom: saved.rollZoom ?? 22 };
+    if (saved?.song?.tracks) return { ...saved, zoom: saved.zoom ?? 6, rollZoom: saved.rollZoom ?? 22, metronome: saved.metronome ?? true, countIn: saved.countIn ?? true };
   } catch {
     // Unreadable or blocked storage: start afresh
   }
-  return { song: defaultSong(), zoom: 6, rollZoom: 22 };
+  return { song: defaultSong(), zoom: 6, rollZoom: 22, metronome: true, countIn: true };
 }
 
 const view = load();
@@ -186,6 +189,8 @@ const transport = {
   atTime: 0,
   /** Recorded notes go into clips that cover them, or this one, made for the take */
   take: null as Clip | null,
+  /** Whether this play started with a count-in */
+  countIn: false,
 };
 
 function playRange(): { from: number; cycle: { start: number; end: number } | null } {
@@ -200,7 +205,7 @@ function playRange(): { from: number; cycle: { start: number; end: number } | nu
 
 function restartSequence(keep: boolean) {
   sendSounds();
-  const seq = songSequence(song(), songSounds(song(), byId).sounds, trackSound, transport.from, transport.cycle);
+  const seq = songSequence(song(), songSounds(song(), byId).sounds, trackSound, transport.from, transport.cycle, { click: view.metronome, countIn: transport.countIn });
   transport.seq = seq;
   player.sequence(seq, keep);
 }
@@ -214,6 +219,7 @@ async function play(record = false) {
   transport.recording = record;
   transport.take = null;
   transport.at = null;
+  transport.countIn = record && view.countIn;
   restartSequence(false);
   renderTransport();
   animate();
@@ -247,12 +253,19 @@ player.onStatus = (status) => {
   transport.atTime = performance.now();
 };
 
+/** The sequence's frame being heard now (negative while counting in) */
+function heardSeqFrame(): number {
+  const seq = transport.seq;
+  if (transport.at === null || !seq) return -(seq?.preroll ?? 0);
+  return transport.at + ((performance.now() - transport.atTime) / 1000 - player.latency) * FPS;
+}
+
 /** The song frame being heard now, or null before the first note */
 function liveFrame(): number | null {
   const seq = transport.seq;
   if (!transport.playing || !seq) return null;
   if (transport.at === null) return transport.from;
-  let f = transport.at + ((performance.now() - transport.atTime) / 1000 - player.latency) * FPS;
+  let f = heardSeqFrame();
   if (seq.loopFrom !== null && f >= seq.length) f = seq.loopFrom + ((f - seq.loopFrom) % (seq.length - seq.loopFrom));
   if (f < 0) return transport.from;
   return songFrame(f, transport.from, transport.cycle, seq);
@@ -266,11 +279,18 @@ function animate() {
     const f = liveFrame();
     if (f === null) {
       animating = false;
+      $('position').classList.remove('counting');
       movePlayhead();
       return;
     }
     playhead = f / song().stepFrames;
     movePlayhead(true);
+    // Counting in: the beats to go, in place of the position
+    const ahead = -heardSeqFrame();
+    const beat = song().stepsPerBeat * song().stepFrames;
+    const counting = transport.countIn && ahead > 0;
+    $('position').classList.toggle('counting', counting);
+    if (counting) $('position').textContent = String(Math.ceil(ahead / beat));
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -1066,6 +1086,10 @@ function renderTransport() {
   playBtn.classList.toggle('on', transport.playing);
   $('record').classList.toggle('on', transport.recording);
   $('cycle').classList.toggle('on', s.cycling);
+  $('metronome').classList.toggle('on', view.metronome);
+  $('metronome').setAttribute('aria-pressed', String(view.metronome));
+  $('count-in').classList.toggle('on', view.countIn);
+  $('count-in').setAttribute('aria-pressed', String(view.countIn));
   $('cycle').setAttribute('aria-pressed', String(s.cycling));
   const name = $<HTMLInputElement>('song-name');
   if (document.activeElement !== name) name.value = s.name;
@@ -1098,6 +1122,19 @@ $('play').addEventListener('click', () => (transport.playing ? stop() : void pla
 $('record').addEventListener('click', toggleRecord);
 $('to-start').addEventListener('click', toStart);
 $('cycle').addEventListener('click', toggleCycle);
+$('metronome').addEventListener('click', toggleMetronome);
+$('count-in').addEventListener('click', () => {
+  view.countIn = !view.countIn;
+  persist();
+  renderTransport();
+});
+
+function toggleMetronome() {
+  view.metronome = !view.metronome;
+  persist();
+  renderTransport();
+  if (transport.playing) restartSequence(true);
+}
 $<HTMLInputElement>('song-name').addEventListener('change', (e) => {
   before();
   song().name = (e.target as HTMLInputElement).value.trim() || 'Untitled';
@@ -1127,7 +1164,7 @@ function toggleCycle() {
 
 function toStart() {
   playhead = song().cycling ? song().cycle.start : 0;
-  arrScroll.scrollLeft = 0;
+  arrScroll.scrollLeft = Math.max(0, ax(playhead) - 40);
   if (transport.playing) void play(transport.recording);
   else movePlayhead();
 }
@@ -1263,6 +1300,7 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (k === 'r') return toggleRecord();
   if (k === 'c') return toggleCycle();
+  if (k === 'm') return toggleMetronome();
   if (k === 'z') return octave(-1);
   if (k === 'x') return octave(1);
   const offset = KEYS[k];
@@ -1342,6 +1380,12 @@ Object.assign(window, {
       const cycle = song().cycling ? { start: song().cycle.start * sf, end: song().cycle.end * sf } : null;
       const seq = songSequence(song(), list, numbers, fromStep * sf, cycle);
       return analyzer!.traceSequence(t.tables, t.instruments, seq, frames, settings).map((r) => Array.from(r));
+    },
+    /** The metronome's frames playing from a step: beats and bars */
+    clicks: (fromStep: number, countIn: boolean) => {
+      const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
+      const seq = songSequence(song(), list, numbers, fromStep * song().stepFrames, null, { click: true, countIn });
+      return { beats: seq.beats, bars: seq.bars, preroll: seq.preroll };
     },
     instruments: () => instruments,
     playing: () => transport.playing,

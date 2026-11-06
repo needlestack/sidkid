@@ -69,6 +69,19 @@
   color: #fff;
 }
 
+.transport-button.count-in {
+  width: auto;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.position.counting {
+  color: var(--playhead);
+  font-weight: 700;
+}
+
 .position {
   min-width: 64px;
   padding: 0 8px;
