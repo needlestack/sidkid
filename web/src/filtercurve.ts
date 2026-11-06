@@ -211,7 +211,9 @@ export function filterScope(w = 420, h = 120): { el: HTMLElement; set: (shape: F
   dark.textContent = 'low';
   const bright = el('text', { x: w - pad, y: h - 2, class: 'filter-axis end' });
   bright.textContent = 'high';
-  svg.append(zero, area, line, mark, dark, bright);
+  const title = el('text', { x: pad, y: pad + 6, class: 'filter-title' });
+  title.textContent = 'Filter Preview';
+  svg.append(zero, area, line, mark, dark, bright, title);
   const readout = document.createElement('div');
   readout.className = 'filter-readout';
   const names: [number, string][] = [

@@ -1022,11 +1022,12 @@ function passbandText(bits: number): string {
 
 /** The filter at a frame, as the player has it (from the trace), for the scope */
 let filterCache: { key: string; at: { passband: number; resonance: number; cutoff: number }[] } | null = null;
-function heardFilter(): { passband: number; resonance: number; cutoff: number }[] | null {
+function heardFilter(upTo = 0): { passband: number; resonance: number; cutoff: number }[] | null {
   const a = audition();
-  const frames = Math.min(TOTAL, Math.ceil(dataEnd() * 2) + 100);
-  const key = JSON.stringify([a.tables[2] && [Array.from(a.tables[2].left), Array.from(a.tables[2].right)], frames]);
-  if (filterCache?.key === key) return filterCache.at;
+  const key = JSON.stringify(a.tables[2] && [Array.from(a.tables[2].left), Array.from(a.tables[2].right)]);
+  // (traced on as far as the playhead goes: a repeat keeps it changing)
+  if (filterCache?.key === key && filterCache.at.length > upTo) return filterCache.at;
+  const frames = Math.min(TOTAL, Math.max(Math.ceil(dataEnd() * 2) + 100, upTo + 200));
   const t = traceWith(a, frames);
   if (!t) return null;
   // Voice 1 not routed through the filter: it isn't filtered then
@@ -1038,9 +1039,9 @@ function heardFilter(): { passband: number; resonance: number; cutoff: number }[
 const scope = filterScope();
 let scopeHover = -1;
 function updateScope() {
-  const at = heardFilter();
-  if (!at) return;
   const f = playhead >= 0 ? playhead : scopeHover >= 0 ? scopeHover : (shape().filter.types[selectedType] ?? shape().filter.types[0])?.start ?? 0;
+  const at = heardFilter(Math.round(f));
+  if (!at) return;
   scope.set(at[Math.max(0, Math.min(at.length - 1, Math.round(f)))]);
 }
 
