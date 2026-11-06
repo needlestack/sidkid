@@ -12,9 +12,10 @@ import { Analyzer } from './engine/analyzer';
 import { loadModel, loadNtsc, Player, saveModel, saveNtsc } from './engine/player';
 import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
 import type { Sequence } from './engine/sequencer';
-import { loadInstruments, sound as soundOf, sounds, soundTables, STORAGE_KEY as INSTRUMENTS_KEY, type Sound } from './instruments';
+import { addInstruments, loadInstruments, sound as soundOf, sounds, soundTables, STORAGE_KEY as INSTRUMENTS_KEY, type Sound } from './instruments';
 import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
+import { importGoatSong, ROW_TO_NOTE } from './songimport';
 import { clipNotes, framesPerStep, frameAt, newId, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
@@ -45,7 +46,9 @@ const HIGHEST = 95;
 const KEYS_W = 44;
 
 interface Saved {
-  song: SongDoc;
+  songs: SongDoc[];
+  /** The song open */
+  current: number;
   /** Pixels a step, in the arrangement and in the editor */
   zoom: number;
   rollZoom: number;
@@ -73,29 +76,37 @@ let byId = new Map(instruments.map((s) => [s.id!, s]));
 
 function load(): Saved {
   try {
-    const saved = JSON.parse(localStorage.getItem(SONG_KEY) ?? 'null') as Saved | null;
-    // Songs saved with whole frames a step: the tempo that was (on PAL)
-    const old = saved?.song as (SongDoc & { stepFrames?: number }) | undefined;
-    if (old && old.bpm === undefined) {
-      old.bpm = Math.round(((60 * 50) / ((old.stepFrames ?? 6) * old.stepsPerBeat)) * 10) / 10;
-      delete old.stepFrames;
+    const saved = JSON.parse(localStorage.getItem(SONG_KEY) ?? 'null') as (Saved & { song?: SongDoc }) | null;
+    // Saved when there was one song
+    if (saved?.song && !saved.songs) {
+      saved.songs = [saved.song];
+      saved.current = 0;
+      delete saved.song;
     }
-    if (saved?.song?.tracks) return { ...saved, zoom: saved.zoom ?? 6, rollZoom: saved.rollZoom ?? 22, metronome: saved.metronome ?? true, countIn: saved.countIn ?? true };
+    if (saved?.songs?.length) {
+      for (const old of saved.songs as (SongDoc & { stepFrames?: number })[]) {
+        // Songs saved with whole frames a step: the tempo that was (on PAL)
+        if (old.bpm === undefined) {
+          old.bpm = Math.round(((60 * 50) / ((old.stepFrames ?? 6) * old.stepsPerBeat)) * 10) / 10;
+          delete old.stepFrames;
+        }
+      }
+      return { ...saved, current: Math.min(saved.current ?? 0, saved.songs.length - 1), zoom: saved.zoom ?? 6, rollZoom: saved.rollZoom ?? 22, metronome: saved.metronome ?? true, countIn: saved.countIn ?? true };
+    }
   } catch {
     // Unreadable or blocked storage: start afresh
   }
-  return { song: defaultSong(), zoom: 6, rollZoom: 22, metronome: true, countIn: true };
+  return { songs: [defaultSong()], current: 0, zoom: 6, rollZoom: 22, metronome: true, countIn: true };
 }
 
 const view = load();
-const song = () => view.song;
+const song = () => view.songs[view.current];
 const barSteps = () => song().stepsPerBeat * song().beatsPerBar;
 /** Steps to frames and back, at the song's tempo and the machine's clock */
 const toFrame = (step: number) => frameAt(song(), step, FPS);
 const toStep = (frame: number) => frame / framesPerStep(song(), FPS);
 
-/** Where a clip is, to find it again after a reload or an undo */
-/** A clip by its track's id (tracks move) and its place in the track */
+/** A clip by its track's id (tracks move) and its place in the track, to find it again after a reload or an undo */
 type ClipRef = { track: string; clip: number };
 function clipRef(c: Clip | null): ClipRef | null {
   if (!c) return null;
@@ -133,11 +144,24 @@ const trackOf = (c: Clip) => song().tracks.find((t) => t.clips.includes(c));
 
 // --- Undo -------------------------------------------------------------------------
 
-const undoStack: string[] = [];
-const redoStack: string[] = [];
+/** A song as it was (its place in the list), or the whole list (when songs come and go) */
+type Undo = { at: number; song: string } | { songs: string; current: number };
+const undoStack: Undo[] = [];
+const redoStack: Undo[] = [];
+const now = (like: Undo): Undo => ('song' in like ? { at: like.at, song: JSON.stringify(view.songs[like.at]) } : { songs: JSON.stringify(view.songs), current: view.current });
 
+/** Call before a change to the song open, once per drag or edit */
 function before() {
-  undoStack.push(JSON.stringify(view.song));
+  push({ at: view.current, song: JSON.stringify(song()) });
+}
+
+/** Call before songs are added or removed */
+function beforeSongs() {
+  push({ songs: JSON.stringify(view.songs), current: view.current });
+}
+
+function push(u: Undo) {
+  undoStack.push(u);
   if (undoStack.length > 200) undoStack.shift();
   redoStack.length = 0;
 }
@@ -145,15 +169,23 @@ function before() {
 function undo(redo = false) {
   const from = redo ? redoStack : undoStack;
   const to = redo ? undoStack : redoStack;
-  const s = from.pop();
-  if (!s) return;
-  to.push(JSON.stringify(view.song));
+  const u = from.pop();
+  if (!u) return;
+  to.push(now(u));
   const ref = clipRef(openClip);
-  view.song = JSON.parse(s);
+  const switching = 'song' in u ? u.at !== view.current : true;
+  if ('song' in u) {
+    view.songs[u.at] = JSON.parse(u.song);
+    view.current = u.at;
+  } else {
+    view.songs = JSON.parse(u.songs);
+    view.current = Math.min(u.current, view.songs.length - 1);
+  }
   // The same clip stays open, if it's still there
   openClip = clipAt(ref);
   selectedNotes.clear();
-  current = Math.min(current, song().tracks.length - 1);
+  current = Math.max(0, Math.min(current, song().tracks.length - 1));
+  if (switching) stop();
   changed();
 }
 
@@ -250,8 +282,8 @@ const TABLE_ROWS = 255;
  * ones shared), as long as they fit GoatTracker's instruments and tables
  * (past that, notes start again instead), and the timed notes.
  */
-function songPlan(from: number, cycle: { start: number; end: number } | null, metronome: { click: boolean; countIn: boolean }) {
-  const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
+function songPlan(from: number, cycle: { start: number; end: number } | null, metronome: { click: boolean; countIn: boolean }, doc: SongDoc = song(), shapes: Map<string, Shape> = byId, fps = FPS) {
+  const { sounds: list, trackSound: numbers } = songSounds(doc, shapes);
   const base = sounds(list.map((s) => ({ shape: s.shape, voices: 1 << s.voice })));
   const all = [...base];
   const made = new Map<string, number | 'silent' | null>();
@@ -277,7 +309,7 @@ function songPlan(from: number, cycle: { start: number; end: number } | null, me
     }
     return made.get(key)!;
   };
-  const seq = songSequence(song(), list, numbers, from, cycle, FPS, metronome, resume);
+  const seq = songSequence(doc, list, numbers, from, cycle, fps, metronome, resume);
   const t = soundTables(all);
   return { seq, tables: t.tables, instruments: t.instruments, trackSound: numbers };
 }
@@ -477,6 +509,7 @@ const arrSteps = () => {
 const snap = () => (view.zoom >= 14 ? 1 : song().stepsPerBeat);
 
 function render() {
+  renderSongs();
   renderHeads();
   renderArrangement();
   renderEditor();
@@ -1486,6 +1519,109 @@ function toStart() {
   else movePlayhead();
 }
 
+// --- Songs: several, and imported ones -------------------------------------------------------------
+
+function renderSongs() {
+  const pick = $<HTMLSelectElement>('song-pick');
+  pick.replaceChildren(...view.songs.map((s, i) => new Option(s.name || `Song ${i + 1}`, String(i))));
+  pick.value = String(view.current);
+  $<HTMLButtonElement>('delete-song').disabled = view.songs.length < 2;
+}
+
+/** After the song open changes: from the start, nothing open, the whole song in view */
+function switchedSong() {
+  stop();
+  openClip = null;
+  selectedNotes.clear();
+  current = 0;
+  playhead = 0;
+  persist();
+  render();
+  $('zoom-fit').click();
+  centreRoll();
+}
+
+$<HTMLSelectElement>('song-pick').addEventListener('change', (e) => {
+  view.current = Number((e.target as HTMLSelectElement).value);
+  switchedSong();
+});
+$('new-song').addEventListener('click', () => {
+  beforeSongs();
+  view.songs.push({ ...defaultSong(), name: `Song ${view.songs.length + 1}` });
+  view.current = view.songs.length - 1;
+  switchedSong();
+});
+$('delete-song').addEventListener('click', () => {
+  if (view.songs.length < 2) return;
+  beforeSongs();
+  const [gone] = view.songs.splice(view.current, 1);
+  view.current = Math.min(view.current, view.songs.length - 1);
+  switchedSong();
+  toast(`Deleted ${gone.name} (⌘Z brings it back)`);
+});
+
+interface Example {
+  file: string;
+  title: string;
+  author: string;
+  settings?: Partial<Settings>;
+  /** It imports exactly (checked by the tests); else what it needs that Song Maker can't do yet */
+  importable?: boolean;
+  needs?: string[];
+}
+
+const importList = $('import-list');
+$('import-song').addEventListener('click', async () => {
+  if (!importList.hidden) {
+    importList.hidden = true;
+    return;
+  }
+  const index = (await (await fetch('./examples/index.json')).json()) as Example[];
+  const list = $('import-songs');
+  list.replaceChildren(
+    ...[...index]
+      .sort((a, b) => Number(!!b.importable) - Number(!!a.importable))
+      .map((ex) => {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.disabled = !ex.importable;
+        const title = document.createElement('b');
+        title.textContent = ex.title;
+        const by = document.createElement('span');
+        by.className = 'by';
+        by.textContent = ex.importable ? ex.author : `Not yet: ${(ex.needs ?? []).slice(0, 4).join(', ') || 'plays differently'}`;
+        b.append(title, by);
+        b.addEventListener('click', () => {
+          importList.hidden = true;
+          void importExample(ex);
+        });
+        li.append(b);
+        return li;
+      }),
+  );
+  importList.hidden = false;
+});
+$('import-close').addEventListener('click', () => (importList.hidden = true));
+
+/** Imports an example song as a new song, its instruments joining the Instrument Maker's */
+async function importExample(ex: Example) {
+  if (!analyzer) return;
+  const bytes = await (await fetch(`./examples/${ex.file}`)).arrayBuffer();
+  const imp = importGoatSong(analyzer, bytes, { ...DEFAULT_SETTINGS, ...ex.settings }, ex.title);
+  if (!imp) {
+    toast(`${ex.title} couldn't be read`);
+    return;
+  }
+  addInstruments(imp.instruments, INSTRUMENT_SECONDS * FPS);
+  instruments = loadInstruments(INSTRUMENT_SECONDS * FPS);
+  byId = new Map(instruments.map((s) => [s.id!, s]));
+  beforeSongs();
+  view.songs.push({ ...imp.song, name: ex.title });
+  view.current = view.songs.length - 1;
+  switchedSong();
+  toast(`Imported ${ex.title}: its ${imp.instruments.length} instruments are in the Instrument Maker too`);
+}
+
 // The computer keys play the selected track, as in the instrument maker
 const KEY_LETTERS = [...'AWSEDFTGYHUJKOLP;'];
 const KEYS: Record<string, number> = Object.fromEntries(KEY_LETTERS.map((k, i) => [k.toLowerCase(), i]));
@@ -1577,6 +1713,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
+    importList.hidden = true;
     if (typing(e)) (e.target as HTMLElement).blur();
     stop();
     selectedNotes.clear();
@@ -1766,6 +1903,55 @@ Object.assign(window, {
       const cycle = song().cycling ? { start: toFrame(song().cycle.start), end: toFrame(song().cycle.end) } : null;
       const plan = songPlan(toFrame(fromStep), cycle, { click: false, countIn: false });
       return analyzer!.traceSequence(plan.tables, plan.instruments, plan.seq, frames, settings).map((r) => Array.from(r));
+    },
+    /**
+     * An example song imported, played by the sequencer and by GoatTracker's
+     * own player, compared frame by frame: what doesn't come across, and
+     * where the playing differs (from the first row to the loop)
+     */
+    importCheck: async (file: string, near?: string) => {
+      const index = await (await fetch('./examples/index.json')).json();
+      const meta = (index as { file: string; settings?: Partial<Settings> }[]).find((e) => e.file === file);
+      const at: Settings = { ...DEFAULT_SETTINGS, ...meta?.settings };
+      const bytes = await (await fetch(`./examples/${file}`)).arrayBuffer();
+      const a = analyzer!;
+      const imp = importGoatSong(a, bytes.slice(0), at, file);
+      if (!imp) return null;
+      const fps = at.ntsc ? 60 : 50;
+      const shapes = new Map(imp.instruments.map((s) => [s.id!, s]));
+      const plan = songPlan(0, null, { click: false, countIn: false }, imp.song, shapes, fps);
+      const shift = imp.firstRow + ROW_TO_NOTE;
+      const frames = imp.length - shift - 1;
+      const mine = a.traceSequence(plan.tables, plan.instruments, plan.seq, frames, at);
+      a.load(bytes.slice(0));
+      const original = a.traceSong(0, imp.length, at);
+      const differ: Record<string, number> = {};
+      const first: Record<string, number> = {};
+      const mark = (what: string, f: number) => {
+        differ[what] = (differ[what] ?? 0) + 1;
+        first[what] ??= f;
+      };
+      const pw = (r: Uint8Array, b: number) => r[b + 2] | ((r[b + 3] & 15) << 8);
+      for (let f = 0; f < frames; f++) {
+        const o = original[f + shift];
+        const m = mine[f];
+        for (let v = 0; v < 3; v++) {
+          const b = v * 7;
+          if (o[b] !== m[b] || o[b + 1] !== m[b + 1]) mark(`pitch ${v + 1}`, f);
+          if ((o[b + 4] & 0xf1) !== (m[b + 4] & 0xf1)) mark(`waveform ${v + 1}`, f);
+          if (o[b + 4] & 0x40 && Math.abs(pw(o, b) - pw(m, b)) > 2) mark(`pulse ${v + 1}`, f);
+          if (o[b + 5] !== m[b + 5] || o[b + 6] !== m[b + 6]) mark(`envelope ${v + 1}`, f);
+        }
+        if (o[0x16] !== m[0x16] || o[0x17] !== m[0x17] || (o[0x18] & 0x70) !== (m[0x18] & 0x70)) mark('filter', f);
+        if ((o[0x18] & 15) !== (m[0x18] & 15)) mark('volume', f);
+      }
+      const look = near && first[near] !== undefined ? Array.from({ length: 30 }, (_, k) => {
+        const f = Math.max(0, first[near] - 10) + k;
+        const v = Number(near.slice(-1)) - 1;
+        const skips = plan.seq.events.filter((e) => e.frame === f && e.voice === v).map((e) => e.note).join(',');
+        return `${f}: ${pw(original[f + shift], v * 7).toString(16)} ${pw(mine[f], v * 7).toString(16)} f${(original[f + shift][v * 7] | (original[f + shift][v * 7 + 1] << 8)).toString(16)}/${(mine[f][v * 7] | (mine[f][v * 7 + 1] << 8)).toString(16)} w${original[f + shift][v * 7 + 4].toString(16)}/${mine[f][v * 7 + 4].toString(16)} ${skips}`;
+      }) : undefined;
+      return { gaps: imp.gaps, frames, differ, first, tracks: imp.song.tracks.length, clips: imp.song.tracks.reduce((n, t) => n + t.clips.length, 0), look };
     },
     /** The metronome's frames playing from a step: beats and bars */
     clicks: (fromStep: number, countIn: boolean) => {

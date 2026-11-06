@@ -22,6 +22,7 @@ declare module '@engine/sidkid.js' {
     _sk_set_instrument(num: number, ad: number, sr: number, wave: number, pulse: number, filter: number, speed: number, vibdelay: number, gatetimer: number, firstwave: number): void;
     _sk_note_on(voice: number, note: number, num: number): void;
     _sk_note_off(voice: number): void;
+    _sk_skip_pulse(voice: number): void;
     _sk_tick(): void;
     _sk_table_pos(voice: number, table: number): number;
     _sk_is_playing(): number;

@@ -8,7 +8,7 @@ import type { SidKidModule } from '@engine/sidkid.js';
 export interface SeqEvent {
   frame: number;
   voice: number;
-  /** The note to start (0 = C-0), or -1 to let go */
+  /** The note to start (0 = C-0), or LET_GO, or SKIP_PULSE */
   note: number;
   instrument: number;
   /** A note's start for the repeat's first frames: on each repeat it plays this early, before the jump back */
@@ -27,6 +27,11 @@ export interface Sequence {
   beats?: number[];
   bars?: number[];
 }
+
+/** An event's note: let go of the voice's note */
+export const LET_GO = -1;
+/** An event's note: hold the voice's pulse program still this frame (as GoatTracker's player does on a pattern's first row) */
+export const SKIP_PULSE = -2;
 
 /** What a frame's metronome does */
 export const NO_CLICK = 0;
@@ -86,6 +91,7 @@ export class Sequencer {
 }
 
 function play(sk: SidKidModule, e: SeqEvent) {
-  if (e.note < 0) sk._sk_note_off(e.voice);
+  if (e.note === SKIP_PULSE) sk._sk_skip_pulse(e.voice);
+  else if (e.note < 0) sk._sk_note_off(e.voice);
   else sk._sk_note_on(e.voice, e.note, e.instrument);
 }

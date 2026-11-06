@@ -106,6 +106,25 @@ export class Analyzer {
   }
 
   /**
+   * Plays the loaded song (see load) silently with its own player and
+   * returns the 25 SID registers after each frame, from when it starts.
+   */
+  traceSong(subsong: number, frames: number, settings: Settings): Uint8Array[] {
+    const { sk } = this;
+    configure(sk, settings);
+    sk._sk_play(subsong);
+    const regs = sk._sk_sidregs();
+    const out: Uint8Array[] = [];
+    for (let f = 0; f < frames; f++) {
+      sk._sk_tick();
+      out.push(sk.HEAPU8.slice(regs, regs + 25));
+    }
+    sk._sk_stop();
+    sk._sk_reset();
+    return out;
+  }
+
+  /**
    * Plays a sequence silently with instruments 1, 2, ... and returns the 25
    * SID registers after each frame, from the sequence's frame 0 (its preroll
    * comes first, unrecorded).

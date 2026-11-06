@@ -31,6 +31,8 @@ const SYNC = 0x02;
 const RING = 0x04;
 const TEST = 0x08;
 const OSCILLATORS = [WAVE_TRI, WAVE_SAW, WAVE_PULSE, WAVE_NOISE];
+/** A note past the end of the frequency table, where they're all 0: a pitch of 0 */
+const SILENT_NOTE = 96;
 /** How near a whole semitone a pitch must be to count as one */
 const WHOLE = 0.08;
 
@@ -82,6 +84,8 @@ function corners(v: ArrayLike<number>, from: number, to: number, slack: number):
  * is one (the top notes all clamp to $FFFF), else in between by its pitch
  */
 function noteOf(freq: number): number {
+  // Notes past the table's 96 all play 0: the first of them
+  if (!freq) return SILENT_NOTE;
   for (let n = 0; n < 96; n++) if (Math.abs(freqOf(n) - freq) <= 2) return n;
   return 12 * Math.log2(freq / freqOf(0));
 }
@@ -101,6 +105,21 @@ function lineOf(v: ArrayLike<number>, end: number, loop: number | null, slack = 
     points.sort((a, b) => a.t - b.t);
   }
   return { points, loop: points.findIndex((p) => p.t === from) };
+}
+
+/** 12-bit values with their wraps undone: each frame within half the range of the last */
+function unwrap(v: ArrayLike<number>): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < v.length; i++) {
+    if (!i) out.push(v[0]);
+    else {
+      let d = v[i] - v[i - 1];
+      if (d > 0x800) d -= 0x1000;
+      if (d < -0x800) d += 0x1000;
+      out.push(out[i - 1] + d);
+    }
+  }
+  return out;
 }
 
 /** Runs of frames in [from, to) where a value holds, skipping where it is null */
@@ -170,32 +189,39 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
 
   // Pitch: fixed where another key plays the same (all of it: the whole
   // instrument, else those steps), else from the key played
+  // A pitch left from the note before at first (the program sets none yet:
+  // 0, played on its own), as many instruments start, for the frames it lasts
+  let leading = 0;
+  const pitchSet = (f: number) => {
+    const p = t.pos[0][f];
+    return !!p && tables[0].right[p - 1] !== PITCH_KEEP && tables[0].left[p - 1] < 0xf0;
+  };
+  while (leading < end && t.freq[leading] === 0 && other.freq[leading] === 0 && !pitchSet(leading)) leading++;
   const span = Math.max(1, end);
   const sameOnBoth = Array.from({ length: span }, (_, f) => t.freq[f] === other.freq[f]);
-  const fixed = sameOnBoth.every(Boolean);
+  const fixed = leading < end && sameOnBoth.slice(leading).every(Boolean);
   const absolute = (f: number) => noteOf(t.freq[f]);
   let fixedNote: number | null = null;
   const stepFixed = (f: number) => !fixed && sameOnBoth[Math.min(f, span - 1)];
   let semis = (f: number) => (stepFixed(f) ? absolute(f) - FIXED_BASE : noteOf(t.freq[f]) - KEY);
   if (fixed && end > 0) {
-    const notes = Array.from({ length: end }, (_, f) => Math.round(absolute(f)));
+    const notes = Array.from({ length: end - leading }, (_, f) => Math.round(absolute(f + leading)));
     const [lo, hi] = [Math.min(...notes), Math.max(...notes)];
     fixedNote = Math.max(hi - NOTE_HIGH, Math.min(lo - NOTE_LOW, notes[0]));
     const base = fixedNote;
     semis = (f) => absolute(f) - base;
   }
   const notes: Note[] = [];
-  let cur = 0;
+  let cur = leading ? NaN : 0;
   let curFixed = false;
   const step = (start: number, n: number, f: number, glide = 0): Note => ({ start, semis: n, ...(glide ? { glide } : {}), ...(stepFixed(f) ? { fixed: true } : {}) });
   let outside = false;
-  if (Array.from(t.freq.subarray(0, end)).some((f, i) => f === 0 && t.control[i] & 0xf0)) gaps.push('a pitch of 0 (left from before, or off the note table)');
   const keep = (n: number) => {
     if (n < NOTE_LOW || n > NOTE_HIGH) outside = true;
     return Math.max(NOTE_LOW, Math.min(NOTE_HIGH, n));
   };
   const whole = (f: number) => Math.abs(semis(f) - Math.round(semis(f))) < WHOLE;
-  for (let f = 0; f < end; ) {
+  for (let f = leading; f < end; ) {
     if (whole(f)) {
       const n = keep(Math.round(semis(f)));
       if (n !== cur || stepFixed(f) !== curFixed) notes.push(step(f, n, f));
@@ -222,7 +248,7 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   if (outside) gaps.push(`pitches beyond ${NOTE_LOW} to +${NOTE_HIGH} semitones`);
   // With vibrato, setting the pitch it is already on starts the wobble again: those sets too
   if (speedPtr) {
-    for (let f = 0; f < end; f++) {
+    for (let f = leading; f < end; f++) {
       const p = t.pos[0][f];
       const right = p ? tables[0].right[p - 1] : PITCH_KEEP;
       const left = p ? tables[0].left[p - 1] : 0;
@@ -248,7 +274,18 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   let pulse = defaultPulse();
   if (pulsePtr) {
     const run = runOf(t.pos[1], t.pulse);
-    pulse = lineOf(t.pulse, Math.max(1, run.end), run.loop, 1);
+    // A program that doesn't start by setting a width carries on from the
+    // voice's: its sweeps are all it does, so where one wraps round the
+    // 12 bits (as the player's do) it carries on past, not jumps back
+    const inherit = tables[1].left[pulsePtr - 1] < 0x80;
+    const widths = inherit ? unwrap(t.pulse) : t.pulse;
+    pulse = lineOf(widths, Math.max(1, run.end), run.loop, 1);
+    if (inherit) {
+      pulse.inherit = true;
+      // Its first frame's move, from the program itself (traced, the width loses its lowest bit)
+      const right = tables[1].right[pulsePtr - 1];
+      pulse.points[0].w = tables[1].left[pulsePtr - 1] ? (right >= 0x80 ? right - 0x100 : right) : 0;
+    }
   }
 
   // The filter
@@ -256,13 +293,13 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   if (filterPtr) {
     const run = runOf(t.pos[2], t.cutoff, t.routing, t.mode);
     const fEnd = run.loop === null ? frames : run.end;
-    const on = (f: number) => (t.routing[f] & 7 ? t.mode[f] & 0x70 : null);
-    filter.types = runs(on, 0, fEnd).map((r): FilterChunk => ({ start: r.start, end: run.loop === null && r.end === fEnd ? Math.min(r.end, frames) : r.end, passband: r.value }));
+    // Chunks of a type and the voices it filters (GoatTracker's are the same whichever voice plays it)
+    const on = (f: number) => (t.routing[f] & 7 ? ((t.mode[f] & 0x70) << 4) | (t.routing[f] & 7) : null);
+    filter.types = runs(on, 0, fEnd).map((r): FilterChunk => ({ start: r.start, end: run.loop === null && r.end === fEnd ? Math.min(r.end, frames) : r.end, passband: r.value >> 4, voices: r.value & 7 }));
     const lineEnd = run.loop === null ? Math.max(1, Math.min(frames, lastChange(t.cutoff, t.routing) + 1)) : run.end;
     filter.cutoff = lineOf(t.cutoff, lineEnd, run.loop);
     const res = Array.from(t.routing, (r) => r >> 4);
     filter.resonance = { points: steps(res, run.loop === null ? lineEnd : run.end + (run.loop === 0 ? run.end - run.loop : 0)), loop: null };
-    if (Array.from(t.routing).some((r) => r & 6)) gaps.push('filtering other voices');
     if (new Set(Array.from(t.mode, (m) => m & 0x0f)).size > 1) gaps.push('volume changes');
   }
 
@@ -295,6 +332,7 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     gateFrames: ins.gateTimer & 0x3f,
     firstWave: ins.firstWave,
     pulseFromSong: !pulsePtr,
+    ...(leading ? { pitchFromSong: true } : {}),
   };
   return { shape, gaps };
 }

@@ -30,7 +30,15 @@
     <main>
       <section class="card song-arrange">
         <header class="card-head arrange-head">
-          <input id="song-name" class="name-input" aria-label="Song name" spellcheck="false" />
+          <div class="song-field">
+            <input id="song-name" class="name-input" aria-label="Song name" spellcheck="false" />
+            <div class="song-tools">
+              <select id="song-pick" aria-label="Song" title="Your songs"></select>
+              <button class="mini" id="new-song" title="Start a new song">New</button>
+              <button class="mini" id="import-song" title="Import one of GoatTracker's example songs">Import…</button>
+              <button class="mini danger" id="delete-song" title="Delete this song">Delete</button>
+            </div>
+          </div>
           <div class="song-transport">
             <div class="transport-group">
               <button class="transport-button" id="to-start" title="Back to the start, or of the cycle when it is on (Return)" aria-label="Back to the start">⏮</button>
@@ -100,6 +108,15 @@
         </div>
       </div>
     </footer>
+
+    <div class="import-list" id="import-list" role="dialog" aria-label="Import a song" hidden>
+      <header>
+        <b>Import a GoatTracker song</b>
+        <button class="mini" id="import-close" aria-label="Close">×</button>
+      </header>
+      <p class="hint">Songs that play exactly as GoatTracker plays them. The others use things Song Maker can't do yet. Their instruments join the Instrument Maker's.</p>
+      <ul id="import-songs"></ul>
+    </div>
 
     <div class="toast" id="toast" role="status"></div>
 

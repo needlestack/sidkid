@@ -27,6 +27,8 @@ static int looped[MAX_CHN];
 
 // Test notes released before they have started sounding
 static int pendingrelease[MAX_CHN];
+// Voices whose pulse is to stand still for the next frame (sk_skip_pulse)
+static int skippulse[MAX_CHN];
 
 static void settempo(void)
 {
@@ -186,6 +188,21 @@ static int advance(void)
   {
     CHN *cptr = &chn[c];
 
+    // As the player itself does on a pattern's first row with pulse
+    // optimization: the pulse program doesn't move this frame
+    if (skippulse[c])
+    {
+      cptr->pulse = old[c].pulse;
+      cptr->ptr[PTBL] = old[c].ptr[PTBL];
+      cptr->pulsetime = old[c].pulsetime;
+      if (!cptr->mute)
+      {
+        sidreg[0x2+7*c] = cptr->pulse & 0xfe;
+        sidreg[0x3+7*c] = cptr->pulse >> 8;
+      }
+      skippulse[c] = 0;
+    }
+
     if ((pendingrelease[c]) && (!cptr->newnote))
     {
       releasenote(c);
@@ -293,6 +310,7 @@ void sk_reset(void)
   }
   resetplayer();
   memset(pendingrelease, 0, sizeof pendingrelease);
+  memset(skippulse, 0, sizeof skippulse);
 }
 
 void sk_set_table(int table, const unsigned char *left, const unsigned char *right, int length)
@@ -340,6 +358,11 @@ void sk_note_on(int voice, int note, int num)
   chn[voice].pattptr = 0x7fffffff;
   pendingrelease[voice] = 0;
   playtestnote(note + FIRSTNOTE, num, voice);
+}
+
+void sk_skip_pulse(int voice)
+{
+  if ((voice >= 0) && (voice < MAX_CHN)) skippulse[voice] = 1;
 }
 
 void sk_note_off(int voice)

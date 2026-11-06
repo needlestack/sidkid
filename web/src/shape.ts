@@ -4,7 +4,7 @@
 // Both go into one GoatTracker wave program (each of its rows sets a
 // waveform and a pitch), and pulse width into a pulse program.
 
-import { fastestSweep, filterStep, pitchRight, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
+import { FASTEST_DOWN, FASTEST_UP, fastestSweep, filterStep, pitchRight, pulseStep, sweepRows, waveLeft, WAVE_GATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI, type Program, type Step } from './tables';
 
 /** The waveform rows, top to bottom: pulse last, so its width row sits under everything */
 export const LANES = [WAVE_TRI, WAVE_SAW, WAVE_NOISE, WAVE_PULSE];
@@ -55,6 +55,12 @@ export interface PulsePoint {
 export interface PulseShape {
   points: PulsePoint[];
   loop: number | null;
+  /**
+   * Starts from the width the voice already had (no width set first), the
+   * line's widths counted from 0 (its first point is the first frame's
+   * move, within a sweep's 127 a frame); imported, no UI
+   */
+  inherit?: boolean;
 }
 
 /** A square wave: half the 12-bit range */
@@ -106,6 +112,8 @@ export interface Shape {
   firstWave: number;
   /** Leaves pulse width to the song (or whatever played before): no pulse program */
   pulseFromSong: boolean;
+  /** Leaves the pitch as the note before set it until the first pitch step (none at all: the whole note); imported, no UI */
+  pitchFromSong?: boolean;
 }
 
 /** The waveform register's bits that aren't oscillators */
@@ -131,6 +139,8 @@ export interface FilterChunk {
   start: number;
   end: number;
   passband: number;
+  /** The voices it filters (bits 0-2), as an imported instrument's do whichever voice plays it; without, the instrument's own; no UI */
+  voices?: number;
 }
 
 export function defaultFilter(): FilterShape {
@@ -171,7 +181,7 @@ export function lineAt(line: PulseShape, t: number): number {
 }
 
 /** The parts of a shape that make its wave program */
-export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'> & Partial<Pick<Shape, 'fixedNote' | 'release' | 'bits'>>;
+export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'> & Partial<Pick<Shape, 'fixedNote' | 'release' | 'bits' | 'pitchFromSong'>>;
 
 /** Where the wave program's bars and notes end, or null if there are none. */
 export function programEnd(s: Pick<Shape, 'bars' | 'notes'> & Partial<Pick<Shape, 'bits'>>): number | null {
@@ -344,6 +354,8 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     return !!at?.fixed;
   };
   const gliding = (t: number) => notes.some((n) => n.start <= t && t < arrival(n));
+  // Before the first pitch step, the pitch the note before left (if the instrument leaves it)
+  const leftAlone = (t: number) => !!s.pitchFromSong && (!notes.length || t < notes[0].start);
   // Where a pitch is set: even the one it is already on (that starts vibrato's wobble again)
   const sets = new Set(notes.map(arrival));
   // Frames without a row of their own wait, after the last row
@@ -382,10 +394,10 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     const wantFixed = fixedAt(past ? end - 1 : t);
     // The first row sets both (the player sets the pitch only from the
     // program), and so does the one the repeat comes back to
-    const all = f === 0 || f === target;
-    if (all || w !== wave) {
+    const all = (f === 0 && !leftAlone(t)) || f === target;
+    if (f === 0 || all || w !== wave) {
       const n = Math.round(want);
-      const set = all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur || wantFixed !== curFixed || (!past && sets.has(t)));
+      const set = !leftAlone(t) && (all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur || wantFixed !== curFixed || (!past && sets.has(t))));
       flush();
       if (f === target) back = steps.length;
       steps.push({ left: waveLeft({ type: 'wave', wave: w }), right: set ? pitchByte(n, wantFixed) : PITCH_KEEP });
@@ -394,6 +406,10 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
         cur = last = n;
         curFixed = wantFixed;
       }
+      continue;
+    }
+    if (leftAlone(t)) {
+      idle++;
       continue;
     }
     if (past || !gliding(t)) {
@@ -455,7 +471,10 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
  */
 export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Program | null {
   if (!bars.some((b) => b.wave & WAVE_PULSE)) return null;
-  return lineProgram(pulse, name, [pulseStep({ type: 'width', width: pulse.points[0].w })], (width) => pulseStep({ type: 'width', width }), (sw) =>
+  // Carrying on from the voice's width: the first frame moves it by its own (from 0), as a one-frame sweep
+  const w0 = pulse.points[0].w;
+  const first = pulse.inherit ? pulseStep({ type: 'sweep', frames: 1, speed: w0 > 0x7ff ? w0 - 0x1000 : w0 }) : pulseStep({ type: 'width', width: w0 });
+  return lineProgram(pulse, name, [first], (width) => pulseStep({ type: 'width', width }), (sw) =>
     pulseStep({ type: 'sweep', ...sw }),
   );
 }
@@ -476,7 +495,11 @@ export function filterProgram(filter: FilterShape, name: string, voices = 1): Pr
   const res = (t: number) => Math.max(0, Math.min(RESONANCE_MAX, Math.round(lineAt(filter.resonance, t))));
   // Outside the chunks the voice goes past the filter (keeping the last type, which is then unheard)
   const typeFor = (t: number) => chunkAt(filter.types, t)?.passband ?? [...filter.types].reverse().find((c) => c.start <= t)?.passband ?? filter.types[0]?.passband ?? 0;
-  const setup = (t: number) => filterStep({ type: 'setup', passband: typeFor(t), resonance: res(t), voices: chunkAt(filter.types, t) ? voices : 0 });
+  const route = (t: number) => {
+    const c = chunkAt(filter.types, t);
+    return c ? (c.voices ?? voices) : 0;
+  };
+  const setup = (t: number) => filterStep({ type: 'setup', passband: typeFor(t), resonance: res(t), voices: route(t) });
   const cut = filter.cutoff;
   const last = cut.points[cut.points.length - 1].t;
   const looping = cut.loop !== null && cut.loop < cut.points.length - 1;
@@ -544,8 +567,12 @@ function lineProgram(line: PulseShape, name: string, first: Step[], set: (v: num
     const first = i === line.loop ? 1 : 0;
     if (first) steps.push(set(along(i, 1, frames)));
     const from = first ? along(i, 1, frames) : pts[i].w;
-    const change = pts[i + 1].w - from;
+    let change = pts[i + 1].w - from;
     const rest = frames - first;
+    // A hair steeper than the fastest sweep, by no more than the lowest bit
+    // a traced width loses each end: the fastest sweep
+    const most = rest * (change >= 0 ? FASTEST_UP : FASTEST_DOWN);
+    if (rest > 0 && Math.abs(change) > most && Math.abs(change) - most <= 2) change = Math.sign(change) * most;
     if (rest > 0 && fastestSweep(change) <= rest) for (const sw of sweepRows(change, rest)) steps.push(sweep(sw));
     else for (let f = first + 1; f <= frames; f++) steps.push(set(along(i, f, frames)));
   }

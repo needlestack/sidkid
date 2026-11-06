@@ -211,6 +211,24 @@ zoomable timeline, aiming for a GarageBand feel.
   the rest differ a little in pitch (vibrato a frame off in jam-mode ticks, which reset per
   note: a song exported to patterns keeps them in step; slides resume on the nearest note).
   Released notes (fixed key up) aren't resumed. No per-track "start again" option yet.
+- Several songs (`songs` + `current` in `sidkid.song2.v1`), a picker with New / Import… / Delete.
+  Undo keeps either the song open or the whole list (`before` / `beforeSongs`).
+- Importing GoatTracker songs (`songimport.ts`, 2026-11-05): tracks per voice and instrument, one
+  step a row, timed from the scan; clips per pattern, joined where a note is held over. Played
+  by the sequencer it matches GoatTracker's player exactly given: a note sounds 2 frames after
+  its row is read (`ROW_TO_NOTE`); notes let go their instrument's lead before their end (also
+  for Song Maker's own songs: as a key-off row does); and `SongDoc.goat` keeps the player's pulse
+  optimization (pulse holds still a frame on each row, the lead before it, and the frame after
+  each pattern's last row; `sk_skip_pulse` in the engine wrapper, restoring pulse state after
+  the frame; the vendor player is untouched). `node scripts/songimportsurvey.mjs` compares every
+  example frame by frame and marks `importable` / `needs` in public/examples/index.json; only
+  importable ones are offered, and a test checks they still play exactly. So far: everlasting.
+  The rest need tempo changes, slides to notes, vibrato and pitch-bend commands, envelope /
+  waveform / program changes mid-song, funk tempo, multispeed.
+- Instrument import gained (no UI): `pitchFromSong` (pitch left from the note before until the
+  first step), `PulseShape.inherit` (carries on from the voice's width; first move from the
+  program's own first row; sweeps unwrapped), `FilterChunk.voices` (absolute routing, may change
+  partway), fixed notes past 95 (a pitch of 0, a drum trick). Survey: 218/226 exact.
 - Not yet: voice priority settings, filter sharing, several songs, .sng export, tempo
   changes, copy/paste, selecting several clips.
 

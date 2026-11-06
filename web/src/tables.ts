@@ -213,7 +213,8 @@ export function pitchRight(p: Pitch): number {
     case 'keep':
       return PITCH_KEEP;
     case 'fixed':
-      return PITCH_KEEP | Math.max(1, Math.min(0x5f, p.note));
+      // (notes past the table's 96 play a pitch of 0)
+      return PITCH_KEEP | Math.max(1, Math.min(0x7f, p.note));
     case 'relative': {
       const n = Math.max(-32, Math.min(95, Math.round(p.semitones)));
       return n < 0 ? n + 0x80 : n;
@@ -434,8 +435,8 @@ export function defaultStep(kind: number): Step {
 // with long runs split at 127 frames.
 
 const ROW_FRAMES = 0x7f;
-const FASTEST_UP = 127;
-const FASTEST_DOWN = 128;
+export const FASTEST_UP = 127;
+export const FASTEST_DOWN = 128;
 
 export interface Sweep {
   frames: number;

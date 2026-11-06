@@ -159,6 +159,19 @@ export function saveIds() {
   }
 }
 
+/** Adds instruments to the Instrument Maker's list (after its starting ones, if it has none saved yet) */
+export function addInstruments(added: Shape[], total: number) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as { instruments?: Shape[] } | null;
+    const state = saved?.instruments?.length ? saved : { ...saved, instruments: loadInstruments(total), current: 0 };
+    state.instruments!.push(...added);
+    giveIds(state.instruments!);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Storage full or blocked: they play in the song all the same, till the page closes
+  }
+}
+
 /** The instruments Instrument Maker 2 saved, or its starting ones */
 export function loadInstruments(total: number): Shape[] {
   saveIds();

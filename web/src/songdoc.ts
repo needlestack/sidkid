@@ -4,7 +4,7 @@
 // held on another track comes back. This file turns a song into the timed
 // notes the player plays (a Sequence).
 
-import type { SeqEvent, Sequence } from './engine/sequencer';
+import { LET_GO, SKIP_PULSE, type SeqEvent, type Sequence } from './engine/sequencer';
 import type { Shape } from './shape';
 
 export const VOICES = 3;
@@ -45,6 +45,13 @@ export interface SongDoc {
   /** The stretch Play repeats while cycling, in steps */
   cycle: { start: number; end: number };
   cycling: boolean;
+  /**
+   * Imported from GoatTracker: plays as its song player did, which holds
+   * each voice's pulse program still a frame on every row, and again after
+   * each pattern's last row (its pulse optimization). Where each voice's
+   * patterns start, and the steps the rows run to.
+   */
+  goat?: { patterns: number[][]; end: number };
 }
 
 /** Frames a step lasts, not a whole number in general */
@@ -219,8 +226,20 @@ export function songSequence(
       // (starting a note lets go of the last), or the instrument lets go itself
       const next = segs[i + 1] ?? (cycle ? again : null);
       if (shape.release !== null) return;
-      if (next && next.start - lead(next) <= s.end) return;
-      events.push({ frame: Math.min(s.end, length - 1), voice, note: -1, instrument: 0 });
+      // (it lets go the lead before its end, as the player looks ahead to a key-off row as to a note)
+      const off = s.end - lead(s);
+      if (next && next.start - lead(next) <= off) return;
+      events.push({ frame: Math.min(off, length - 1), voice, note: LET_GO, instrument: 0 });
+    });
+  }
+  if (song.goat) {
+    const skips = goatPulseSkips(song, sounds, trackSound, fps);
+    skips.forEach((frames, voice) => {
+      const add = (a: number, b: number, shift: number) => {
+        for (const f of frames) if (f >= a && f < b) events.push({ frame: f + shift, voice, note: SKIP_PULSE, instrument: 0 });
+      };
+      add(from, end, -from);
+      if (cycle) add(cycle.start, cycle.end, firstLength - cycle.start);
     });
   }
   events.sort((a, b) => a.frame - b.frame || (a.note < 0 ? 0 : 1) - (b.note < 0 ? 0 : 1));
@@ -240,6 +259,33 @@ export function songSequence(
     if (cycle) clicks(cycle.start, cycle.end, firstLength - cycle.start);
   }
   return { events, length, loopFrom, preroll, beats, bars };
+}
+
+/**
+ * The frames of each voice where GoatTracker's player holds its pulse
+ * still (see SongDoc.goat): on every row, the instrument's lead before it
+ * (when the player looks ahead to the next row; the instrument is the one
+ * the voice last started a note with), and the frame after each pattern's
+ * last row.
+ */
+function goatPulseSkips(song: SongDoc, sounds: SongSound[], trackSound: number[], fps: number): number[][] {
+  const goat = song.goat!;
+  return [0, 1, 2].map((voice) => {
+    const starts = voiceSegments(song, voice, fps)
+      .filter((s) => !s.from && trackSound[s.track])
+      .map((s) => ({ frame: s.start, lead: leadOf(sounds[trackSound[s.track] - 1].shape) }));
+    const out: number[] = [];
+    let k = 0;
+    let lead = starts[0]?.lead ?? 3;
+    for (let step = 0; step < goat.end; step++) {
+      const at = frameAt(song, step, fps);
+      while (k < starts.length && starts[k].frame <= at) lead = starts[k++].lead;
+      out.push(at - lead);
+    }
+    // (a pattern's last row is read a step before the next starts, which sounds two frames later: so the frame before that)
+    for (const p of goat.patterns[voice] ?? []) if (p > 0) out.push(frameAt(song, p - 1, fps) - 1);
+    return out;
+  });
 }
 
 /** The song frame a sequence made by songSequence() has got to */

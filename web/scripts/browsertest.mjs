@@ -738,7 +738,8 @@ try {
     return out.map(([k, n]) => `${k}x${n}`).join(' ');
   };
 
-  // A note starts on its frame: step 4 at 6 frames a step is frame 24 (the gate goes off two frames before, for the hard restart)
+  // A note starts on its frame: step 4 at 6 frames a step is frame 24 (the gate goes off two frames before, for the hard
+  // restart); it lets go its lead (3 frames) before its end, as GoatTracker's player does before a key-off row
   const onTime = await sm.evaluate(() => {
     const s = window.songMaker.song();
     s.tracks.forEach((t) => (t.clips = []));
@@ -747,7 +748,7 @@ try {
     return window.songMaker.trace(60);
   });
   const onRuns = voiceRuns(onTime, 0);
-  report(onRuns === '0:0x23 0:1x1 1168:1x24 1168:0x12', 'song notes play on their frames', onRuns);
+  report(onRuns === '0:0x23 0:1x1 1168:1x21 1168:0x15', 'song notes play on their frames', onRuns);
 
   // Two tracks on one voice take turns: the newer note takes it, and the held one comes back after
   const turns = await sm.evaluate(() => {
@@ -758,7 +759,7 @@ try {
     return window.songMaker.trace(100);
   });
   const turnRuns = voiceRuns(turns, 0);
-  report(turnRuns === '685:1x21 685:0x2 685:1x1 1168:1x21 1168:0x2 1168:1x1 685:1x48 685:0x4', 'song tracks on one voice take turns', turnRuns);
+  report(turnRuns === '685:1x21 685:0x2 685:1x1 1168:1x21 1168:0x2 1168:1x1 685:1x45 685:0x7', 'song tracks on one voice take turns', turnRuns);
 
   // A note getting its voice back picks up where it left off: after the other track's note, the
   // Lead's pulse sweep and waveform carry on as if it had played alone
@@ -960,12 +961,11 @@ try {
   const stillOpen = await sm.evaluate(() => `${window.songMaker.openClip()?.start} ${document.querySelectorAll('.roll-note').length} notes`);
   report(stillOpen === '16 1 notes', 'song keeps the open clip across a reload', stillOpen);
 
-  // A song saved with frames a step comes back at its tempo
-  const oldTempo = await sm.evaluate(() => {
+  // A song saved as they were first (one song, with frames a step) comes back, at its tempo
+  await sm.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('sidkid.song2.v1'));
-    delete saved.song.bpm;
-    saved.song.stepFrames = 8;
-    localStorage.setItem('sidkid.song2.v1', JSON.stringify(saved));
+    const { bpm: _bpm, ...song } = saved.songs[saved.current];
+    localStorage.setItem('sidkid.song2.v1', JSON.stringify({ song: { ...song, stepFrames: 8 }, zoom: saved.zoom, rollZoom: saved.rollZoom, open: saved.open }));
   });
   await sm.reload();
   await sm.waitForFunction(() => window.songMaker?.ready());
@@ -1016,6 +1016,45 @@ try {
   await sm.waitForFunction(() => window.songMaker?.ready());
   const stuck = await sm.evaluate(() => document.querySelectorAll('.track-instrument')[1].selectedOptions[0].text);
   report(stuck === 'Snare old', 'song keeps instrument picks across reloads', stuck);
+
+  // Several songs: New adds one, Delete removes it, ⌘Z brings it back
+  const songCount = () => sm.evaluate(() => document.getElementById('song-pick').options.length);
+  const songsAtFirst = await songCount();
+  await sm.click('#new-song');
+  const songsAdded = await songCount();
+  await sm.click('#delete-song');
+  const songsRemoved = await songCount();
+  await sm.keyboard.down('Meta');
+  await sm.keyboard.press('z');
+  await sm.keyboard.up('Meta');
+  const songsRestored = await songCount();
+  report(songsAdded === songsAtFirst + 1 && songsRemoved === songsAtFirst && songsRestored === songsAtFirst + 1, 'song list adds and deletes songs', `${songsAtFirst} → ${songsAdded} → ${songsRemoved} → ${songsRestored}`);
+
+  // Importing an example: a new song, its instruments added to the Instrument Maker's, the song before left alone
+  const earlierSong = await sm.evaluate(() => JSON.stringify(window.songMaker.song()));
+  await sm.click('#import-song');
+  await sm.waitForSelector('#import-songs li button:not([disabled])');
+  await sm.click('#import-songs li button:not([disabled])');
+  await sm.waitForFunction(() => window.songMaker.song().name === 'Everlasting Annoyance', { timeout: 30000 });
+  const importedSong = await sm.evaluate((earlier) => {
+    const saved = JSON.parse(localStorage.getItem('sidkid.maker2.v1')).instruments.map((i) => i.name);
+    const pick = document.getElementById('song-pick');
+    const songs = JSON.parse(localStorage.getItem('sidkid.song2.v1')).songs;
+    return `${window.songMaker.song().tracks.length} tracks, ${saved.filter((n) => n.endsWith('(Everlasting Annoyance)')).length} instruments, earlier song ${JSON.stringify(songs[songs.length - 2]) === earlier ? 'kept' : 'changed'}, ${pick.options.length} songs`;
+  }, earlierSong);
+  report(/^9 tracks, 9 instruments, earlier song kept, \d+ songs$/.test(importedSong), 'song imports an example', importedSong);
+
+  // Songs offered for import play exactly as GoatTracker's player does
+  const importExact = await sm.evaluate(async () => {
+    const index = await (await fetch('./examples/index.json')).json();
+    const out = [];
+    for (const ex of index.filter((e) => e.importable)) {
+      const r = await window.songMaker.importCheck(ex.file);
+      out.push(`${ex.file}: ${r.gaps.length || Object.keys(r.differ).length ? `${r.gaps.join(', ')} ${JSON.stringify(r.first)}` : 'same'}`);
+    }
+    return out;
+  });
+  report(importExact.length > 0 && importExact.every((e) => e.endsWith(': same')), 'song imports play as they did', importExact.join(' | '));
 
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
   await colorScheme(sm, 'dark');

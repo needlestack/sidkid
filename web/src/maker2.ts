@@ -2372,6 +2372,24 @@ $<HTMLInputElement>('name').addEventListener('input', (e) => {
 
 // --- Instruments -----------------------------------------------------------------
 
+// Instruments added elsewhere (a song imported in the Song Maker, in another tab) join the list here
+window.addEventListener('storage', (e) => {
+  if (e.key !== STORAGE_KEY || !e.newValue) return;
+  try {
+    const saved = JSON.parse(e.newValue) as { instruments?: Shape[] };
+    if (!saved.instruments?.length) return;
+    migrate(saved.instruments, TOTAL);
+    const id = shape().id;
+    state.instruments = saved.instruments;
+    state.current = Math.max(0, state.instruments.findIndex((s) => s.id === id));
+    renderInstruments();
+    render();
+    sendToPlayer();
+  } catch {
+    // Unreadable: keep what's here
+  }
+});
+
 function renderInstruments() {
   const select = $<HTMLSelectElement>('instrument');
   select.replaceChildren(...state.instruments.map((s, i) => new Option(s.name || `Instrument ${i + 1}`, String(i))));

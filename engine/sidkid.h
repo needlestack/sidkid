@@ -89,6 +89,9 @@ void sk_set_instrument(int num, int ad, int sr, int wave, int pulse, int filter,
 void sk_note_on(int voice, int note, int num);
 // Releases the note; if it hasn't started yet, as soon as it does.
 void sk_note_off(int voice);
+// Holds a voice's pulse program still for the next frame, as the player
+// does itself on the first row of a pattern with pulse optimization on.
+void sk_skip_pulse(int voice);
 
 // Runs one frame of the playroutine without rendering audio.
 void sk_tick(void);

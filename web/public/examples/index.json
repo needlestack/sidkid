@@ -6,61 +6,151 @@
     "copyright": "10/2001",
     "settings": {
       "multiplier": 2
-    }
+    },
+    "importable": false,
+    "needs": [
+      "more than one player call a frame",
+      "slides up",
+      "slides to notes",
+      "vibrato",
+      "wave program changes",
+      "tempo changes"
+    ]
   },
   {
     "file": "cabrinigreen.sng",
     "title": "i'll be a pimp in cabrini green",
     "author": "(when i grow up)",
-    "copyright": ""
+    "copyright": "",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "attack/decay changes",
+      "sustain/release changes",
+      "waveform changes",
+      "filter program changes",
+      "pitches beyond -32 to +48 semitones"
+    ]
   },
   {
     "file": "consultant.sng",
     "title": "The Consultant",
     "author": "Cadaver",
-    "copyright": "2002 Covert Bitops"
+    "copyright": "2002 Covert Bitops",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides to notes",
+      "vibrato",
+      "pulse program changes"
+    ]
   },
   {
     "file": "dojo.sng",
     "title": "Dojo",
     "author": "Cadaver",
-    "copyright": "2002 Covert Bitops"
+    "copyright": "2002 Covert Bitops",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "wave program changes",
+      "filter program changes"
+    ]
   },
   {
     "file": "everlasting.sng",
     "title": "Everlasting Annoyance",
     "author": "Richard",
-    "copyright": "The New Dimension"
+    "copyright": "The New Dimension",
+    "importable": true
   },
   {
     "file": "funktest.sng",
     "title": "Covert Ops in 2D (funktempo)",
     "author": "Cadaver",
-    "copyright": "2002 Covert Bitops"
+    "copyright": "2002 Covert Bitops",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "wave program changes",
+      "filter program changes",
+      "funk tempo"
+    ]
   },
   {
     "file": "ghosttrackers.sng",
     "title": "GhostTrackers",
     "author": "",
-    "copyright": ""
+    "copyright": "",
+    "importable": false,
+    "needs": [
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "sustain/release changes",
+      "wave program changes",
+      "pulse program changes",
+      "filter program changes",
+      "tempo changes"
+    ]
   },
   {
     "file": "hyperspace.sng",
     "title": "My Own Hyperspace",
     "author": ":P",
-    "copyright": "2005 :P"
+    "copyright": "2005 :P",
+    "importable": false,
+    "needs": [
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "attack/decay changes",
+      "sustain/release changes",
+      "waveform changes",
+      "filter program changes",
+      "cutoff changes"
+    ]
   },
   {
     "file": "sanction.sng",
     "title": "On a sanction from CIA",
     "author": "Cadaver",
-    "copyright": "Covert Bitops 2005"
+    "copyright": "Covert Bitops 2005",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "sustain/release changes",
+      "waveform changes"
+    ]
   },
   {
     "file": "sixpack.sng",
     "title": "Sixpack of Cola",
     "author": "beek - covered by No-XS",
-    "copyright": ""
+    "copyright": "",
+    "importable": false,
+    "needs": [
+      "slides to notes",
+      "tempo changes"
+    ]
   },
   {
     "file": "tempo2test.sng",
@@ -69,24 +159,54 @@
     "copyright": "2006 Covert Bitops",
     "settings": {
       "pulseOptimization": false
-    }
+    },
+    "importable": false,
+    "needs": [
+      "slides to notes",
+      "funk tempo"
+    ]
   },
   {
     "file": "transylvanian.sng",
     "title": "Transylvanian Whipping",
     "author": "Cadaver",
-    "copyright": "2005 Covert Bitops"
+    "copyright": "2005 Covert Bitops",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "filter program changes"
+    ]
   },
   {
     "file": "unleash.sng",
     "title": "Unleash The F****** Fury",
     "author": "Cadaver",
-    "copyright": "2004 Covert Bitops"
+    "copyright": "2004 Covert Bitops",
+    "importable": false,
+    "needs": [
+      "tempo changes",
+      "slides up",
+      "slides down",
+      "slides to notes",
+      "vibrato",
+      "sustain/release changes",
+      "filter program changes",
+      "volume changes",
+      "the gate going back on after letting go"
+    ]
   },
   {
     "file": "wavecmdtest.sng",
     "title": "Wavetable command test",
     "author": "Cadaver",
-    "copyright": "2006 Covert Bitops"
+    "copyright": "2006 Covert Bitops",
+    "importable": false,
+    "needs": [
+      "envelope changes partway"
+    ]
   }
 ]
