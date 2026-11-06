@@ -313,13 +313,13 @@ export function songSequence(
   from: number,
   cycle: { start: number; end: number } | null,
   fps: number,
-  /** Clicks on the beats, and a bar of them first (count-in) */
-  metronome: { click: boolean; countIn: boolean } = { click: false, countIn: false },
+  /** Clicks on the beats, and a bar of them first (count-in); and playing on past the song's end, to `until` (a frame) */
+  metronome: { click: boolean; countIn: boolean; until?: number } = { click: false, countIn: false },
   resume: Resumer = () => null,
   /** The speed table row a speed is in (0 for none) */
   speedRow: (speed: Speed | null) => number = () => 0,
 ): Sequence {
-  const end = cycle ? cycle.end : frameAt(song, songEnd(song), fps);
+  const end = cycle ? cycle.end : Math.max(frameAt(song, songEnd(song), fps), metronome.until ?? 0);
   // The first pass, from where playing starts; then the cycle, round and round
   const firstLength = Math.max(0, end - from);
   const loopFrom = cycle ? firstLength : null;

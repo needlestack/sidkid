@@ -265,8 +265,12 @@ function playRange(): { from: number; cycle: { start: number; end: number } | nu
   return { from, cycle };
 }
 
+/** How long playing goes on past a song's end, with nothing there (a blank song) or recording on past it: till stopped, in effect */
+const PLAY_ON_SECONDS = 30 * 60;
+
 function restartSequence(keep: boolean) {
-  const plan = songPlan(transport.from, transport.cycle, { click: view.metronome, countIn: transport.countIn });
+  const on = !transport.cycle && (transport.recording || songEnd(song()) === 0);
+  const plan = songPlan(transport.from, transport.cycle, { click: view.metronome, countIn: transport.countIn, ...(on ? { until: transport.from + PLAY_ON_SECONDS * FPS } : {}) });
   trackSound = plan.trackSound;
   player.setTables(plan.tables);
   plan.instruments.forEach((ins, i) => player.setInstrument(i + 1, ins));
@@ -284,7 +288,7 @@ const TABLE_ROWS = 255;
  * ones shared), as long as they fit GoatTracker's instruments and tables
  * (past that, notes start again instead), and the timed notes.
  */
-function songPlan(from: number, cycle: { start: number; end: number } | null, metronome: { click: boolean; countIn: boolean }, doc: SongDoc = song(), shapes: Map<string, Shape> = byId, fps = FPS) {
+function songPlan(from: number, cycle: { start: number; end: number } | null, metronome: { click: boolean; countIn: boolean; until?: number }, doc: SongDoc = song(), shapes: Map<string, Shape> = byId, fps = FPS) {
   const { sounds: list, trackSound: numbers } = songSounds(doc, shapes);
   const base = sounds(list.map((s) => ({ shape: s.shape, voices: 1 << s.voice })));
   const all = [...base];
@@ -2512,6 +2516,8 @@ Object.assign(window, {
     },
     instruments: () => instruments,
     playing: () => transport.playing,
+    /** The song frame being heard */
+    liveFrame,
     openClip: () => openClip,
   },
 });

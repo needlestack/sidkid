@@ -1215,6 +1215,12 @@ try {
   const songsAtFirst = await songCount();
   await sm.click('#new-song');
   const songsAdded = await songCount();
+  // A blank song plays on (the metronome to hear) until stopped
+  await sm.keyboard.press(' ');
+  await new Promise((r) => setTimeout(r, 1500));
+  const blankPlays = await sm.evaluate(() => `${window.songMaker.playing()} ${window.songMaker.liveFrame()}`);
+  await sm.keyboard.press(' ');
+  report(/^true [\d.]+$/.test(blankPlays) && Number(blankPlays.split(' ')[1]) > 40, 'song blank plays on', blankPlays);
   await sm.click('#delete-song');
   await sm.evaluate(() => [...document.querySelectorAll('.ask button')].find((b) => b.textContent === 'Delete song').click());
   const songsRemoved = await songCount();
