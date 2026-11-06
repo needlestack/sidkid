@@ -27,7 +27,10 @@ RESID := envelope extfilt filter pot sid voice wave \
 	wave8580__ST wave8580_P_T wave8580_PS_ wave8580_PST
 RESIDFP := envelopefp extfiltfp filterfp potfp sidfp voicefp wavefp
 
-CORE_C := gsong gplay gtables gglue
+# gpack: GoatTracker's packer (greloc.c) with its assembler (asm/) and player (player.s, built in)
+ASM := asmtab chnkpool expr lexyy log membuf membufio namedbuf parse pc vec
+CORE_C := gsong gplay gtables gglue gpack $(addprefix asm/,$(ASM))
+GEN := $(BUILD)/gen
 # The headers the C++ sources share (reSID's inline clocking among them)
 CORE_CXX_H := $(wildcard core/*.h core/resid/*.h core/resid-fp/*.h)
 CORE_CXX := gsid $(addprefix resid/,$(RESID)) $(addprefix resid-fp/,$(RESIDFP))
@@ -49,9 +52,9 @@ $(NATIVE)/scantest: $(NATIVE_OBJS) $(NATIVE)/tools/scantest.o
 $(NATIVE)/notetest: $(NATIVE_OBJS) $(NATIVE)/tools/notetest.o
 	$(CXX) -o $@ $^
 
-$(NATIVE)/core/%.o: core/%.c core/*.h
+$(NATIVE)/core/%.o: core/%.c core/*.h core/asm/*.h $(GEN)/player_s.h
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Icore -c -o $@ $<
+	$(CC) $(CFLAGS) -Icore -Icore/asm -I$(GEN) -c -o $@ $<
 
 $(NATIVE)/core/%.o: core/%.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
@@ -73,8 +76,8 @@ $(NATIVE)/%.o: %.cpp $(CORE_CXX_H)
 # so the comparison is of the players, on the same chip.
 
 REF := $(BUILD)/ref
-REF_VENDOR := gsong.c gplay.c gsid.cpp gcommon.h gsong.h gplay.h gsid.h gsound.h
-REF_OURS := goattrk2.h gtables.c gglue.c
+REF_VENDOR := gsong.c gplay.c gsid.cpp gcommon.h gsong.h gplay.h gsid.h gsound.h greloc.c greloc.h
+REF_OURS := goattrk2.h gtables.c gglue.c gpack.c
 REF_RESID := resid/wave.cpp resid/wave.h
 REF_OBJS := $(addprefix $(REF)/obj/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(REF)/obj/,$(API))
 
@@ -85,6 +88,8 @@ $(REF)/src/.stamp: $(addprefix $(VENDOR)/,$(REF_VENDOR)) $(addprefix core/,$(REF
 	cp $(addprefix $(VENDOR)/,$(REF_VENDOR)) $(REF)/src/
 	cp $(VENDOR)/resid/*.cpp $(VENDOR)/resid/*.h $(REF)/src/resid/
 	cp $(VENDOR)/resid-fp/*.cpp $(VENDOR)/resid-fp/*.h $(REF)/src/resid-fp/
+	@mkdir -p $(REF)/src/asm
+	cp $(VENDOR)/asm/*.c $(VENDOR)/asm/*.h $(REF)/src/asm/
 	cp $(addprefix core/,$(REF_OURS)) $(REF)/src/
 	cp $(addprefix core/,$(REF_RESID)) $(REF)/src/resid/
 	@touch $@
@@ -92,10 +97,10 @@ $(REF)/src/.stamp: $(addprefix $(VENDOR)/,$(REF_VENDOR)) $(addprefix core/,$(REF
 $(REF)/sngrender: $(REF_OBJS) $(REF)/obj/tools/sngrender.o
 	$(CXX) -o $@ $^
 
-$(REF)/obj/%.o: $(REF)/src/.stamp
+$(REF)/obj/%.o: $(REF)/src/.stamp $(GEN)/player_s.h
 	@mkdir -p $(dir $@)
 	@if [ -f $(REF)/src/$*.c ]; then \
-		echo $(CC) $(REF)/src/$*.c; $(CC) $(CFLAGS) -I$(REF)/src -c -o $@ $(REF)/src/$*.c; \
+		echo $(CC) $(REF)/src/$*.c; $(CC) $(CFLAGS) -I$(REF)/src -I$(REF)/src/asm -I$(GEN) -c -o $@ $(REF)/src/$*.c; \
 	else \
 		echo $(CXX) $(REF)/src/$*.cpp; $(CXX) $(CXXFLAGS) -I$(REF)/src -c -o $@ $(REF)/src/$*.cpp; \
 	fi
@@ -130,7 +135,7 @@ WASM_OBJS := $(addprefix $(WASM)/core/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(
 WASM_FUNCS := sk_init sk_configure sk_set_model sk_load_song sk_save_song sk_num_subsongs sk_play sk_stop sk_seek sk_scan \
 	sk_reset sk_set_table sk_set_instrument sk_note_on sk_note_off sk_skip_pulse sk_clear_filter sk_frame_now sk_row sk_slide sk_tick sk_table_pos \
 	sk_is_playing sk_song_looped sk_toggle_mute sk_is_muted sk_render sk_frame_left sk_render_frame sk_sidregs sk_envelopes sk_frames \
-	sk_song_name sk_author_name sk_copyright_name malloc free
+	sk_song_name sk_author_name sk_copyright_name sk_pack malloc free
 comma := ,
 empty :=
 space := $(empty) $(empty)
@@ -146,9 +151,9 @@ $(WASM)/sidkid.js: $(WASM_OBJS)
 		-sEXPORTED_FUNCTIONS=$(WASM_EXPORTS) \
 		-sEXPORTED_RUNTIME_METHODS=FS,HEAP16,HEAPU8,UTF8ToString
 
-$(WASM)/core/%.o: core/%.c core/*.h
+$(WASM)/core/%.o: core/%.c core/*.h core/asm/*.h $(GEN)/player_s.h
 	@mkdir -p $(dir $@)
-	$(EMCC) $(CFLAGS) -Icore -c -o $@ $<
+	$(EMCC) $(CFLAGS) -Icore -Icore/asm -I$(GEN) -c -o $@ $<
 
 $(WASM)/core/%.o: core/%.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
@@ -161,6 +166,11 @@ $(WASM)/%.o: %.c sidkid.h core/*.h
 $(WASM)/%.o: %.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
 	$(EMXX) $(CXXFLAGS) -Icore -c -o $@ $<
+
+# The packer's player, built in (gpack.c)
+$(GEN)/player_s.h: core/player.s
+	@mkdir -p $(dir $@)
+	(echo 'static const unsigned char player_s[] = {'; xxd -i < $<; echo '};') > $@
 
 clean:
 	rm -rf $(BUILD)

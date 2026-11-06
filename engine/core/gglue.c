@@ -3,7 +3,8 @@
 //
 // Definitions the GoatTracker engine sources expect from the editor
 // (goattrk2.c, gorder.c, gpattern.c, ginstr.c, gtable.c, gdisplay.c,
-// greloc.c, gsound.c, bme_end.c). Defaults match goattrk2.c.
+// gsound.c, bme_end.c). Defaults match goattrk2.c. (greloc.c's own are
+// greloc.c's, part of the engine through gpack.c.)
 //
 
 #include "goattrk2.h"
@@ -41,12 +42,6 @@ int einum, eipos, eicolumn;
 // gtable.c
 int etview[MAX_TABLES];
 int etmarknum = -1;
-
-// greloc.c
-unsigned char pattused[MAX_PATT];
-unsigned char instrused[MAX_INSTR];
-unsigned char tableused[MAX_TABLES][MAX_TABLELEN+1];
-int tableerror;
 
 // gdisplay.c: playback time, counted in frames
 int timeframes = 0;

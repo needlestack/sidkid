@@ -16,6 +16,8 @@ import { addInstruments, loadInstruments, sound as soundOf, sounds, soundTables,
 import { resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
 import { importGoatSong, ROW_TO_NOTE } from './songimport';
+import { diskOf, packSong, playingProgram } from './c64export';
+import { encodeWav, renderSong } from './engine/export';
 import { exportSong } from './songexport';
 import { slideSemitones, vibratoCurve, wobbleOf, wobbleRow } from './vibrato';
 import { audible, songRows, type ResumedNote, bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
@@ -1980,17 +1982,48 @@ function deleteSong() {
   toast(`Deleted ${gone.name} (⌘Z brings it back)`);
 }
 
-// Exporting: the song as a GoatTracker song file, downloaded
+// Exporting: the song as GoatTracker plays it, downloaded as a GoatTracker
+// song, a C64 disk that plays it, a SID file, or its sound
+type ExportKind = 'd64' | 'sid' | 'sng' | 'wav';
 $('export-song').addEventListener('click', () => {
+  const act = (kind: ExportKind) => () => void exportAs(kind);
+  askChoice($('export-song').getBoundingClientRect(), `Export “${song().name}” as`, [
+    { label: 'C64 disk (.d64)', act: act('d64') },
+    { label: 'SID file (.sid)', act: act('sid') },
+    { label: 'GoatTracker song (.sng)', act: act('sng') },
+    { label: 'Sound (.wav)', act: act('wav') },
+  ]);
+});
+
+async function exportAs(kind: ExportKind) {
   const plan = songPlan(0, null, { click: false, countIn: false });
   const { bytes, gaps } = exportSong(song(), plan, FPS);
+  const name = (song().name || 'song').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'song';
+  const file = `${name}.${kind}`;
+  // (played as Song Maker plays it: its clock, and an imported song's pulse optimization)
+  const at: Settings = { ...settings, ...(song().goat?.pulseOptimization === false ? { pulseOptimization: false } : {}) };
+  const model = loadModel();
+  let out: Blob | null = null;
+  if (kind === 'sng') out = new Blob([bytes.buffer as ArrayBuffer]);
+  else if (kind === 'wav') {
+    toast(`Making ${file}…`);
+    const rendered = await renderSong({ song: bytes.slice().buffer, settings: at, model, subsong: 0, muted: [false, false, false] });
+    out = encodeWav(rendered.samples, rendered.sampleRate);
+  } else {
+    const packed = await packSong(bytes, at, model, kind === 'sid' ? 0 : 1);
+    if (packed) out = new Blob([(kind === 'sid' ? packed : diskOf(name, playingProgram(packed, song().name || name, at))).slice().buffer as ArrayBuffer]);
+  }
+  if (!out) {
+    toast(`${file} couldn't be made`);
+    return;
+  }
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'application/octet-stream' }));
-  link.download = `${(song().name || 'song').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'song'}.sng`;
+  link.href = URL.createObjectURL(out);
+  link.download = file;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 10000);
-  toast(gaps.length ? `Exported ${link.download}, but GoatTracker can't play all of it as here: ${gaps.join('; ')}` : `Exported ${link.download}`);
-});
+  toast(gaps.length ? `Exported ${file}, but GoatTracker can't play all of it as here: ${gaps.join('; ')}` : `Exported ${file}`);
+}
 
 // --- Asking: a question by what it's about, a button for each answer and one to leave it -------
 

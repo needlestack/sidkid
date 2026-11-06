@@ -42,6 +42,7 @@ declare module '@engine/sidkid.js' {
     _sk_song_name(): number;
     _sk_author_name(): number;
     _sk_copyright_name(): number;
+    _sk_pack(path: number, format: number, model: number): number;
   }
 
   export default function createSidKid(options?: { wasmBinary?: ArrayBuffer }): Promise<SidKidModule>;

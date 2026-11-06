@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "examples": "node scripts/examples.mjs",
+    "c64check": "node scripts/c64check.mjs",
     "test": "tsc && vite build --mode test --outDir dist-test && node scripts/browsertest.mjs",
     "test:firefox": "tsc && vite build --mode test --outDir dist-test && BROWSER=firefox node scripts/browsertest.mjs"
   },

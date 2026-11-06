@@ -242,6 +242,20 @@ zoomable timeline, aiming for a GarageBand feel.
   with Song Maker's: exact for a song made here and for the imports (except 2-frame steps, which
   need funk tempo: listed as a gap). Resumes are traced in their song (`resumeTraces` plays the
   note alone with the song's tempo, rows and rests).
+- Export also makes a C64 disk (.d64), a SID file and a WAV (Export opens a menu; `exportAs`).
+  The .sng goes through GoatTracker's own packer/relocator, compiled into the engine
+  (`engine/core/gpack.c` includes `greloc.c`, with its assembler `core/asm/` and `player.s`
+  built in as `build/gen/player_s.h`; `sk_pack`), in an engine instance of its own
+  (`c64export.ts` `packSong`: the packer exits on a song it can't assemble). Its output is
+  byte-for-byte gt2reloc's (checked on the importable examples, 2026-11-06, with a gt2reloc built
+  from vendor/ against Homebrew SDL 1.2). The disk's program (`playingProgram`): `10 SYS2061`,
+  then code that prints the title and plays the song from CIA 1's timer at the song's rate
+  (counts for PAL and NTSC machines, picked by $02A6), the player at $1000; VICE's autostart
+  runs it. Disk images by d64lib (`web/src/d64lib.js`, GMC64's, kept as it is there).
+  `web/scripts/c64check.mjs` (needs VICE) boots disks in x64sc on PAL and NTSC and compares
+  the SID writes with the engine frame by frame: the rate is right on both; frames match
+  (pulse widths within 2 of 4096: the two players round sweep steps differently) except where
+  GoatTracker's own 6502 and editor players differ (everlasting's voice 2 pulse program).
 - Tracks: S solos (any number); Delete with no clip picked up asks to clear or delete the selected
   track; deleting a song asks first.
 - Several songs (`songs` + `current` in `sidkid.song2.v1`), a picker with New / Import… / Delete.

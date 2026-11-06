@@ -1366,6 +1366,7 @@ try {
       name = this.download;
     };
     document.getElementById('export-song').click();
+    [...document.querySelectorAll('.ask button')].find((b) => b.textContent.includes('.sng')).click();
     HTMLAnchorElement.prototype.click = click;
     return name;
   });
@@ -1388,6 +1389,7 @@ try {
       href = this.href;
     };
     document.getElementById('export-song').click();
+    [...document.querySelectorAll('.ask button')].find((b) => b.textContent.includes('.sng')).click();
     HTMLAnchorElement.prototype.click = click;
     return Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer()));
   });
@@ -1419,6 +1421,7 @@ try {
       href = this.href;
     };
     document.getElementById('export-song').click();
+    [...document.querySelectorAll('.ask button')].find((b) => b.textContent.includes('.sng')).click();
     HTMLAnchorElement.prototype.click = click;
     return Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer()));
   });
@@ -1428,6 +1431,46 @@ try {
   await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeSteady);
   const steadyTempo = await tempoOf();
   report(steadyTempo === '[88,[]]', 'song import keeps a steady tempo', steadyTempo);
+
+  // Export as a C64 disk (a program that plays the song, at the player's $1000), a SID file, or its sound
+  const exported = await sm.evaluate(async () => {
+    const got = {};
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      got[this.download.split('.').pop()] = this.href;
+    };
+    for (const ext of ['d64', 'sid', 'wav']) {
+      document.getElementById('export-song').click();
+      [...document.querySelectorAll('.ask button')].find((b) => b.textContent.includes(`.${ext}`)).click();
+      for (let i = 0; i < 200 && !got[ext]; i++) await new Promise((r) => setTimeout(r, 50));
+    }
+    HTMLAnchorElement.prototype.click = click;
+    const bytes = async (ext) => (got[ext] ? new Uint8Array(await (await fetch(got[ext])).arrayBuffer()) : new Uint8Array());
+    const [d64, sid, wav] = [await bytes('d64'), await bytes('sid'), await bytes('wav')];
+    // The disk: one program, its first sector (track 17 sector 0, one interleave in on the 1541's layout) a BASIC SYS2061 at $0801
+    const dir = 0x16500 + 256;
+    const t = d64[dir + 3];
+    const sec = d64[dir + 4];
+    const spt = (tr) => (tr <= 17 ? 21 : tr <= 24 ? 19 : tr <= 30 ? 18 : 17);
+    let off = 0;
+    for (let tr = 1; tr < t; tr++) off += spt(tr) * 256;
+    off += sec * 256;
+    const first = [...d64.subarray(off + 2, off + 2 + 12)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+    return {
+      d64: d64.length,
+      type: d64[dir + 2],
+      first,
+      sid: String.fromCharCode(...sid.subarray(0, 4)),
+      sidInit: (sid[10] << 8) | sid[11],
+      wav: String.fromCharCode(...wav.subarray(0, 4)),
+      wavSeconds: (wav.length - 44) / 2 / 44100,
+    };
+  });
+  report(
+    exported.d64 === 174848 && exported.type === 0x82 && exported.first === '01 08 0b 08 0a 00 9e 32 30 36 31 00' && exported.sid === 'PSID' && exported.sidInit === 0x1000 && exported.wav === 'RIFF' && exported.wavSeconds > 1,
+    'song exports a C64 disk, SID and sound',
+    JSON.stringify(exported),
+  );
 
   // Songs offered for import play exactly as GoatTracker's player does
   const importExact = await sm.evaluate(async () => {

@@ -128,6 +128,12 @@ const char *sk_song_name(void);
 const char *sk_author_name(void);
 const char *sk_copyright_name(void);
 
+// The loaded song packed by GoatTracker's packer/relocator into a file at
+// path, with the player settings sk_configure set: format 0 = SID (its
+// header naming the chip model, 0 = 6581, 1 = 8580), 1 = PRG (player at
+// $1000, load address first), 2 = raw binary. Its size, or 0 on failure.
+int sk_pack(const char *path, int format, int model);
+
 #ifdef __cplusplus
 }
 #endif
