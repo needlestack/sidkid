@@ -309,6 +309,8 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     return w;
   };
   const gliding = (t: number) => notes.some((n) => n.start <= t && t < arrival(n));
+  // Where a pitch is set: even the one it is already on (that starts vibrato's wobble again)
+  const sets = new Set(notes.map(arrival));
   // Frames without a row of their own wait, after the last row
   let idle = 0;
   const flush = () => {
@@ -346,7 +348,7 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     const all = f === 0 || f === target;
     if (all || w !== wave) {
       const n = Math.round(want);
-      const set = all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur);
+      const set = all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur || (!past && sets.has(t)));
       flush();
       if (f === target) back = steps.length;
       steps.push({ left: waveLeft({ type: 'wave', wave: w }), right: set ? pitchByte(n) : PITCH_KEEP });
@@ -355,7 +357,7 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
       continue;
     }
     if (past || !gliding(t)) {
-      if (want !== cur) {
+      if (want !== cur || (!past && sets.has(t))) {
         flush();
         steps.push({ left: WAVE_KEEP, right: pitchByte(want) });
         cur = last = want;

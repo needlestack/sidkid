@@ -970,7 +970,29 @@
 
 .tl-gutter-row.pitch-from {
   cursor: default;
+}
+
+.pitch-from-chip {
+  padding: 0 7px;
+  border: 1px solid var(--step-bar);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10.5px;
   font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pitch-from-chip:hover {
+  border-color: var(--accent);
+}
+
+.pitch-from-chip.fixed {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .choice-popup {

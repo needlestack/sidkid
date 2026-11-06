@@ -557,6 +557,17 @@ try {
   });
   report(restart === '2 82', 'maker2 hard restart', restart);
 
+  // Song instruments imported: those with nothing the shapes can't hold play just as they did
+  const imported = await m2.evaluate(async () => {
+    const out = [];
+    for (const name of ['sanction.sng', 'dojo.sng']) {
+      const bytes = new Uint8Array(await (await fetch(`examples/${name}`)).arrayBuffer());
+      for (const r of window.maker2.importSong(bytes)) if (!r.gaps.length && r.differs.length) out.push(`${name} ${r.name}: ${r.differs.join(', ')}`);
+    }
+    return out.join('; ') || 'all the same';
+  });
+  report(imported === 'all the same', 'maker2 imports song instruments', imported);
+
   // The filter: set up on the first frame (band pass, resonance, voice 1), its cutoff following the line
   const filt = await m2.evaluate(() => {
     const s = window.maker2.state();

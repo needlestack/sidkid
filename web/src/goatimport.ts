@@ -1,0 +1,297 @@
+// GoatTracker instruments into shapes for the second instrument maker.
+//
+// Rather than read the tables row by row (with their commands, shared rows
+// and jumps between instruments), an instrument is played silently and its
+// shape is read off what the player does each frame: the waveform, pitch,
+// pulse width and filter. Where the tables' positions start repeating, the
+// shape repeats too. What a shape can't hold is listed as gaps.
+
+import type { Trace } from './engine/analyzer';
+import { defaultFilter, defaultPulse, NOTE_HIGH, NOTE_LOW, type Bar, type FilterChunk, type Note, type PulsePoint, type Shape } from './shape';
+import type { Instrument } from './song';
+import { WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
+import { freqOf } from './vibrato';
+
+/** Plays an instrument on a key for some frames, as the analyzer does */
+export type Tracer = (ins: Instrument, note: number, frames: number) => Trace;
+
+export interface Imported {
+  shape: Shape;
+  /** What didn't come across, in words */
+  gaps: string[];
+}
+
+/** The key traced, and another to tell played pitches from fixed ones */
+export const KEY = 48;
+const OTHER_KEY = 60;
+
+const GATE = 0x01;
+const PITCH_KEEP = 0x80;
+const SYNC = 0x02;
+const RING = 0x04;
+const TEST = 0x08;
+const OSCILLATORS = [WAVE_TRI, WAVE_SAW, WAVE_PULSE, WAVE_NOISE];
+/** How near a whole semitone a pitch must be to count as one */
+const WHOLE = 0.08;
+
+/**
+ * Where a table's run stops (its position going to 0), or where it starts
+ * repeating and the frame it would come back round. A repeat is the
+ * positions and what they set (`values`) coming round together: a row can
+ * sit on one position for many frames while what it sets keeps moving.
+ */
+export function runOf(pos: Uint8Array, ...values: ArrayLike<number>[]): { end: number; loop: number | null } {
+  const n = pos.length;
+  const stop = pos.indexOf(0);
+  if (stop >= 0) return { end: stop, loop: null };
+  const same = (a: number, b: number) => pos[a] === pos[b] && values.every((v) => v[a] === v[b]);
+  // The repeat that starts soonest (and of those the shortest), seen at
+  // least twice: two frames alike near the end are no repeat
+  let best: { end: number; loop: number } | null = null;
+  for (let period = 1; period * 3 <= n; period++) {
+    let from = n - period;
+    while (from > 0 && same(from - 1, from - 1 + period)) from--;
+    if (n - from >= period * 2 && (!best || from < best.loop)) best = { end: from + period, loop: from };
+  }
+  return best ?? { end: n, loop: null };
+}
+
+/**
+ * The corners of a line of values a frame apart: each straight stretch as
+ * long as every frame on it is within a unit of the line (the player drops
+ * pulse width's lowest bit, so a steady sweep reads as uneven steps).
+ */
+function corners(v: ArrayLike<number>, from: number, to: number, slack: number): PulsePoint[] {
+  const out: PulsePoint[] = [{ t: from, w: v[from] }];
+  let a = from;
+  while (a < to) {
+    let b = a + 1;
+    const straight = (z: number) => {
+      for (let f = a + 1; f < z; f++) if (Math.abs(v[a] + ((v[z] - v[a]) * (f - a)) / (z - a) - v[f]) > slack) return false;
+      return true;
+    };
+    while (b < to && straight(b + 1)) b++;
+    out.push({ t: b, w: v[b] });
+    a = b;
+  }
+  return out;
+}
+
+/** A line over frames [0, end) as points, with its repeat from `loop` (frames loop..end-1 going round) */
+function lineOf(v: ArrayLike<number>, end: number, loop: number | null, slack = 0): { points: PulsePoint[]; loop: number | null } {
+  if (loop === null) return { points: corners(v, 0, Math.max(0, end - 1), slack), loop: null };
+  // A shape's repeat runs from just after a point to the last point: one
+  // round on if the repeat starts on the very first frame
+  const period = end - loop;
+  const shift = loop === 0 ? period : 0;
+  const from = loop - 1 + shift;
+  const to = end - 1 + shift;
+  const points = corners(v, 0, to, slack);
+  if (!points.some((p) => p.t === from)) {
+    points.push({ t: from, w: v[from] });
+    points.sort((a, b) => a.t - b.t);
+  }
+  return { points, loop: points.findIndex((p) => p.t === from) };
+}
+
+/** Runs of frames in [from, to) where a value holds, skipping where it is null */
+function runs<T>(at: (f: number) => T | null, from: number, to: number): { start: number; end: number; value: T }[] {
+  const out: { start: number; end: number; value: T }[] = [];
+  for (let f = from; f < to; f++) {
+    const v = at(f);
+    const last = out[out.length - 1];
+    if (v === null) continue;
+    if (last && last.end === f && last.value === v) last.end = f + 1;
+    else out.push({ start: f, end: f + 1, value: v });
+  }
+  return out;
+}
+
+const COMMAND_NAMES: Record<number, string> = {
+  0x4: 'vibrato from the wave table',
+  0x7: 'sets the waveform by command',
+  0x8: 'switches pulse programs',
+  0x9: 'switches filter programs',
+  0xa: 'sets the filter routing by command',
+  0xb: 'sets the cutoff by command',
+  0xf: 'sets the volume',
+};
+
+/**
+ * Converts a song's instrument. `frames` is how long to play it for (the
+ * longer, the more of a slow repeat is seen).
+ */
+export function importInstrument(ins: Instrument, tables: { left: Uint8Array; right: Uint8Array }[], trace: Tracer, frames: number): Imported {
+  const gaps: string[] = [];
+  const [, pulsePtr, filterPtr, speedPtr] = ins.tables;
+  // Without its vibrato, for the pitches underneath; on another key, to tell fixed pitches
+  const plainIns: Instrument = { ...ins, tables: [ins.tables[0], pulsePtr, filterPtr, 0] };
+  const t = trace(plainIns, KEY, frames);
+  const other = trace(plainIns, OTHER_KEY, frames);
+
+  // The wave program: where it stops or repeats
+  const wave = runOf(t.pos[0], t.control, t.freq);
+  const end = Math.min(wave.end, frames);
+  const loop = wave.loop;
+
+  // Waveforms: a bar for each oscillator's runs
+  const bars: Bar[] = [];
+  for (const osc of OSCILLATORS) {
+    for (const r of runs((f) => (t.control[f] & osc ? true : null), 0, end)) bars.push({ wave: osc, start: r.start, end: r.end });
+  }
+  bars.sort((a, b) => a.start - b.start);
+  // After it stops, the player keeps the last waveform: held, unless that was silence
+  const hold = loop !== null || (end > 0 && (t.control[end - 1] & 0xf0) !== 0);
+
+  const used = (bit: number) => Array.from(t.control).some((c) => c & bit);
+  if (used(SYNC)) gaps.push('sync');
+  if (used(RING)) gaps.push('ring modulation');
+  if (Array.from(t.control).some((c, f) => f > 0 && c & TEST)) gaps.push('the test bit partway through');
+
+  // Letting go of the key itself: the gate going off and staying off
+  let release: number | null = null;
+  const off = Array.from(t.control).findIndex((c) => !(c & GATE));
+  if (off >= 0) {
+    release = Math.max(1, off);
+    if (Array.from(t.control).slice(off).some((c) => c & GATE)) gaps.push('the gate going back on after letting go');
+  }
+
+  // Pitch: fixed when another key plays the same, else from the key played
+  const span = Math.max(1, end);
+  const sameOnBoth = Array.from({ length: span }, (_, f) => t.freq[f] === other.freq[f]);
+  const fixed = sameOnBoth.every(Boolean);
+  if (!fixed && sameOnBoth.some(Boolean) && end > 0) gaps.push('pitches both fixed and from the key played');
+  const absolute = (f: number) => 12 * Math.log2(t.freq[f] / freqOf(0));
+  let fixedNote: number | null = null;
+  let semis = (f: number) => 12 * Math.log2(t.freq[f] / freqOf(KEY));
+  if (fixed && end > 0) {
+    const notes = Array.from({ length: end }, (_, f) => Math.round(absolute(f)));
+    const [lo, hi] = [Math.min(...notes), Math.max(...notes)];
+    fixedNote = Math.max(hi - NOTE_HIGH, Math.min(lo - NOTE_LOW, notes[0]));
+    const base = fixedNote;
+    semis = (f) => absolute(f) - base;
+  }
+  const notes: Note[] = [];
+  let cur = 0;
+  let outside = false;
+  const keep = (n: number) => {
+    if (n < NOTE_LOW || n > NOTE_HIGH) outside = true;
+    return Math.max(NOTE_LOW, Math.min(NOTE_HIGH, n));
+  };
+  const whole = (f: number) => Math.abs(semis(f) - Math.round(semis(f))) < WHOLE;
+  for (let f = 0; f < end; ) {
+    if (whole(f)) {
+      const n = keep(Math.round(semis(f)));
+      if (n !== cur) notes.push({ start: f, semis: n });
+      cur = n;
+      f++;
+      continue;
+    }
+    // Between semitones: a glide to where it lands
+    const from = f;
+    while (f < end && !whole(f)) f++;
+    if (f >= end) {
+      gaps.push('slides that don’t land on a note');
+      const n = keep(Math.round(semis(end - 1)));
+      notes.push({ start: from, semis: n, glide: Math.max(1, end - 1 - from) });
+      break;
+    }
+    const n = keep(Math.round(semis(f)));
+    notes.push({ start: from, semis: n, glide: f - from });
+    cur = n;
+    f++;
+  }
+  if (outside) gaps.push(`pitches beyond ${NOTE_LOW} to +${NOTE_HIGH} semitones`);
+  // With vibrato, setting the pitch it is already on starts the wobble again: those sets too
+  if (speedPtr) {
+    for (let f = 0; f < end; f++) {
+      const p = t.pos[0][f];
+      const right = p ? tables[0].right[p - 1] : PITCH_KEEP;
+      const left = p ? tables[0].left[p - 1] : 0;
+      // A row sets its pitch as it finishes (a delay row on its last frame)
+      const finishes = f === end - 1 || p !== t.pos[0][f + 1];
+      if (!finishes || right === PITCH_KEEP || left >= 0xf0) continue;
+      if (!notes.some((n) => n.start <= f && f <= n.start + (n.glide ?? 0))) {
+        const n = keep(Math.round(semis(f)));
+        notes.push({ start: f, semis: n });
+      }
+    }
+    notes.sort((a, b) => a.start - b.start);
+  }
+
+  // Vibrato, from its speed table row
+  let vibrato: Shape['vibrato'] = null;
+  if (speedPtr) {
+    const [left, right] = [tables[3].left[speedPtr - 1] ?? 0, tables[3].right[speedPtr - 1] ?? 0];
+    vibrato = { delay: ins.vibratoDelay, turn: left & 0x7f, even: (left & 0x80) !== 0, depth: right };
+  }
+
+  // Pulse width
+  let pulse = defaultPulse();
+  if (pulsePtr) {
+    const run = runOf(t.pos[1], t.pulse);
+    pulse = lineOf(t.pulse, Math.max(1, run.end), run.loop, 1);
+  } else if (bars.some((b) => b.wave === WAVE_PULSE)) gaps.push('pulse width left to the song');
+
+  // The filter
+  const filter = defaultFilter();
+  if (filterPtr) {
+    const run = runOf(t.pos[2], t.cutoff, t.routing, t.mode);
+    const fEnd = run.loop === null ? frames : run.end;
+    const on = (f: number) => (t.routing[f] & 7 ? t.mode[f] & 0x70 : null);
+    filter.types = runs(on, 0, fEnd).map((r): FilterChunk => ({ start: r.start, end: run.loop === null && r.end === fEnd ? Math.min(r.end, frames) : r.end, passband: r.value }));
+    const lineEnd = run.loop === null ? Math.max(1, Math.min(frames, lastChange(t.cutoff, t.routing) + 1)) : run.end;
+    filter.cutoff = lineOf(t.cutoff, lineEnd, run.loop);
+    const res = Array.from(t.routing, (r) => r >> 4);
+    filter.resonance = { points: steps(res, run.loop === null ? lineEnd : run.end + (run.loop === 0 ? run.end - run.loop : 0)), loop: null };
+    if (Array.from(t.routing).some((r) => r & 6)) gaps.push('filtering other voices');
+    if (new Set(Array.from(t.mode, (m) => m & 0x0f)).size > 1) gaps.push('volume changes');
+  }
+
+  // Envelope changes partway, and commands the shape has no place for
+  if (new Set(t.ad).size > 1 || new Set(t.sr).size > 1) gaps.push('envelope changes partway');
+  const commands = new Set<string>();
+  for (let f = 0; f < frames; f++) {
+    const p = t.pos[0][f];
+    const l = p ? tables[0].left[p - 1] : 0;
+    if (l >= 0xf0 && l < 0xff && COMMAND_NAMES[l & 0xf]) commands.add(COMMAND_NAMES[l & 0xf]);
+  }
+  gaps.push(...commands);
+  if (ins.firstWave !== 0x09) gaps.push(`a first frame of $${ins.firstWave.toString(16).padStart(2, '0')}`);
+  if (ins.gateTimer & 0x40) gaps.push('notes running on without letting go');
+  if ((ins.gateTimer & 0x3f) !== 2) gaps.push(`letting go ${ins.gateTimer & 0x3f} frames before a note`);
+
+  const shape: Shape = {
+    name: ins.name || 'Imported',
+    ad: ins.ad,
+    sr: ins.sr,
+    bars,
+    pulse,
+    notes,
+    waveLoop: loop,
+    hold,
+    vibrato,
+    filter,
+    fixedNote,
+    release,
+    hardRestart: !(ins.gateTimer & 0x80),
+  };
+  return { shape, gaps };
+}
+
+/** The last frame a value (or the routing) changes */
+function lastChange(v: ArrayLike<number>, w: ArrayLike<number>): number {
+  for (let f = v.length - 1; f > 0; f--) if (v[f] !== v[f - 1] || w[f] !== w[f - 1]) return f;
+  return 0;
+}
+
+/** A line that plays as these steps: a point either side of each change */
+function steps(v: number[], end: number): PulsePoint[] {
+  const out: PulsePoint[] = [{ t: 0, w: v[0] }];
+  for (let f = 1; f < end; f++) {
+    if (v[f] === v[f - 1]) continue;
+    if (out[out.length - 1].t !== f - 1) out.push({ t: f - 1, w: v[f - 1] });
+    out.push({ t: f, w: v[f] });
+  }
+  return out;
+}

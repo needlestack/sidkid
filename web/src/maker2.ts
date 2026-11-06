@@ -13,7 +13,8 @@ import { loadModel, loadNtsc, Player, saveModel, saveNtsc } from './engine/playe
 import { DEFAULT_SETTINGS, type Settings, type Status } from './engine/protocol';
 import { ATTACK_MS, DECAY_MS } from './adsr';
 import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
-import { noteName, type Instrument } from './song';
+import { noteName, parseSong, type Instrument } from './song';
+import { importInstrument, KEY as IMPORT_KEY, type Tracer } from './goatimport';
 import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
 import { filterScope, modeIcon } from './filtercurve';
@@ -264,8 +265,7 @@ function setKeyUp(f: number) {
   else state.keyUp = at;
 }
 
-function audition(): Audition {
-  const s = shape();
+function audition(s: Shape = shape()): Audition {
   const pulse = pulseProgram(s.bars, s.pulse, s.name);
   const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
   // Vibrato reads its speed from a row of the speed table, and glides from the rows after it
@@ -799,7 +799,15 @@ function renderGutter() {
     const fixed = shape().fixedNote;
     for (const semis of [24, 12, 0, -12]) {
       const label = fixed !== null ? noteName(fixed + semis) : semis === 0 ? 'played' : semitoneText(semis);
-      const row = add(noteY(semis) + SEMI / 2 - 7, 14, [label], `semi${semis === 0 ? ' pitch-from' : ''}`);
+      // Where the pitches go from: a capsule, to show it can be changed
+      let content: string | Node = label;
+      if (semis === 0) {
+        const chip = document.createElement('span');
+        chip.className = `pitch-from-chip${fixed !== null ? ' fixed' : ''}`;
+        chip.textContent = fixed !== null ? `fixed ${label}` : label;
+        content = chip;
+      }
+      const row = add(noteY(semis) + SEMI / 2 - 7, 14, [content], `semi${semis === 0 ? ' pitch-from' : ''}`);
       // Over where the pitches go from, a choice beside it: as played, or fixed
       if (semis === 0) {
         row.addEventListener('pointerenter', () => showChoice(row, pitchChoice));
@@ -1212,10 +1220,9 @@ const DEFAULT_WOBBLE: Wobble = { turn: 3, even: true, depth: 3 };
  * played silently with and without. Null if it never shows.
  */
 const startCache = new Map<string, number | null>();
-function vibratoStart(delay: number): number | null {
-  const s = shape();
+function vibratoStart(delay: number, s: Shape = shape()): number | null {
   if (!s.vibrato) return null;
-  const a = audition();
+  const a = audition(s);
   const frames = Math.min(TOTAL, delay * 2 + 60);
   const key = JSON.stringify([a.tables.map((t) => [Array.from(t.left), Array.from(t.right)]), a.instrument, delay, frames, ntsc]);
   if (startCache.has(key)) return startCache.get(key)!;
@@ -1229,17 +1236,17 @@ function vibratoStart(delay: number): number | null {
 }
 
 /** The delay setting whose vibrato starts nearest a frame. */
-function delayFor(frame: number): number {
+function delayFor(frame: number, s: Shape = shape()): number {
   let lo = 1;
   let hi = 255;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    const at = vibratoStart(mid);
+    const at = vibratoStart(mid, s);
     if (at !== null && at < frame) lo = mid + 1;
     else hi = mid;
   }
-  const before = lo > 1 ? vibratoStart(lo - 1) : null;
-  const here = vibratoStart(lo);
+  const before = lo > 1 ? vibratoStart(lo - 1, s) : null;
+  const here = vibratoStart(lo, s);
   if (before !== null && here !== null && frame - before < here - frame) return lo - 1;
   return lo;
 }
@@ -2738,6 +2745,66 @@ Analyzer.create()
   .then((a) => (analyzer = a))
   .catch((err) => toast(`Engine failed to start: ${err}`));
 
+// --- From GoatTracker songs ------------------------------------------------------
+
+/** How long an imported instrument is played to read its shape: long enough to see slow repeats come round */
+const IMPORT_FRAMES = 1200;
+
+/**
+ * A song's instruments as shapes, each with what didn't come across: its
+ * gaps, and where playing the shape differs from the original (a trace of
+ * each, compared frame by frame).
+ */
+function importSong(bytes: Uint8Array, only?: number): { name: string; gaps: string[]; differs: string[]; shape: Shape; traces?: Trace[] }[] {
+  if (!analyzer) return [];
+  const song = parseSong(bytes);
+  const a = analyzer;
+  const tracer: Tracer = (ins, note, frames) => a.trace(song.tables, ins, note, frames, settings);
+  const out = [];
+  for (let n = 1; n < song.instruments.length; n++) {
+    const ins = song.instruments[n];
+    if (!ins || !ins.tables[0] || (only !== undefined && n !== only)) continue;
+    const { shape: imported, gaps } = importInstrument(ins, song.tables, tracer, IMPORT_FRAMES);
+    const original = tracer(ins, IMPORT_KEY, IMPORT_FRAMES);
+    // The player counts vibrato's delay only on frames that don't set the
+    // pitch, so the same delay can start it elsewhere in the shape: start it
+    // where the original does
+    if (imported.vibrato) {
+      const plain = tracer({ ...ins, tables: [ins.tables[0], ins.tables[1], ins.tables[2], 0] }, IMPORT_KEY, IMPORT_FRAMES);
+      const from = original.freq.findIndex((f, i) => f !== plain.freq[i]);
+      if (from >= 0) imported.vibrato.delay = delayFor(from, imported);
+    }
+    const au = audition(imported);
+    const copy = a.trace(au.tables, au.instrument, IMPORT_KEY, IMPORT_FRAMES, settings);
+    out.push({ name: `${n}: ${ins.name}`, gaps, differs: differences(original, copy), shape: imported, ...(only !== undefined ? { traces: [original, copy] } : {}) });
+  }
+  return out;
+}
+
+/** Where two traces of a note part ways: what, and from when */
+function differences(a: Trace, b: Trace): string[] {
+  const out: string[] = [];
+  const first = (what: string, differ: (f: number) => boolean) => {
+    for (let f = 0; f < a.frames; f++) {
+      if (differ(f)) {
+        out.push(`${what} from frame ${f}`);
+        return;
+      }
+    }
+  };
+  first('waveform', (f) => (a.control[f] & 0xf1) !== (b.control[f] & 0xf1));
+  first('pitch', (f) => Math.abs(12 * Math.log2((a.freq[f] || 1) / (b.freq[f] || 1))) > 0.05);
+  // (within 2 of 4096: a straight sweep for one whose steps alternate a little)
+  first('pulse width', (f) => !!(a.control[f] & 0x40) && Math.abs(a.pulse[f] - b.pulse[f]) > 2);
+  const filtered = (t: Trace, f: number) => (t.routing[f] & 7) !== 0;
+  first('filtering', (f) => filtered(a, f) !== filtered(b, f));
+  first('filter type', (f) => filtered(a, f) && (a.mode[f] & 0x70) !== (b.mode[f] & 0x70));
+  first('cutoff', (f) => filtered(a, f) && a.cutoff[f] !== b.cutoff[f]);
+  first('resonance', (f) => filtered(a, f) && a.routing[f] >> 4 !== b.routing[f] >> 4);
+  first('envelope', (f) => a.ad[f] !== b.ad[f] || a.sr[f] !== b.sr[f]);
+  return out;
+}
+
 // For scripts/browsertest.mjs
 Object.assign(window, {
   maker2: {
@@ -2747,6 +2814,7 @@ Object.assign(window, {
     audition,
     ready: () => analyzer !== null,
     status: () => lastStatus,
+    importSong,
     /** Sets the key the traces play */
     setKey: (note: number) => (test.note = note),
   },

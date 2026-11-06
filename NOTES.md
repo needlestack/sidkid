@@ -150,4 +150,12 @@ zoomable timeline, aiming for a GarageBand feel.
   (wave cmd 1/2) by a calculated speed row (left $80, right = shift: a fraction of the
   semitone above the last note set), so it is the same on every key. One row per glide frame.
   `waveProgram` returns the speed rows it used; the audition puts vibrato's row first.
-- Next: the GoatTracker importer (.sng instruments into maker2), to find the gaps.
+- Importer (`goatimport.ts`, `importSong` on the maker2 hook): plays each song instrument
+  silently and reads the shape off the trace (loops = table positions *and* values repeating,
+  the earliest-starting repeat wins); then traces the shape and compares frame by frame.
+  Vibrato delay is re-searched so it starts where the original's does; pitch re-sets kept
+  for vibrato (a delay row sets its pitch on its last frame). `node scripts/importsurvey.mjs`
+  surveys the examples: 160/226 play the same. No Import button yet (loaded things must
+  load as they are). Biggest gaps: drum+instrument combos (fixed pitch per step, 48),
+  drum pitch range beyond -12..+24 (17 more), first-frame waveform ($19 mostly, 34),
+  sync/ring (27), test bit mid-note (8).
