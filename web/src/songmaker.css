@@ -239,6 +239,15 @@
   margin-left: auto;
 }
 
+/* Asking: click again to remove */
+.track-remove.asking {
+  background: var(--playhead);
+  border-color: var(--playhead);
+  color: #fff;
+  font-size: 11px;
+  padding: 0 6px;
+}
+
 .add-track {
   margin: 8px;
   align-self: start;
@@ -344,29 +353,26 @@ html.drag-cursor * {
 
 .clip2-body {
   fill: hsl(var(--h) var(--clip-s) var(--clip-l));
-  stroke: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
-}
-
-.clip2.open .clip2-body {
-  stroke: var(--text);
-  stroke-width: 2;
 }
 
 .clip2.muted {
   opacity: 0.45;
 }
 
-/* A repeat: lighter, with the piece's corners */
+/* The repeats: lighter, inside the one outline */
 .clip2-repeat {
   fill: hsl(var(--h) var(--clip-s) var(--clip-l));
   fill-opacity: 0.45;
-  stroke: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
-  stroke-opacity: 0.55;
 }
 
-.clip2.open .clip2-repeat {
+.clip2-outline {
+  fill: none;
+  stroke: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
+}
+
+.clip2.open .clip2-outline {
   stroke: var(--text);
-  stroke-opacity: 0.5;
+  stroke-width: 2;
 }
 
 .clip2-note {
@@ -534,22 +540,40 @@ html.drag-cursor * {
   pointer-events: none;
 }
 
-.roll-key {
-  fill: var(--surface);
+/* The piano beside the editor */
+.piano-bed {
+  fill: var(--step-bar);
+}
+
+.piano-white {
+  fill: #fbfbfd;
+  stroke: #b9b5cc;
+  stroke-width: 0.6;
   cursor: pointer;
 }
 
-.roll-key.black {
-  fill: var(--surface-2);
+.piano-black {
+  fill: #2a2838;
+  cursor: pointer;
 }
 
-.roll-key:hover {
-  fill: var(--accent-soft);
+.piano-white:hover {
+  fill: #ecebf6;
 }
 
-.roll-key-label {
-  fill: var(--muted);
-  font-size: 10px;
+.piano-black:hover {
+  fill: #47445c;
+}
+
+.piano-white.down,
+.piano-black.down {
+  fill: var(--accent);
+}
+
+.piano-label {
+  fill: #6c6880;
+  font-size: 9px;
+  font-weight: 600;
   pointer-events: none;
 }
 

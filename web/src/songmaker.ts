@@ -295,8 +295,10 @@ function animate() {
       movePlayhead();
       return;
     }
-    playhead = toStep(f);
-    movePlayhead(true);
+    if (!scrubbing) {
+      playhead = toStep(f);
+      movePlayhead(true);
+    }
     // Counting in: the beats to go, in place of the position
     const ahead = -heardSeqFrame();
     const beat = song().stepsPerBeat * framesPerStep(song(), FPS);
@@ -475,7 +477,18 @@ function renderHeads() {
     remove.title = 'Remove this track';
     remove.setAttribute('aria-label', 'Remove this track');
     remove.disabled = song().tracks.length < 2;
-    remove.addEventListener('click', () => removeTrack(i));
+    // A second click removes it: the first asks
+    remove.addEventListener('click', () => {
+      if (remove.classList.contains('asking')) return removeTrack(i);
+      remove.classList.add('asking');
+      remove.textContent = 'Remove?';
+      remove.title = 'Click again to remove this track and its clips';
+    });
+    remove.addEventListener('pointerleave', () => {
+      remove.classList.remove('asking');
+      remove.textContent = '×';
+      remove.title = 'Remove this track';
+    });
     const row = document.createElement('div');
     row.className = 'track-row';
     const voiceLabel = document.createElement('span');
@@ -573,13 +586,16 @@ function drawClip(t: Track, ti: number, clip: Clip, k: number, heard: { start: n
   g.style.setProperty('--h', String(hue(t)));
   const x0 = ax(clip.start);
   const w = Math.max(4, ax(clip.span));
-  // The piece itself, then each repeat of it: a lighter copy with its own corners
+  // One outline round the piece and its repeats, notched where each repeat
+  // starts (no line down: it's all one clip); the piece itself darker
   const piece = Math.max(4, ax(Math.min(clip.length, clip.span)));
-  el('rect', { x: x0 + 0.5, y: top + 0.5, width: piece - 1, height: h - 1, rx: 5, class: 'clip2-body' }, g);
-  for (let at = clip.length; at < clip.span; at += clip.length) {
-    const len = ax(Math.min(clip.length, clip.span - at));
-    el('rect', { x: x0 + ax(at) + 1.5, y: top + 0.5, width: Math.max(2, len - 2), height: h - 1, rx: 5, class: 'clip2-repeat' }, g);
-  }
+  const repeats: number[] = [];
+  for (let at = clip.length; at < clip.span; at += clip.length) repeats.push(x0 + ax(at));
+  const outline = clipOutline(x0 + 0.5, top + 0.5, w - 1, h - 1, repeats);
+  g.dataset.repeats = String(repeats.length);
+  if (repeats.length) el('path', { d: outline, class: 'clip2-repeat' }, g);
+  el('rect', { x: x0 + 0.5, y: top + 0.5, width: piece - 1, height: h - 1, rx: CLIP_R, class: 'clip2-body' }, g);
+  el('path', { d: outline, class: 'clip2-outline' }, g);
   // Its notes, scaled to the clip's range of pitch
   const notes = clipNotes(clip);
   if (notes.length) {
@@ -622,6 +638,24 @@ function isDouble(e: PointerEvent): boolean {
   const double = e.timeStamp - lastPress.time < 400 && Math.hypot(e.clientX - lastPress.x, e.clientY - lastPress.y) < 6;
   Object.assign(lastPress, { time: double ? 0 : e.timeStamp, x: e.clientX, y: e.clientY });
   return double;
+}
+
+const CLIP_R = 5;
+
+/**
+ * A clip's outline: a rounded box, with a notch in its top and bottom edges
+ * at each repeat (the corners of the pieces either side, meeting).
+ */
+function clipOutline(x: number, y: number, w: number, h: number, notches: number[]): string {
+  const r = Math.min(CLIP_R, w / 2, h / 2);
+  // A notch is two corners, so no wider than the room either side of it
+  const cuts = notches.map((at, i) => ({ at, r: Math.max(0, Math.min(r, (at - (notches[i - 1] ?? x)) / 2, ((notches[i + 1] ?? x + w) - at) / 2)) }));
+  const arc = (rr: number, toX: number, toY: number) => `A${rr},${rr} 0 0 1 ${toX},${toY}`;
+  let d = `M${x},${y + r}${arc(r, x + r, y)}`;
+  for (const c of cuts) d += `L${c.at - c.r},${y}${arc(c.r, c.at, y + c.r)}${arc(c.r, c.at + c.r, y)}`;
+  d += `L${x + w - r},${y}${arc(r, x + w, y + r)}L${x + w},${y + h - r}${arc(r, x + w - r, y + h)}`;
+  for (const c of [...cuts].reverse()) d += `L${c.at + c.r},${y + h}${arc(c.r, c.at, y + h - c.r)}${arc(c.r, c.at - c.r, y + h)}`;
+  return `${d}L${x + r},${y + h}${arc(r, x, y + h - r)}Z`;
 }
 
 function title(text: string) {
@@ -686,7 +720,7 @@ arr.addEventListener('pointerdown', (e) => {
       dragCursor('ew-resize');
     } else {
       arrDrag = { kind: 'seek' };
-      seek(stepAt(p.x));
+      scrubTo(stepAt(p.x));
     }
     return;
   }
@@ -725,7 +759,7 @@ arr.addEventListener('pointermove', (e) => {
   const s = song();
   if (!d) return;
   const by = Math.round((p.x - ('x0' in d ? d.x0 : p.x)) / view.zoom / snap()) * snap();
-  if (d.kind === 'seek') seek(stepAt(p.x));
+  if (d.kind === 'seek') scrubTo(stepAt(p.x));
   else if (d.kind === 'cycle-new') {
     const at = Math.round(stepAt(p.x) / snap()) * snap();
     s.cycle = { start: Math.min(d.from, at), end: Math.max(d.from, at, Math.min(d.from, at) + snap()) };
@@ -779,6 +813,7 @@ const endArrDrag = () => {
   arrDrag = null;
   dragCursor(null);
   if (!d) return;
+  if (d.kind === 'seek') endScrub();
   if (d.kind === 'clip' && d.moved) changed();
   else if (d.kind === 'cycle' || d.kind === 'cycle-new') changed();
 };
@@ -882,6 +917,19 @@ function renderZoom() {
   $('zoom-label').textContent = `${bars < 10 ? bars.toFixed(1) : Math.round(bars)} bars shown`;
 }
 
+/** Dragging along a ruler: the playhead follows, and playing goes on from where it's let go */
+let scrubbing = false;
+function scrubTo(step: number) {
+  scrubbing = true;
+  playhead = Math.max(0, step);
+  movePlayhead();
+}
+function endScrub() {
+  if (!scrubbing) return;
+  scrubbing = false;
+  if (transport.playing) void play(transport.recording);
+}
+
 function seek(step: number) {
   playhead = Math.max(0, step);
   if (transport.playing) {
@@ -949,14 +997,7 @@ function renderEditor() {
   }
   if (band) el('rect', { x: Math.min(band.x0, band.x1), y: Math.min(band.y0, band.y1), width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0), class: 'roll-band' }, roll);
   renderRollRuler(width, shown);
-  // The note names alongside
-  rollKeys.setAttribute('width', String(KEYS_W));
-  rollKeys.setAttribute('height', String(height));
-  rollKeys.replaceChildren();
-  for (let n = LOWEST; n <= HIGHEST; n++) {
-    el('rect', { x: 0, y: ry(n), width: KEYS_W, height: ROW, class: `roll-key${BLACK.includes(n % 12) ? ' black' : ''}`, 'data-key': n }, rollKeys);
-    if (n % 12 === 0) el('text', { x: KEYS_W - 5, y: ry(n) + ROW - 2, class: 'roll-key-label', 'text-anchor': 'end' }, rollKeys).textContent = noteName(n).replace('-', '');
-  }
+  drawPiano(height);
   movePlayhead();
 }
 
@@ -985,12 +1026,57 @@ function renderRollRuler(width: number, shown: number) {
   }
 }
 
-// Clicking the editor's ruler moves the playhead there
-rollRuler.addEventListener('pointerdown', (e) => {
+// The editor's ruler moves the playhead: click, or drag to scrub
+const rulerStep = (e: PointerEvent) => {
   const r = rollRuler.getBoundingClientRect();
-  const step = Math.max(0, Math.round((e.clientX - r.left - KEYS_PAD) / view.rollZoom));
-  seek((openClip?.start ?? 0) + step);
+  return (openClip?.start ?? 0) + Math.max(0, (e.clientX - r.left - KEYS_PAD) / view.rollZoom);
+};
+let rulerDown = false;
+rollRuler.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  rulerDown = true;
+  rollRuler.setPointerCapture(e.pointerId);
+  dragCursor('ew-resize');
+  scrubTo(rulerStep(e));
 });
+rollRuler.addEventListener('pointermove', (e) => rulerDown && scrubTo(rulerStep(e)));
+const rulerUp = () => {
+  if (!rulerDown) return;
+  rulerDown = false;
+  dragCursor(null);
+  endScrub();
+};
+rollRuler.addEventListener('pointerup', rulerUp);
+rollRuler.addEventListener('pointercancel', rulerUp);
+
+/**
+ * A piano down the editor's left, its keys on the rows of their notes: white
+ * keys meet halfway along the black keys between them, as on a real one.
+ */
+function drawPiano(height: number) {
+  rollKeys.setAttribute('width', String(KEYS_W));
+  rollKeys.setAttribute('height', String(height));
+  rollKeys.replaceChildren();
+  el('rect', { x: 0, y: 0, width: KEYS_W, height, class: 'piano-bed' }, rollKeys);
+  const black = (n: number) => BLACK.includes(((n % 12) + 12) % 12);
+  for (let n = LOWEST; n <= HIGHEST; n++) {
+    if (black(n)) continue;
+    const top = black(n + 1) ? ry(n + 1) + ROW / 2 : ry(n);
+    const bottom = black(n - 1) ? ry(n - 1) + ROW / 2 : ry(n) + ROW;
+    el('rect', { x: 0.5, y: top + 0.5, width: KEYS_W - 1, height: bottom - top - 1, rx: 2, class: 'piano-white', 'data-key': n }, rollKeys);
+    if (n % 12 === 0) el('text', { x: KEYS_W - 4, y: ry(n) + ROW - 2, class: 'piano-label', 'text-anchor': 'end' }, rollKeys).textContent = noteName(n).replace('-', '');
+  }
+  for (let n = LOWEST; n <= HIGHEST; n++) {
+    if (black(n)) el('rect', { x: 0, y: ry(n) + 1, width: KEYS_W * 0.6, height: ROW - 2, rx: 1.5, class: 'piano-black', 'data-key': n }, rollKeys);
+  }
+  lightPiano();
+}
+
+/** The editor's piano shows the notes the keys are playing */
+function lightPiano() {
+  const sounding = new Set([...held.values()].map((h) => h.note));
+  for (const key of rollKeys.querySelectorAll<SVGElement>('[data-key]')) key.classList.toggle('down', sounding.has(Number(key.dataset.key)));
+}
 
 /** Scrolls the editor to the clip's notes, or around C-3 */
 function centreRoll() {
@@ -1353,6 +1439,7 @@ function renderKeyboard() {
     board.addEventListener('pointercancel', end);
   }
   const sounding = new Set([...held.values()].map((h) => h.note));
+  lightPiano();
   const labels = $('key-labels');
   labels.replaceChildren();
   for (const key of board.querySelectorAll<HTMLElement>('.key')) {

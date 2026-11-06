@@ -865,13 +865,30 @@ try {
   const repeated = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks[1].clips.map((c) => [c.start, c.length, c.span])));
   report(repeated === '[[16,16,32]]', 'song clip repeats', repeated);
 
-  // Repeats are drawn as lighter copies; the length handle stays at the end of the piece itself
+  // One outline, notched top and bottom where the repeat starts; the length handle at the end of the piece itself
   const drawn = await sm.evaluate(() => {
     const piece = document.querySelector('.clip2-body').getBoundingClientRect();
     const handle = document.querySelector('.clip2-extend .clip2-edge').getBoundingClientRect();
-    return `${document.querySelectorAll('.clip2-repeat').length} ${Math.abs(handle.right - piece.right) <= 1 ? 'at its end' : handle.right - piece.right}`;
+    const arcs = (document.querySelector('.clip2-outline').getAttribute('d').match(/A/g) ?? []).length;
+    return `${document.querySelector('[data-repeats]').dataset.repeats} repeat, ${arcs} arcs, ${Math.abs(handle.right - piece.right) <= 1 ? 'handle at its end' : handle.right - piece.right}`;
   });
-  report(drawn === '1 at its end', 'song repeats drawn apart', drawn);
+  report(drawn === '1 repeat, 8 arcs, handle at its end', 'song repeats drawn in one outline', drawn);
+
+  // The editor's piano lights the key that's down
+  await sm.keyboard.down('d');
+  const lit = await sm.evaluate(() => [...document.querySelectorAll('#roll-keys .down')].map((k) => k.dataset.key).join(','));
+  await sm.keyboard.up('d');
+  const unlit = await sm.evaluate(() => document.querySelectorAll('#roll-keys .down').length);
+  report(lit === '40' && unlit === 0, 'song piano lights up', `${lit} then ${unlit}`);
+
+  // Dragging along the editor's ruler scrubs the playhead (the clip starts on bar 2)
+  const rr = await sm.$eval('#roll-ruler', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.move(rr.x + 8 + 2, rr.y + 10);
+  await sm.mouse.down();
+  await sm.mouse.move(rr.x + 8 + 22 * 4 + 2, rr.y + 10, { steps: 4 });
+  const scrubbed = await sm.evaluate(() => document.getElementById('position').textContent);
+  await sm.mouse.up();
+  report(scrubbed === '2.2.1', 'song scrubs the playhead', scrubbed);
 
   // Zooming out and back in keeps the song in view
   for (let i = 0; i < 8; i++) await sm.click('#zoom-out');
@@ -914,6 +931,17 @@ try {
   await sm.waitForFunction(() => window.songMaker?.ready());
   const was = await sm.evaluate(() => `${window.songMaker.song().bpm} ${document.getElementById('tempo').value}`);
   report(was === '93.8 93.8', 'song keeps an old tempo', was);
+
+  // Removing a track takes a second click
+  await sm.click('.track-remove');
+  const asked = await sm.evaluate(() => `${window.songMaker.song().tracks.length} ${document.querySelector('.track-remove').textContent}`);
+  await sm.click('.track-remove');
+  const removed = await sm.evaluate(() => window.songMaker.song().tracks.length);
+  await sm.keyboard.down('Meta');
+  await sm.keyboard.press('z');
+  await sm.keyboard.up('Meta');
+  const back = await sm.evaluate(() => window.songMaker.song().tracks.length);
+  report(asked === '3 Remove?' && removed === 2 && back === 3, 'song removes a track on a second click', `${asked}, ${removed}, ${back}`);
 
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
   await colorScheme(sm, 'dark');
