@@ -934,9 +934,7 @@ try {
   const was = await sm.evaluate(() => `${window.songMaker.song().bpm} ${document.getElementById('tempo').value}`);
   report(was === '93.8 93.8', 'song keeps an old tempo', was);
 
-  // Removing a track takes a second click
-  await sm.click('.track-remove');
-  const asked = await sm.evaluate(() => `${window.songMaker.song().tracks.length} ${document.querySelector('.track-remove').textContent}`);
+  // × removes a track, ⌘Z brings it back with its clip still open; Space on a focused button plays rather than pressing it
   await sm.click('.track-remove');
   const removed = await sm.evaluate(() => window.songMaker.song().tracks.length);
   await sm.keyboard.down('Meta');
@@ -944,7 +942,12 @@ try {
   await sm.keyboard.up('Meta');
   const back = await sm.evaluate(() => window.songMaker.song().tracks.length);
   const openAfterUndo = await sm.evaluate(() => window.songMaker.openClip() !== null);
-  report(asked === '3 Remove?' && removed === 2 && back === 3 && openAfterUndo, 'song removes a track on a second click', `${asked}, ${removed}, ${back}, ${openAfterUndo ? 'clip still open' : 'clip closed'}`);
+  await sm.focus('.track-remove');
+  await sm.keyboard.press(' ');
+  await sm.waitForFunction(() => window.songMaker.playing(), { timeout: 2000 }).catch(() => {});
+  const spaced = await sm.evaluate(() => `${window.songMaker.song().tracks.length} ${window.songMaker.playing()}`);
+  await sm.keyboard.press(' ');
+  report(removed === 2 && back === 3 && openAfterUndo && spaced === '3 true', 'song removes a track, Space plays', `${removed}, ${back}, ${openAfterUndo ? 'clip still open' : 'clip closed'}, space: ${spaced}`);
 
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
   await colorScheme(sm, 'dark');

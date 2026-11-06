@@ -239,15 +239,6 @@
   margin-left: auto;
 }
 
-/* Asking: click again to remove */
-.track-remove.asking {
-  background: var(--playhead);
-  border-color: var(--playhead);
-  color: #fff;
-  font-size: 11px;
-  padding: 0 6px;
-}
-
 .add-track {
   margin: 8px;
   align-self: start;

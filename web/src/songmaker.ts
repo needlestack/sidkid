@@ -492,18 +492,7 @@ function renderHeads() {
     remove.title = 'Remove this track';
     remove.setAttribute('aria-label', 'Remove this track');
     remove.disabled = song().tracks.length < 2;
-    // A second click removes it: the first asks
-    remove.addEventListener('click', () => {
-      if (remove.classList.contains('asking')) return removeTrack(i);
-      remove.classList.add('asking');
-      remove.textContent = 'Remove?';
-      remove.title = 'Click again to remove this track and its clips';
-    });
-    remove.addEventListener('pointerleave', () => {
-      remove.classList.remove('asking');
-      remove.textContent = '×';
-      remove.title = 'Remove this track';
-    });
+    remove.addEventListener('click', () => removeTrack(i));
     const row = document.createElement('div');
     row.className = 'track-row';
     const voiceLabel = document.createElement('span');
@@ -1524,7 +1513,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.repeat) return;
-  if (e.key === ' ' && !(e.target as HTMLElement).matches('button, select')) {
+  // Space plays and stops wherever the focus is (not pressing a focused button or opening a menu)
+  if (e.key === ' ') {
     e.preventDefault();
     if (transport.playing) stop();
     else void play();
