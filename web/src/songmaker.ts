@@ -573,10 +573,12 @@ function drawClip(t: Track, ti: number, clip: Clip, k: number, heard: { start: n
   g.style.setProperty('--h', String(hue(t)));
   const x0 = ax(clip.start);
   const w = Math.max(4, ax(clip.span));
-  el('rect', { x: x0 + 0.5, y: top + 0.5, width: w - 1, height: h - 1, rx: 5, class: 'clip2-body' }, g);
-  // Repeats: a notch where each pass starts
+  // The piece itself, then each repeat of it: a lighter copy with its own corners
+  const piece = Math.max(4, ax(Math.min(clip.length, clip.span)));
+  el('rect', { x: x0 + 0.5, y: top + 0.5, width: piece - 1, height: h - 1, rx: 5, class: 'clip2-body' }, g);
   for (let at = clip.length; at < clip.span; at += clip.length) {
-    el('path', { d: `M${x0 + ax(at)},${top + 1}v${h - 2}`, class: 'clip2-notch' }, g);
+    const len = ax(Math.min(clip.length, clip.span - at));
+    el('rect', { x: x0 + ax(at) + 1.5, y: top + 0.5, width: Math.max(2, len - 2), height: h - 1, rx: 5, class: 'clip2-repeat' }, g);
   }
   // Its notes, scaled to the clip's range of pitch
   const notes = clipNotes(clip);
@@ -592,11 +594,16 @@ function drawClip(t: Track, ti: number, clip: Clip, k: number, heard: { start: n
       el('rect', { x: ax(n.start) + 0.5, y: ny(n.note) - 1.5, width: Math.max(1.5, ax(n.length) - 1), height: 3, rx: 1, class: `clip2-note${n.start >= clip.start + clip.length ? ' again' : ''}${stolen ? ' stolen' : ''}` }, g);
     }
   }
-  // Pull handles: the length (lower right) and the repeat (upper right)
-  el('rect', { x: x0 + w - EDGE, y: top + h / 2, width: EDGE, height: h / 2, class: 'clip2-edge', 'data-edge': 'length' }, g).append(title('Drag to change the length'));
+  // Pull handles: the piece's length (its lower right) and the repeat (the clip's upper right)
+  const right = x0 + piece;
+  const extend = el('g', { class: 'clip2-extend', 'data-edge': 'length' }, g);
+  el('rect', { x: right - EDGE * 2, y: top + h / 2, width: EDGE * 2, height: h / 2, class: 'clip2-edge' }, extend);
+  const ey = top + h - 9;
+  el('path', { d: `M${right - 12},${ey}h7m-2.6,-2.6l2.6,2.6l-2.6,2.6M${right - 3.5},${ey - 4}v8`, class: 'clip2-icon' }, extend);
+  extend.append(title(clip.span > clip.length ? 'Drag to change the length of the piece that repeats' : 'Drag to change the length'));
   const loop = el('g', { class: 'clip2-loop', 'data-edge': 'span' }, g);
   el('rect', { x: x0 + w - EDGE * 2, y: top, width: EDGE * 2, height: h / 2, class: 'clip2-edge' }, loop);
-  el('path', { d: `M${x0 + w - 11},${top + 9}a4,4 0 1 1 1.5,3.1m-1.5,-3.1l-1.4,-2.6m1.4,2.6l2.6,-1.3`, class: 'clip2-loop-icon' }, loop);
+  el('path', { d: `M${x0 + w - 11},${top + 9}a4,4 0 1 1 1.5,3.1m-1.5,-3.1l-1.4,-2.6m1.4,2.6l2.6,-1.3`, class: 'clip2-icon' }, loop);
   loop.append(title('Drag to repeat'));
 }
 

@@ -356,9 +356,17 @@ html.drag-cursor * {
   opacity: 0.45;
 }
 
-.clip2-notch {
+/* A repeat: lighter, with the piece's corners */
+.clip2-repeat {
+  fill: hsl(var(--h) var(--clip-s) var(--clip-l));
+  fill-opacity: 0.45;
   stroke: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
-  stroke-dasharray: 3 3;
+  stroke-opacity: 0.55;
+}
+
+.clip2.open .clip2-repeat {
+  stroke: var(--text);
+  stroke-opacity: 0.5;
 }
 
 .clip2-note {
@@ -366,7 +374,7 @@ html.drag-cursor * {
 }
 
 .clip2-note.again {
-  opacity: 0.55;
+  opacity: 0.4;
 }
 
 /* Another track on the voice has it here */
@@ -379,7 +387,7 @@ html.drag-cursor * {
   cursor: ew-resize;
 }
 
-.clip2-loop-icon {
+.clip2-icon {
   fill: none;
   stroke: hsl(var(--h) 60% var(--clip-ink-l));
   stroke-width: 1.4;
@@ -388,8 +396,7 @@ html.drag-cursor * {
   pointer-events: none;
 }
 
-.clip2:hover .clip2-loop-icon,
-.clip2-loop:hover .clip2-loop-icon {
+.clip2:hover .clip2-icon {
   opacity: 0.8;
 }
 

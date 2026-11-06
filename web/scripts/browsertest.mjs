@@ -865,6 +865,14 @@ try {
   const repeated = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks[1].clips.map((c) => [c.start, c.length, c.span])));
   report(repeated === '[[16,16,32]]', 'song clip repeats', repeated);
 
+  // Repeats are drawn as lighter copies; the length handle stays at the end of the piece itself
+  const drawn = await sm.evaluate(() => {
+    const piece = document.querySelector('.clip2-body').getBoundingClientRect();
+    const handle = document.querySelector('.clip2-extend .clip2-edge').getBoundingClientRect();
+    return `${document.querySelectorAll('.clip2-repeat').length} ${Math.abs(handle.right - piece.right) <= 1 ? 'at its end' : handle.right - piece.right}`;
+  });
+  report(drawn === '1 at its end', 'song repeats drawn apart', drawn);
+
   // Zooming out and back in keeps the song in view
   for (let i = 0; i < 8; i++) await sm.click('#zoom-out');
   for (let i = 0; i < 10; i++) await sm.click('#zoom-in');
