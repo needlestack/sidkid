@@ -2076,22 +2076,23 @@ $('import-song').addEventListener('click', async () => {
   }
   const index = (await (await fetch('./examples/index.json')).json()) as Example[];
   const list = $('import-songs');
+  // (only the songs that come across as they play)
   list.replaceChildren(
-    ...[...index]
-      .sort((a, b) => Number(!!b.importable) - Number(!!a.importable))
+    ...index
+      .filter((ex) => ex.importable)
       .map((ex) => {
         const li = document.createElement('li');
         const b = document.createElement('button');
-        b.disabled = !ex.importable;
         const title = document.createElement('b');
         title.textContent = ex.title;
         const by = document.createElement('span');
         by.className = 'by';
-        by.textContent = ex.importable ? ex.author : `Not yet: ${(ex.needs ?? []).slice(0, 4).join(', ') || 'plays differently'}`;
+        by.textContent = ex.author;
         b.append(title, by);
-        b.addEventListener('click', () => {
+        b.addEventListener('click', async () => {
           importList.hidden = true;
-          void importExample(ex);
+          const bytes = await (await fetch(`./examples/${ex.file}`)).arrayBuffer();
+          importBytes(bytes, ex.title, ex.settings);
         });
         li.append(b);
         return li;
@@ -2101,23 +2102,41 @@ $('import-song').addEventListener('click', async () => {
 });
 $('import-close').addEventListener('click', () => (importList.hidden = true));
 
-/** Imports an example song as a new song, its instruments joining the Instrument Maker's */
-async function importExample(ex: Example) {
+// A song file of one's own
+const importInput = $('import-file-input') as HTMLInputElement;
+$('import-file').addEventListener('click', () => importInput.click());
+importInput.addEventListener('change', async () => {
+  const file = importInput.files?.[0];
+  importInput.value = '';
+  if (!file) return;
+  importList.hidden = true;
+  importBytes(await file.arrayBuffer(), file.name.replace(/\.sng$/i, ''), {}, true);
+});
+
+/**
+ * Imports a GoatTracker song as a new song, its instruments joining the
+ * Instrument Maker's. One that wouldn't play as it does in GoatTracker
+ * isn't imported (a file's, checked here; the examples' by the tests).
+ */
+function importBytes(bytes: ArrayBuffer, name: string, settings: Partial<Settings> = {}, check = false) {
   if (!analyzer) return;
-  const bytes = await (await fetch(`./examples/${ex.file}`)).arrayBuffer();
-  const imp = importGoatSong(analyzer, bytes, { ...DEFAULT_SETTINGS, ...ex.settings }, ex.title);
+  const imp = importGoatSong(analyzer, bytes, { ...DEFAULT_SETTINGS, ...settings }, name);
   if (!imp) {
-    toast(`${ex.title} couldn't be read`);
+    toast(`${name} isn't a GoatTracker song`);
+    return;
+  }
+  if (check && imp.gaps.length) {
+    toast(`${name} can't come across as it plays yet: it has ${imp.gaps.slice(0, 4).join(', ')}`);
     return;
   }
   addInstruments(imp.instruments, INSTRUMENT_SECONDS * FPS);
   instruments = loadInstruments(INSTRUMENT_SECONDS * FPS);
   byId = new Map(instruments.map((s) => [s.id!, s]));
   beforeSongs();
-  view.songs.push({ ...imp.song, name: ex.title });
+  view.songs.push(imp.song);
   view.current = view.songs.length - 1;
   switchedSong();
-  toast(`Imported ${ex.title}: its ${imp.instruments.length} instruments are in the Instrument Maker too`);
+  toast(`Imported ${imp.song.name}: its ${imp.instruments.length} instruments are in the Instrument Maker too`);
 }
 
 // The computer keys play the selected track, as in the instrument maker

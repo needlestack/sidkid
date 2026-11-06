@@ -7,7 +7,7 @@
 //    screenshots to build/webtest/.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { preview } from 'vite';
 import puppeteer from 'puppeteer-core';
 
@@ -1346,6 +1346,39 @@ try {
     return name;
   });
   report(!reExported.gaps.length && !Object.keys(reExported.differ).length && downloaded === 'Everlasting Annoyance.sng', 'song exports an imported song', `${JSON.stringify(reExported.differ)} ${downloaded}`);
+
+  // Only the songs that come across are offered; a file of one's own imports too, and comes back as it was exported
+  const offered = await sm.evaluate(async () => {
+    document.getElementById('import-song').click();
+    const index = await (await fetch('./examples/index.json')).json();
+    await new Promise((r) => setTimeout(r, 300));
+    const shown = document.querySelectorAll('#import-songs li').length;
+    document.getElementById('import-close').click();
+    return `${shown} of ${index.filter((e) => e.importable).length}`;
+  });
+  const roundFrames = 600;
+  const exportedBytes = await sm.evaluate(async () => {
+    let href = null;
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      href = this.href;
+    };
+    document.getElementById('export-song').click();
+    HTMLAnchorElement.prototype.click = click;
+    return Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer()));
+  });
+  const roundFile = `${OUT}/roundtrip.sng`;
+  writeFileSync(roundFile, Uint8Array.from(exportedBytes));
+  const exportedPlays = await sm.evaluate((n) => JSON.stringify(window.songMaker.trace(n)), roundFrames);
+  const songsBeforeFile = await sm.evaluate(() => document.getElementById('song-pick').options.length);
+  await (await sm.$('#import-file-input')).uploadFile(roundFile);
+  await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeFile);
+  const reimportedPlays = await sm.evaluate((n) => JSON.stringify(window.songMaker.trace(n)), roundFrames);
+  // (one that wouldn't play as it does isn't imported)
+  await (await sm.$('#import-file-input')).uploadFile(`${ROOT}web/public/examples/hyperspace.sng`);
+  await new Promise((r) => setTimeout(r, 2000));
+  const refused = await sm.evaluate((n) => document.getElementById('song-pick').options.length === n + 1 && document.getElementById('toast').textContent.includes("can't come across"), songsBeforeFile);
+  report(offered.split(' of ')[0] === offered.split(' of ')[1] && reimportedPlays === exportedPlays && refused, 'song imports a file, round trip', `${offered} offered, round trip ${reimportedPlays === exportedPlays ? 'same' : 'differs'}, refused ${refused}`);
 
   // Songs offered for import play exactly as GoatTracker's player does
   const importExact = await sm.evaluate(async () => {

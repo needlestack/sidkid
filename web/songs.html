@@ -115,8 +115,10 @@
         <b>Import a GoatTracker song</b>
         <button class="mini" id="import-close" aria-label="Close">×</button>
       </header>
-      <p class="hint">Songs that play exactly as GoatTracker plays them. The others use things Song Maker can't do yet. Their instruments join the Instrument Maker's.</p>
+      <p class="hint">Songs that play exactly as GoatTracker plays them. Their instruments join the Instrument Maker's.</p>
       <ul id="import-songs"></ul>
+      <button class="mini" id="import-file" title="A GoatTracker song (.sng) of your own, such as one exported from here">From a file…</button>
+      <input type="file" id="import-file-input" accept=".sng" hidden />
     </div>
 
     <div class="toast" id="toast" role="status"></div>
