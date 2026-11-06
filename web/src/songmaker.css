@@ -268,8 +268,20 @@
 }
 
 .arr-cycle-end {
-  fill: transparent;
   cursor: ew-resize;
+}
+
+.arr-cycle-hit {
+  fill: transparent;
+}
+
+.arr-cycle-grip {
+  fill: #c9a227;
+  pointer-events: none;
+}
+
+.arr-cycle-end:hover .arr-cycle-grip {
+  fill: var(--text);
 }
 
 /* While dragging: the drag's cursor everywhere */
@@ -429,6 +441,12 @@ html.drag-cursor * {
 .roll-note-end {
   fill: transparent;
   cursor: ew-resize;
+}
+
+/* The end under the pointer lights up */
+.roll-note-end:hover {
+  fill: var(--text);
+  fill-opacity: 0.25;
 }
 
 .roll-keys {

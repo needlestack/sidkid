@@ -834,14 +834,23 @@ try {
 
   // Its left end moves its start and keeps its end; the ends show arrows, the middle a hand
   const nb = await sm.$eval('.roll-note', (e) => e.getBoundingClientRect().toJSON());
-  const cursors = await sm.evaluate(() => ['.roll-note-end', '.roll-note', '.arr-cycle-end', '.arr-cycle', '.clip2-edge'].map((q) => getComputedStyle(document.querySelector(q)).cursor).join(' '));
+  // (what is actually under the pointer: a handle's own cursor is no use if something covers it)
+  const cursors = await sm.evaluate(() =>
+    [['.roll-note', 'left'], ['.roll-note', 'middle'], ['.roll-note', 'right'], ['.arr-cycle', 'left'], ['.arr-cycle', 'middle'], ['.arr-cycle', 'right'], ['.clip2-body', 'right']]
+      .map(([q, where]) => {
+        const r = document.querySelector(q).getBoundingClientRect();
+        const x = where === 'left' ? r.left + 1 : where === 'right' ? r.right - 1 : (r.left + r.right) / 2;
+        return getComputedStyle(document.elementFromPoint(x, r.top + r.height / 2)).cursor;
+      })
+      .join(' '),
+  );
   await sm.mouse.move(nb.x + 2, nb.y + 4);
   await sm.mouse.down();
   await sm.mouse.move(nb.x + 2 - 22, nb.y + 4, { steps: 3 });
   const during = await sm.evaluate(() => getComputedStyle(document.body).cursor);
   await sm.mouse.up();
   const stretched = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
-  report(stretched === '[[3,3]]' && cursors === 'ew-resize grab ew-resize grab ew-resize' && during === 'ew-resize', 'song note ends and cursors', `${stretched} ${cursors} / ${during}`);
+  report(stretched === '[[3,3]]' && cursors === 'ew-resize grab ew-resize ew-resize grab ew-resize ew-resize' && during === 'ew-resize', 'song note ends and cursors', `${stretched} ${cursors} / ${during}`);
 
   // The editor's ruler numbers the song's bars (this clip starts on bar 2)
   const rollBars = await sm.evaluate(() => [...document.querySelectorAll('#roll-ruler text')].map((t) => t.textContent).join(' '));

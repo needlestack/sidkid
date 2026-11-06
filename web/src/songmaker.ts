@@ -32,6 +32,8 @@ const INSTRUMENT_SECONDS = 32;
 
 /** Arrangement: the ruler (the cycle along its top), then a lane per track */
 const RULER_H = 32;
+/** How wide the cycle's ends are to grab */
+const CYCLE_GRIP = 14;
 const CYCLE_H = 12;
 const LANE_H = 56;
 const EDGE = 7;
@@ -530,9 +532,14 @@ function renderArrangement() {
   const c = s.cycle;
   el('rect', { x: ax(c.start), y: 2, width: ax(c.end - c.start), height: CYCLE_H - 2, rx: 3, class: `arr-cycle${s.cycling ? ' on' : ''}`, 'data-cycle': '' }, arr);
   // Its ends, to drag (drawn over the middle, which moves it)
+  // (the ruler's full height while cycling, where they show as grips)
   for (const end of ['start', 'end'] as const) {
     const at = ax(end === 'start' ? c.start : c.end);
-    el('rect', { x: at - EDGE / 2 - (end === 'start' ? 0 : 3), y: 0, width: EDGE + 3, height: CYCLE_H, class: 'arr-cycle-end', 'data-cycle-end': end }, arr);
+    const h = s.cycling ? RULER_H : CYCLE_H;
+    const g = el('g', { class: 'arr-cycle-end', 'data-cycle-end': end }, arr);
+    el('rect', { x: at - CYCLE_GRIP / 2, y: 0, width: CYCLE_GRIP, height: h, class: 'arr-cycle-hit' }, g);
+    if (s.cycling) el('rect', { x: at - (end === 'start' ? 0 : 3), y: 2, width: 3, height: h - 4, rx: 1.5, class: 'arr-cycle-grip' }, g);
+    g.append(title(end === 'start' ? 'Drag to move where the cycle starts' : 'Drag to move where the cycle ends'));
   }
   if (s.cycling) el('rect', { x: ax(c.start), y: RULER_H, width: ax(c.end - c.start), height: height - RULER_H, class: 'arr-cycle-band' }, arr);
   const bar = barSteps();
@@ -887,6 +894,8 @@ const KEYS_PAD = 8;
 const rx = (step: number) => KEYS_PAD + step * view.rollZoom;
 const ry = (note: number) => (HIGHEST - note) * ROW;
 const BLACK = [1, 3, 6, 8, 10];
+/** Pixels a note's end handles reach past it */
+const NOTE_REACH = 3;
 
 function renderEditor() {
   const c = openClip;
@@ -922,10 +931,10 @@ function renderEditor() {
       const ng = el('g', { 'data-note': i }, g);
       const w = Math.max(3, n.length * view.rollZoom - 2);
       el('rect', { x: rx(n.start) + 1, y: ry(n.note) + 1, width: w, height: ROW - 2, rx: 3, class: `roll-note${selectedNotes.has(n) ? ' selected' : ''}${n.start >= c.length ? ' past' : ''}` }, ng);
-      // Its ends, to drag: a third of it each at most, so the middle is left to move it
-      const end = Math.min(6, w / 3);
-      el('rect', { x: rx(n.start) + 1, y: ry(n.note), width: end, height: ROW, class: 'roll-note-end', 'data-note-end': 'start' }, ng);
-      el('rect', { x: rx(n.start) + 1 + w - end, y: ry(n.note), width: end, height: ROW, class: 'roll-note-end', 'data-note-end': 'end' }, ng);
+      // Its ends, to drag: reaching a little past it, and a third of it each at most, so the middle is left to move it
+      const end = Math.min(7, w / 3);
+      el('rect', { x: rx(n.start) + 1 - NOTE_REACH, y: ry(n.note), width: end + NOTE_REACH, height: ROW, class: 'roll-note-end', 'data-note-end': 'start' }, ng);
+      el('rect', { x: rx(n.start) + 1 + w - end, y: ry(n.note), width: end + NOTE_REACH, height: ROW, class: 'roll-note-end', 'data-note-end': 'end' }, ng);
       ng.append(title(noteName(n.note)));
     });
     rollPlayhead.setAttribute('y2', String(height));
