@@ -170,7 +170,7 @@ $(WASM)/%.o: %.cpp $(CORE_CXX_H)
 # The packer's player, built in (gpack.c)
 $(GEN)/player_s.h: core/player.s
 	@mkdir -p $(dir $@)
-	(echo 'static const unsigned char player_s[] = {'; xxd -i < $<; echo '};') > $@
+	(echo 'static const unsigned char player_s[] = {'; od -An -v -tx1 $< | sed -e 's/ *\([0-9a-f][0-9a-f]\)/0x\1,/g'; echo '};') > $@
 
 clean:
 	rm -rf $(BUILD)

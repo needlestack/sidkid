@@ -1,14 +1,16 @@
 # Working notes
 
-Notes for picking the work up again. Last updated 2026-11-05.
+Notes for picking the work up again. Last updated 2026-11-06.
 
 ## How we work
 
 - Commit locally; don't push unless asked. The owner prefers running it locally
   (`cd web && npx vite --port 5173 --strictPort`, then http://localhost:5173/songs.html).
-- Two pages (2026-11-05): Instrument Maker (`instruments2.html`) and Song Maker (`songs.html`),
-  switched in the middle of the top bar. The old song player (`index.html`) and first
-  instrument maker (`instruments.html`) are set aside: unlinked, still built and tested.
+- Two pages: Instrument Maker (`instruments2.html`) and Song Maker (`songs.html`), switched in
+  the middle of the top bar; `index.html` sends visitors to the Song Maker. The first song player
+  and instrument maker were removed on 2026-11-06 (in git history before `6d9282a`).
+- User docs: `README.md` and `docs/quickstart.md` (key points only; assume the reader knows
+  synths and GarageBand). `node web/scripts/screenshots.mjs` retakes `docs/images/`.
 - Commit as `Jonathan Field <needlestack@users.noreply.github.com>`.
 - No warnings in the UI. Make it clear enough that they aren't needed: sane
   defaults that can be bypassed, and loaded songs load exactly as they are.
@@ -20,24 +22,13 @@ Notes for picking the work up again. Last updated 2026-11-05.
 
 - Chrome: `cd web && npx tsc --noEmit -p . && npm test` (about 6 min because of the export tests; run it in the background).
 - Firefox: `FIREFOX=$HOME/sidkid/build/browsers/firefox/mac_arm-stable_158.0.1/Firefox.app/Contents/MacOS/firefox npm run test:firefox`.
-- The audio playback tests ("ui plays", "test note runs the program", "quick tap",
-  and sometimes "pulse sweep to a goal") fail when the machine's audio is
-  unavailable. Rerun before assuming a regression; they passed at `fb0ab9f`.
-- Page hook for scripts: `window.instrumentMaker` (state, loadSong, trace, frameSteps, ready, idle, status).
+- Audio playback tests can fail when the machine's audio is unavailable. Rerun before
+  assuming a regression.
+- Page hooks for scripts: `window.maker2` and `window.songMaker`.
+- `npm run c64check` (needs VICE): exported disks booted on PAL and NTSC C64s.
 - Node can't import `src/tables.ts` (extensionless imports). Test pure functions from a copy.
 
-## Where things are (instrument maker)
-
-- `web/src/instrumentmaker.ts`: the page. Wave/Pulse/Filter programs, steps, the bottom bar,
-  the Note start… and Vibrato… popovers (only one is open at a time).
-- `web/src/tables.ts`: table helpers, including the sweeps (`sweepRows`, `sweepLength`, `fastestSweep`).
-- `web/src/vibrato.ts`: vibrato and slide maths (simulates GoatTracker's vibtime).
-- `web/src/envelope.ts`, `analyzer.ts`, `adsr.ts`, `filtercurve.ts`, `waveicon.ts`.
-- Speed table rows: `speedRow()` reuses or appends rows. Song rows are `speedFixed` and never changed.
-- Sweeps are goal-based ("to X over N frames"). Editing a goal keeps later goals
-  (`laterGoals`/`keepGoals`) and keeps closed loops closed (`loopCloses`/`closeLoop`).
-
-## Instrument maker 2 (experiment, `instruments2.html`)
+## Instrument Maker (`instruments2.html`, `src/maker2.ts`)
 
 The owner wants to nail instruments before the song editor, and is trying a
 second approach next to the first (keep both): no step list, just shaping on a
@@ -132,17 +123,14 @@ zoomable timeline, aiming for a GarageBand feel.
 
 ## Next ideas
 
-1. Instrument maker 2: loading instruments from songs; Note start (hard restart, legato);
-   releasing by itself; sync/ring mod.
-2. Drag handles on the first maker's graph to move sweep end points.
-3. The song editor (plan above).
-4. Saving to .sng.
+1. Song-level filter (a filter lane), voice priority settings, funk tempo for steps under
+   3 frames, a usability pass on the tempo lane and the effects.
+2. Maybe: exposing gate frames ("Restart time"), latency calibration, MIDI input.
 
 ## Known loose ends
 
 - 9/A (switch program) commands store raw table positions, which break if programs
   are edited. Not fixed because no example uses them.
-- The program name input doesn't update if it has focus while a song loads.
 - Undecided: a README note about attack/decay ≈ 0.
 - Safari is untested.
 
