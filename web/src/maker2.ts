@@ -707,7 +707,7 @@ function renderGutter() {
     if (row.wave !== null) add(row.top, row.h, [waveIcon(row.wave, 26, 14), waveName(row.wave)], 'lane');
     else add(row.top, row.h, ['Width'], 'lane width');
   }
-  toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), state.notesOpen ? 'head' : '');
+  toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), 'head');
   if (state.notesOpen) {
     const fixed = shape().fixedNote;
     for (let semis = rollHigh(); semis >= state.rollLow; semis -= 12) {
@@ -740,7 +740,7 @@ function renderGutter() {
     }
     add(vibTop(), VIB_H, ['Vibrato'], 'lane width');
   }
-  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), state.filterOpen ? 'head' : '');
+  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), 'head');
   if (state.filterOpen) {
     add(typeTop(), TYPE_H, ['Type'], 'lane sub');
     add(cutoffTop(), CUTOFF_H, ['Cutoff'], 'lane sub');
@@ -897,7 +897,7 @@ function drawWaveBand() {
 
 const LINE_PAD = 6;
 
-/** An open section's band: its header, shaded across like its name beside it (and over the grid) */
+/** A section's band: its header, shaded across like its name beside it (and over the grid) */
 function drawHead(top: number) {
   if (!plot.querySelector('#head-fade')) {
     const fade = el('linearGradient', { id: 'head-fade', x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', {}, plot));
@@ -916,7 +916,7 @@ function drawFilter() {
   const s = shape();
   const top = filterTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
-  if (state.filterOpen) drawHead(top);
+  drawHead(top);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-filter-strip': '' }, plot);
   // Folded, the band previews the cutoff (open, its rows show it)
   if (!state.filterOpen && !s.filter.types.length) {
@@ -1055,7 +1055,7 @@ function drawNotes() {
   const s = shape();
   const top = notesTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
-  if (state.notesOpen) drawHead(top);
+  drawHead(top);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
   // Folded, the band previews the pitch as a thin line (open, the roll shows it)
   if (!state.notesOpen) {

@@ -182,7 +182,7 @@
   cursor: pointer;
 }
 
-/* An open section's header row: shaded from its top down to the row headers' shade (over the gutter's edge, one band across) */
+/* A section's header row: shaded from its top down to the row headers' shade (over the gutter's edge, one band across) */
 .tl-gutter-row.head {
   right: -1px;
   background: linear-gradient(var(--head-top), var(--surface-2));
