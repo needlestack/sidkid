@@ -697,17 +697,17 @@ function renderGutter() {
     });
   };
   if (state.volumeOpen) {
-    toggle(RULER, 22, 'Volume', true, () => openVolume(false), 'rule');
+    toggle(RULER, 22, 'Volume', true, () => openVolume(false));
     // Each level's number sits just above its line
     for (const v of [1, 0.5, 0]) add(plotY(v) - 15, 14, [String(v * 100)], 'on-line');
-  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true), 'rule');
-  toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen), 'rule');
+  } else toggle(RULER, VOLUME_PREVIEW, 'Volume', false, () => openVolume(true));
+  toggle(floor(), PAD_BOTTOM, 'Waveform', state.waveOpen, () => openWaves(!state.waveOpen));
   const r = rows();
   for (const row of r ?? []) {
     if (row.wave !== null) add(row.top, row.h, [waveIcon(row.wave, 26, 14), waveName(row.wave)], 'lane');
     else add(row.top, row.h, ['Width'], 'lane width');
   }
-  toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
+  toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen));
   if (state.notesOpen) {
     const fixed = shape().fixedNote;
     for (let semis = rollHigh(); semis >= state.rollLow; semis -= 12) {
@@ -738,9 +738,9 @@ function renderGutter() {
         row.addEventListener('pointerleave', hideChoiceSoon);
       }
     }
-    add(vibTop(), VIB_H, ['Vibrato'], 'lane width rule-thin');
+    add(vibTop(), VIB_H, ['Vibrato'], 'lane width');
   }
-  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), `rule${state.filterOpen ? ' head' : ''}`);
+  toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), state.filterOpen ? 'head' : '');
   if (state.filterOpen) {
     add(typeTop(), TYPE_H, ['Type'], 'lane sub');
     add(cutoffTop(), CUTOFF_H, ['Cutoff'], 'lane sub');

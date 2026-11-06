@@ -137,7 +137,6 @@
 .tl-gutter-row.lane {
   color: var(--text);
   font-weight: 600;
-  border-top: 1px solid var(--border);
 }
 
 .heard-wave {
@@ -181,10 +180,6 @@
 .strip-hit {
   fill: transparent;
   cursor: pointer;
-}
-
-.tl-gutter-row.rule {
-  border-top: 1px solid var(--border);
 }
 
 /* An open section's header row: shaded from its top down to the row headers' shade (over the gutter's edge, one band across) */
