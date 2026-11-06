@@ -18,7 +18,7 @@ import { importInstrument, KEY } from './goatimport';
 import { sound, soundTables } from './instruments';
 import type { Shape } from './shape';
 import { parseSong } from './song';
-import { newId, type Clip, type SongDoc, type Track } from './songdoc';
+import { newId, type Clip, type SongDoc, type TempoChange, type Track } from './songdoc';
 import { buildTimeline, type Note as GoatNote } from './timeline';
 
 /** Frames after a row is read that its note sounds (its program's first frame) */
@@ -38,6 +38,9 @@ export interface GoatImport {
   /** Frames GoatTracker plays before looping */
   length: number;
 }
+
+const FUNK_TEMPO = 14;
+const TEMPO = 15;
 
 const COMMAND_NAMES: Record<number, string> = {
   1: 'slides up',
@@ -65,18 +68,30 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
   const gaps: string[] = [];
   if (settings.multiplier !== 1) gaps.push('more than one player call a frame');
 
-  // One step a row: rows all the same length
-  const lengths = new Map<number, number>();
-  for (const rows of tl.rows) for (let i = 1; i < rows.length; i++) lengths.set(rows[i].frame - rows[i - 1].frame, (lengths.get(rows[i].frame - rows[i - 1].frame) ?? 0) + 1);
-  const rowFrames = [...lengths.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? 6;
-  if (lengths.size > 1) gaps.push('tempo changes');
+  // One step a row: the rows' frames (all voices read theirs together, the
+  // tempo being the song's), and a tempo change wherever a row's length does
+  const rows = tl.rows.reduce((a, r) => (r.length > a.length ? r : a), [] as (typeof tl.rows)[number]).map((e) => e.frame);
+  const rowSet = new Set(rows);
+  if (tl.rows.some((r) => r.some((e) => e.frame < tl.length && !rowSet.has(e.frame)))) gaps.push('voices at different tempos');
   const commands = new Set<number>();
   for (const rows of tl.rows) for (const e of rows) if (e.data.command && e.frame < tl.length) commands.add(e.data.command);
-  for (const c of [...commands].sort((x, y) => x - y)) gaps.push(COMMAND_NAMES[c] ?? `command ${c}`);
+  // (tempo and funk tempo are the rows' lengths, which the tempo changes keep)
+  for (const c of [...commands].sort((x, y) => x - y)) if (c !== TEMPO && c !== FUNK_TEMPO) gaps.push(COMMAND_NAMES[c] ?? `command ${c}`);
 
-  const firstRow = Math.min(...tl.rows.filter((r) => r.length).map((r) => r[0].frame));
-  const step = (frame: number) => (frame - firstRow) / rowFrames;
-  const steps = (frame: number) => Math.round(step(frame));
+  const firstRow = rows[0] ?? 0;
+  const lengthAt = (i: number) => (rows[Math.min(i + 1, rows.length - 1)] ?? 6) - (rows[Math.min(i, rows.length - 2)] ?? 0) || 6;
+  // The step a frame falls at: a row's own, between rows by how far, and on past the last at its length
+  const steps = (frame: number) => {
+    let lo = 0;
+    let hi = rows.length - 1;
+    if (frame >= rows[hi]) return hi + Math.round((frame - rows[hi]) / lengthAt(hi - 1));
+    while (lo + 1 < hi) {
+      const mid = (lo + hi) >> 1;
+      if (rows[mid] <= frame) lo = mid;
+      else hi = mid;
+    }
+    return lo + Math.round((frame - rows[lo]) / (rows[lo + 1] - rows[lo]));
+  };
 
   // The instruments the notes play
   const used = [...new Set(tl.notes.flat().map((n) => n.instrument))].sort((x, y) => x - y);
@@ -109,9 +124,13 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
 
   const fps = settings.ntsc ? 60 : 50;
   const end = steps(tl.length);
+  const bpmOf = (frames: number) => (60 * fps) / (frames * STEPS_PER_BEAT);
+  const tempo: TempoChange[] = [];
+  for (let i = 1; i < rows.length - 1; i++) if (lengthAt(i) !== lengthAt(i - 1)) tempo.push({ step: i, bpm: bpmOf(lengthAt(i)) });
   const song: SongDoc = {
     name: goat.title || name,
-    bpm: Math.round(((60 * fps) / (rowFrames * STEPS_PER_BEAT)) * 1000) / 1000,
+    bpm: bpmOf(lengthAt(0)),
+    ...(tempo.length ? { tempo } : {}),
     stepsPerBeat: STEPS_PER_BEAT,
     beatsPerBar: BEATS_PER_BAR,
     tracks,

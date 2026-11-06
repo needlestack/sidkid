@@ -738,6 +738,9 @@ try {
   await sm.waitForFunction(() => window.songMaker?.ready(), { timeout: 5000 });
   report(true, 'song maker page loads');
 
+  // The tracks start under the ruler (32) and the tempo lane (34)
+  const TRACKS_TOP = 66;
+
   // Frequency (hex) and gate of a voice, frame by frame: "freq:gate", runs collapsed to "xN"
   const voiceRuns = (regs, v) => {
     const out = [];
@@ -858,6 +861,35 @@ try {
     window.songMaker.render();
   });
 
+  // Tempo changes: a note after one lands on the frame the steps before it add up to, held or ramped
+  const tempoOnsets = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    const keep = JSON.stringify(s);
+    s.tracks.forEach((t) => (t.clips = []));
+    s.tracks[0].clips = [{ start: 0, length: 32, span: 32, notes: [{ start: 20, length: 4, note: 48 }] }];
+    const onset = () => {
+      const regs = window.songMaker.trace(400);
+      return regs.findIndex((r) => (r[0] | (r[1] << 8)) === 0x1168);
+    };
+    s.bpm = 125;
+    s.tempo = [{ step: 16, bpm: (60 * 50) / (7 * 4) }];
+    window.songMaker.render();
+    const held = onset();
+    // Ramping from 120 at the start to 60 at step 8, then held: each step's frames at its tempo
+    s.bpm = 120;
+    s.tempo = [{ step: 8, bpm: 60, ramp: true }];
+    window.songMaker.render();
+    const ramped = onset();
+    let want = 0;
+    for (let k = 0; k < 20; k++) want += 750 / (k < 8 ? 120 - 7.5 * k : 60);
+    Object.assign(s, JSON.parse(keep));
+    delete s.tempo;
+    window.songMaker.render();
+    return `${held} ${ramped}/${Math.round(want)}`;
+  });
+  const [heldOnset, rampOnset] = tempoOnsets.split(' ');
+  report(heldOnset === '124' && rampOnset.split('/')[0] === rampOnset.split('/')[1], 'song tempo changes', tempoOnsets);
+
   // Double-click in a lane makes a clip; double-click in the editor adds a note
   await sm.evaluate(() => {
     const s = window.songMaker.song();
@@ -865,7 +897,7 @@ try {
     window.songMaker.render();
   });
   const arrBox = await sm.$eval('#arr', (e) => e.getBoundingClientRect().toJSON());
-  await sm.mouse.click(arrBox.x + 6 * 16 + 30, arrBox.y + 32 + 56 + 28, { count: 2 });
+  await sm.mouse.click(arrBox.x + 6 * 16 + 30, arrBox.y + TRACKS_TOP + 56 + 28, { count: 2 });
   const made = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks.map((t) => t.clips.map((c) => [c.start, c.length, c.span]))));
   report(made === '[[],[[16,16,16]],[]]', 'song double-click makes a clip', made);
   const rollBox = await sm.$eval('#roll-scroll', (e) => e.getBoundingClientRect().toJSON());
@@ -940,6 +972,24 @@ try {
   await sm.mouse.up();
   report(scrubbed === '2.2.1', 'song scrubs the playhead', scrubbed);
 
+  // The tempo lane: double-click adds a change, dragging it up speeds it up from there; the BPM box shows the tempo at the playhead
+  const laneBox = await sm.$eval('#arr', (e) => e.getBoundingClientRect().toJSON());
+  const zoomNow = await sm.evaluate(() => JSON.parse(localStorage.getItem('sidkid.song2.v1')).zoom);
+  const tempoX = laneBox.x + 32 * zoomNow + 2;
+  await sm.mouse.click(tempoX, laneBox.y + 32 + 17, { count: 2 });
+  const added3 = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tempo));
+  const tempoDot = await sm.$eval('[data-tempo="1"] .dot', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.move(tempoDot.x + tempoDot.width / 2, tempoDot.y + tempoDot.height / 2);
+  await sm.mouse.down();
+  await sm.mouse.move(tempoDot.x + tempoDot.width / 2, tempoDot.y + tempoDot.height / 2 - 12, { steps: 4 });
+  await sm.mouse.up();
+  const dragged3 = await sm.evaluate(() => window.songMaker.song().tempo[0].bpm);
+  await sm.evaluate(() => {
+    delete window.songMaker.song().tempo;
+    window.songMaker.render();
+  });
+  report(added3 === '[{"step":32,"bpm":125}]' && dragged3 > 125, 'song tempo lane', `${added3} → ${dragged3}`);
+
   // Zooming out and back in keeps the song in view
   for (let i = 0; i < 8; i++) await sm.click('#zoom-out');
   for (let i = 0; i < 10; i++) await sm.click('#zoom-in');
@@ -953,7 +1003,7 @@ try {
 
   // Recording: R plays, a held key becomes a note on the selected track (no count-in here)
   await sm.click('#count-in');
-  await sm.mouse.click(arrBox.x - 100, arrBox.y + 32 + 20);
+  await sm.mouse.click(arrBox.x - 100, arrBox.y + TRACKS_TOP + 20);
   await sm.keyboard.press('r');
   await sm.waitForFunction(() => window.songMaker.playing());
   await new Promise((r) => setTimeout(r, 500));
@@ -1020,7 +1070,7 @@ try {
   });
   await sm.reload();
   await sm.waitForFunction(() => window.songMaker?.ready());
-  await sm.select('.track-head:nth-of-type(3) .track-instrument', await sm.evaluate(() => window.songMaker.instruments()[2].id));
+  await sm.select('.track-head:nth-of-type(4) .track-instrument', await sm.evaluate(() => window.songMaker.instruments()[2].id));
   await sm.reload();
   await sm.waitForFunction(() => window.songMaker?.ready());
   await sm.reload();

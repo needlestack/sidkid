@@ -35,10 +35,19 @@ export interface Track {
   clips: Clip[];
 }
 
+/** A change of tempo at a step: held from there, or reached by a ramp from the change before */
+export interface TempoChange {
+  step: number;
+  bpm: number;
+  ramp?: boolean;
+}
+
 export interface SongDoc {
   name: string;
-  /** Beats a minute (each step starts on the frame nearest its time, so any tempo works) */
+  /** Beats a minute from the start (each step starts on the frame nearest its time, so any tempo works) */
   bpm: number;
+  /** Where the tempo changes after that, in step order */
+  tempo?: TempoChange[];
   stepsPerBeat: number;
   beatsPerBar: number;
   tracks: Track[];
@@ -54,11 +63,70 @@ export interface SongDoc {
   goat?: { patterns: number[][]; end: number };
 }
 
-/** Frames a step lasts, not a whole number in general */
+/** Frames a step lasts at the song's starting tempo, not a whole number in general */
 export const framesPerStep = (song: SongDoc, fps: number) => (60 * fps) / (song.bpm * song.stepsPerBeat);
 
+/** The tempo during a step: the change it's in (or on its way to, on a ramp) */
+export function bpmAt(song: SongDoc, step: number): number {
+  let bpm = song.bpm;
+  let from = 0;
+  for (const c of song.tempo ?? []) {
+    if (c.step > step) {
+      // On a ramp: the way along it from the change before
+      if (c.ramp && c.step > from) return bpm + ((c.bpm - bpm) * (step - from)) / (c.step - from);
+      return bpm;
+    }
+    bpm = c.bpm;
+    from = c.step;
+  }
+  return bpm;
+}
+
+/** Frames each step from 0 starts at, for songs whose tempo changes (worked out as far as asked for) */
+const starts = new WeakMap<SongDoc, { key: string; at: number[] }>();
+function stepStarts(song: SongDoc, fps: number, upTo: number): number[] {
+  const key = JSON.stringify([song.bpm, song.stepsPerBeat, song.tempo, fps]);
+  let c = starts.get(song);
+  if (!c || c.key !== key) {
+    c = { key, at: [0] };
+    starts.set(song, c);
+  }
+  const at = c.at;
+  while (at.length <= upTo) {
+    const k = at.length - 1;
+    at.push(at[k] + (60 * fps) / (bpmAt(song, k) * song.stepsPerBeat));
+  }
+  return at;
+}
+
+/** Where a step (or part of one) starts, in frames, exactly */
+export function exactFrame(song: SongDoc, step: number, fps: number): number {
+  if (!song.tempo?.length || step <= 0) return step * framesPerStep(song, fps);
+  const k = Math.floor(step);
+  const at = stepStarts(song, fps, k + 1);
+  return at[k] + (step - k) * (at[k + 1] - at[k]);
+}
+
 /** The frame a step (or part of one) starts on: the nearest */
-export const frameAt = (song: SongDoc, step: number, fps: number) => Math.round(step * framesPerStep(song, fps));
+export const frameAt = (song: SongDoc, step: number, fps: number) => Math.round(exactFrame(song, step, fps));
+
+/** The step (with how far into it) at a frame */
+export function stepAt(song: SongDoc, frame: number, fps: number): number {
+  if (!song.tempo?.length || frame <= 0) return frame / framesPerStep(song, fps);
+  // Past the last change it's steady: count on from there
+  const lastChange = song.tempo[song.tempo.length - 1].step;
+  let at = stepStarts(song, fps, lastChange + 1);
+  if (frame >= at[lastChange]) return lastChange + (frame - at[lastChange]) / (at[lastChange + 1] - at[lastChange]);
+  let lo = 0;
+  let hi = lastChange;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1;
+    if (at[mid] <= frame) lo = mid;
+    else hi = mid;
+  }
+  at = stepStarts(song, fps, lo + 1);
+  return lo + (frame - at[lo]) / (at[lo + 1] - at[lo]);
+}
 
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -192,8 +260,10 @@ export function songSequence(
   const firstLength = Math.max(0, end - from);
   const loopFrom = cycle ? firstLength : null;
   const length = cycle ? firstLength + (cycle.end - cycle.start) : firstLength + 1;
-  const beat = song.stepsPerBeat * framesPerStep(song, fps);
-  const bar = beat * song.beatsPerBar;
+  // A bar's frames, at the tempo where playing starts (for the count-in)
+  const barSteps = song.stepsPerBeat * song.beatsPerBar;
+  const fromStep = stepAt(song, from, fps);
+  const bar = exactFrame(song, fromStep, fps) - exactFrame(song, fromStep - barSteps, fps);
   const preroll = Math.max(1, ...sounds.map((s) => Math.max(leadOf(s.shape), resumeLeadOf(s.shape))), metronome.countIn ? Math.ceil(bar) + 1 : 0);
   const events: SeqEvent[] = [];
   for (let voice = 0; voice < VOICES; voice++) {
@@ -247,7 +317,7 @@ export function songSequence(
   const beats: number[] = [];
   const bars: number[] = [];
   const clicks = (a: number, b: number, shift: number) => {
-    for (let k = Math.floor(a / beat) - 1; k <= Math.ceil(b / beat) + 1; k++) {
+    for (let k = Math.floor(stepAt(song, a, fps) / song.stepsPerBeat) - 1; k <= Math.ceil(stepAt(song, b, fps) / song.stepsPerBeat) + 1; k++) {
       const t = frameAt(song, k * song.stepsPerBeat, fps);
       if (t >= a && t < b) (k % song.beatsPerBar === 0 ? bars : beats).push(t + shift);
     }

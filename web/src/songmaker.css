@@ -235,6 +235,53 @@
   background: var(--surface-2);
 }
 
+.heads-tempo {
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The tempo lane: a line of the tempo, its points to drag */
+.arr-tempo {
+  fill: var(--surface);
+}
+
+.arr-tempo-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.arr-tempo-point {
+  cursor: grab;
+}
+
+.arr-tempo-point .hit {
+  fill: transparent;
+}
+
+.arr-tempo-point .dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.arr-tempo-point:hover .dot {
+  fill: var(--accent);
+}
+
+.arr-tempo-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .track-head {
   flex: 0 0 56px;
   height: 56px;

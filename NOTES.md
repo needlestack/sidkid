@@ -211,6 +211,13 @@ zoomable timeline, aiming for a GarageBand feel.
   the rest differ a little in pitch (vibrato a frame off in jam-mode ticks, which reset per
   note: a song exported to patterns keeps them in step; slides resume on the nearest note).
   Released notes (fixed key up) aren't resumed. No per-track "start again" option yet.
+- Tempo (2026-11-05): `SongDoc.bpm` is the tempo from the start, `SongDoc.tempo` the changes
+  (held, or `ramp` from the one before). Steps → frames through a cached running total of each
+  step's length (`exactFrame` / `frameAt` / `stepAt` in songdoc.ts), so everything follows it.
+  The Tempo lane under the ruler edits it (drag points; double-click adds/removes; ⌥-click a
+  point ramps to it); the BPM box shows and edits the tempo at the playhead. Imports read each
+  row's length (a step a row), so GoatTracker's tempo and funk tempo commands come across;
+  per-voice tempos ("voices at different tempos") don't yet.
 - Several songs (`songs` + `current` in `sidkid.song2.v1`), a picker with New / Import… / Delete.
   Undo keeps either the song open or the whole list (`before` / `beforeSongs`).
 - Importing GoatTracker songs (`songimport.ts`, 2026-11-05): tracks per voice and instrument, one

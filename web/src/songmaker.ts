@@ -16,7 +16,7 @@ import { addInstruments, loadInstruments, sound as soundOf, sounds, soundTables,
 import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
 import { importGoatSong, ROW_TO_NOTE } from './songimport';
-import { clipNotes, framesPerStep, frameAt, newId, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
+import { bpmAt, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -104,7 +104,7 @@ const song = () => view.songs[view.current];
 const barSteps = () => song().stepsPerBeat * song().beatsPerBar;
 /** Steps to frames and back, at the song's tempo and the machine's clock */
 const toFrame = (step: number) => frameAt(song(), step, FPS);
-const toStep = (frame: number) => frame / framesPerStep(song(), FPS);
+const toStep = (frame: number) => stepOfFrame(song(), frame, FPS);
 
 /** A clip by its track's id (tracks move) and its place in the track, to find it again after a reload or an undo */
 type ClipRef = { track: string; clip: number };
@@ -399,7 +399,8 @@ function animate() {
     }
     // Counting in: the beats to go, in place of the position
     const ahead = -heardSeqFrame();
-    const beat = song().stepsPerBeat * framesPerStep(song(), FPS);
+    // (a beat's frames at the tempo where playing starts)
+    const beat = toFrame(toStep(transport.from) + song().stepsPerBeat) - transport.from;
     const counting = transport.countIn && ahead > 0;
     $('position').classList.toggle('counting', counting);
     if (counting) $('position').textContent = String(Math.ceil(ahead / beat));
@@ -498,7 +499,10 @@ function positionText(step: number): string {
 const arr = $('arr') as unknown as SVGSVGElement;
 const arrScroll = $('arr-scroll');
 const ax = (step: number) => step * view.zoom;
-const laneTop = (i: number) => RULER_H + i * LANE_H;
+/** The tempo lane, under the ruler; the tracks under it */
+const TEMPO_H = 34;
+const TRACKS_TOP = RULER_H + TEMPO_H;
+const laneTop = (i: number) => TRACKS_TOP + i * LANE_H;
 /** Steps the arrangement shows: the song and room after it */
 const arrSteps = () => {
   const bar = barSteps();
@@ -522,7 +526,11 @@ function renderHeads() {
   heads.replaceChildren();
   const spacer = document.createElement('div');
   spacer.className = 'heads-ruler';
-  heads.append(spacer);
+  const tempoHead = document.createElement('div');
+  tempoHead.className = 'heads-tempo';
+  tempoHead.textContent = 'Tempo';
+  tempoHead.title = 'Drag a point up or down to change the tempo, or sideways to move it. Double-click to add a change, or a point to remove it; ⌥-click a point to ramp to it.';
+  heads.append(spacer, tempoHead);
   song().tracks.forEach((t, i) => {
     const head = document.createElement('div');
     head.className = `track-head${i === current ? ' current' : ''}${t.muted ? ' muted' : ''}`;
@@ -615,7 +623,7 @@ headsEl.addEventListener('pointermove', (e) => {
     dragCursor('grabbing');
   }
   const tracks = song().tracks;
-  const top = headsEl.getBoundingClientRect().top + RULER_H;
+  const top = headsEl.getBoundingClientRect().top + TRACKS_TOP;
   const to = Math.max(0, Math.min(tracks.length - 1, Math.floor((e.clientY - top) / LANE_H)));
   if (to === d.from) return;
   const [moving] = tracks.splice(d.from, 1);
@@ -683,6 +691,7 @@ function renderArrangement() {
     g.append(title(end === 'start' ? 'Drag to move where the cycle starts' : 'Drag to move where the cycle ends'));
   }
   if (s.cycling) el('rect', { x: ax(c.start), y: RULER_H, width: ax(c.end - c.start), height: height - RULER_H, class: 'arr-cycle-band' }, arr);
+  drawTempo(steps);
   const bar = barSteps();
   const beatPx = ax(s.stepsPerBeat);
   for (let st = 0; st <= steps; st += beatPx >= 14 ? s.stepsPerBeat : bar) {
@@ -797,6 +806,8 @@ function movePlayhead(follow = false) {
   playheadLine.setAttribute('x1', String(x));
   playheadLine.setAttribute('x2', String(x));
   $('position').textContent = positionText(playhead);
+  const tempoBox = $<HTMLInputElement>('tempo');
+  if (document.activeElement !== tempoBox) tempoBox.value = bpmText(bpmAt(song(), Math.floor(playhead)));
   if (follow) {
     const left = arrScroll.scrollLeft;
     const w = arrScroll.clientWidth;
@@ -816,6 +827,7 @@ function movePlayhead(follow = false) {
 // Arrangement pointer: ruler (cycle along its top), clips (moved, lengthened, repeated), lanes
 type ArrDrag =
   | { kind: 'seek' }
+  | { kind: 'tempo'; at: number; x0: number; y0: number; step: number; bpm: number; scale: { lo: number; hi: number }; moved: boolean }
   | { kind: 'cycle-new'; from: number }
   | { kind: 'cycle'; what: 'start' | 'end' | 'move'; x0: number; start: number; end: number }
   | { kind: 'clip'; what: 'move' | 'length' | 'span'; clip: Clip; track: number; x0: number; y0: number; start: number; length: number; span: number; copy: boolean; moved: boolean };
@@ -850,6 +862,10 @@ arr.addEventListener('pointerdown', (e) => {
       arrDrag = { kind: 'seek' };
       scrubTo(stepAt(p.x));
     }
+    return;
+  }
+  if (p.y < TRACKS_TOP) {
+    tempoDown(e, p, target);
     return;
   }
   const g = target.closest<SVGGElement>('[data-clip]');
@@ -887,7 +903,8 @@ arr.addEventListener('pointermove', (e) => {
   const s = song();
   if (!d) return;
   const by = Math.round((p.x - ('x0' in d ? d.x0 : p.x)) / view.zoom / snap()) * snap();
-  if (d.kind === 'seek') scrubTo(stepAt(p.x));
+  if (d.kind === 'tempo') tempoMove(d, p, e);
+  else if (d.kind === 'seek') scrubTo(stepAt(p.x));
   else if (d.kind === 'cycle-new') {
     const at = Math.round(stepAt(p.x) / snap()) * snap();
     s.cycle = { start: Math.min(d.from, at), end: Math.max(d.from, at, Math.min(d.from, at) + snap()) };
@@ -917,7 +934,7 @@ arr.addEventListener('pointermove', (e) => {
     if (d.what === 'move') {
       c.start = Math.max(0, d.start + by);
       // Up or down to another track
-      const lane = Math.max(0, Math.min(s.tracks.length - 1, Math.floor((p.y - RULER_H) / LANE_H)));
+      const lane = Math.max(0, Math.min(s.tracks.length - 1, Math.floor((p.y - TRACKS_TOP) / LANE_H)));
       const from = s.tracks.findIndex((t) => t.clips.includes(c));
       if (lane !== from) {
         s.tracks[from].clips.splice(s.tracks[from].clips.indexOf(c), 1);
@@ -939,18 +956,134 @@ arr.addEventListener('pointermove', (e) => {
 const endArrDrag = () => {
   const d = arrDrag;
   arrDrag = null;
+  tempoScale = null;
   dragCursor(null);
   if (!d) return;
   if (d.kind === 'seek') endScrub();
+  if (d.kind === 'tempo' && d.moved) changed();
   if (d.kind === 'clip' && d.moved) changed();
   else if (d.kind === 'cycle' || d.kind === 'cycle-new') changed();
 };
 arr.addEventListener('pointerup', endArrDrag);
 arr.addEventListener('pointercancel', endArrDrag);
 
+// --- The tempo lane: the song's tempo from the start, and where it changes ---------------------------
+
+const TEMPO_MIN_SPAN = 20;
+/** The tempos the lane shows, top to bottom (held while a point is dragged, so it doesn't move under the pointer) */
+let tempoScale: { lo: number; hi: number } | null = null;
+function tempoRange(): { lo: number; hi: number } {
+  if (tempoScale) return tempoScale;
+  const s = song();
+  const all = [s.bpm, ...(s.tempo ?? []).map((c) => c.bpm)];
+  const mid = (Math.min(...all) + Math.max(...all)) / 2;
+  const half = Math.max(TEMPO_MIN_SPAN, Math.max(...all) - Math.min(...all)) / 2 + 4;
+  return { lo: mid - half, hi: mid + half };
+}
+const tempoY = (bpm: number, r = tempoRange()) => RULER_H + 5 + (1 - (bpm - r.lo) / (r.hi - r.lo)) * (TEMPO_H - 10);
+const bpmOfY = (y: number, r: { lo: number; hi: number }) => r.lo + (1 - (y - RULER_H - 5) / (TEMPO_H - 10)) * (r.hi - r.lo);
+const bpmText = (bpm: number) => (Number.isInteger(Math.round(bpm * 10) / 10) ? String(Math.round(bpm)) : (Math.round(bpm * 10) / 10).toFixed(1));
+
+/** The points: the start (index 0, the song's own tempo) and each change */
+function tempoPoints(): { step: number; bpm: number; ramp: boolean }[] {
+  const s = song();
+  return [{ step: 0, bpm: s.bpm, ramp: false }, ...(s.tempo ?? []).map((c) => ({ step: c.step, bpm: c.bpm, ramp: !!c.ramp }))];
+}
+
+function drawTempo(steps: number) {
+  const width = ax(steps);
+  el('rect', { x: 0, y: RULER_H, width, height: TEMPO_H, class: 'arr-tempo', 'data-tempo-lane': '' }, arr);
+  el('line', { x1: 0, x2: width, y1: TRACKS_TOP - 0.5, y2: TRACKS_TOP - 0.5, class: 'arr-lane-line' }, arr);
+  const pts = tempoPoints();
+  // Held from each point to the next, or ramped into the next
+  let d = `M0,${tempoY(pts[0].bpm)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i];
+    d += p.ramp ? `L${ax(p.step)},${tempoY(p.bpm)}` : `H${ax(p.step)}V${tempoY(p.bpm)}`;
+  }
+  d += `H${width}`;
+  el('path', { d, class: 'arr-tempo-line' }, arr);
+  pts.forEach((p, i) => {
+    const g = el('g', { class: 'arr-tempo-point', 'data-tempo': i }, arr);
+    el('circle', { cx: ax(p.step), cy: tempoY(p.bpm), r: 8, class: 'hit' }, g);
+    el('circle', { cx: ax(p.step), cy: tempoY(p.bpm), r: 3.5, class: 'dot' }, g);
+    const label = el('text', { x: ax(p.step) + 6, y: tempoY(p.bpm) < RULER_H + TEMPO_H / 2 ? tempoY(p.bpm) + 11 : tempoY(p.bpm) - 4, class: 'arr-tempo-label' }, g);
+    label.textContent = bpmText(p.bpm);
+    g.append(title(i ? `${bpmText(p.bpm)} BPM from here${p.ramp ? ', ramping to it' : ''}. Drag to change; double-click to remove; ⌥-click to ${p.ramp ? 'hold' : 'ramp'}.` : `${bpmText(p.bpm)} BPM from the start. Drag up or down to change.`));
+  });
+}
+
+/** The tempo changes, as points (the start dropped back to the song's own tempo) */
+function setTempoPoints(pts: { step: number; bpm: number; ramp: boolean }[]) {
+  const s = song();
+  s.bpm = pts[0].bpm;
+  const rest = pts.slice(1).map((p) => ({ step: p.step, bpm: p.bpm, ...(p.ramp ? { ramp: true } : {}) }));
+  if (rest.length) s.tempo = rest;
+  else delete s.tempo;
+}
+
+function tempoDown(e: PointerEvent, p: { x: number; y: number }, target: Element) {
+  const hit = target.closest<SVGElement>('[data-tempo]');
+  const pts = tempoPoints();
+  if (hit) {
+    const at = Number(hit.dataset.tempo);
+    if (isDouble(e) && at > 0) {
+      before();
+      pts.splice(at, 1);
+      setTempoPoints(pts);
+      changed();
+      return;
+    }
+    if (e.altKey && at > 0) {
+      before();
+      pts[at].ramp = !pts[at].ramp;
+      setTempoPoints(pts);
+      changed();
+      return;
+    }
+    tempoScale = tempoRange();
+    arrDrag = { kind: 'tempo', at, x0: p.x, y0: p.y, step: pts[at].step, bpm: pts[at].bpm, scale: tempoScale, moved: false };
+    dragCursor('grabbing');
+    return;
+  }
+  // Double-clicking the lane adds a change there, at the tempo it already is (drag it to change it)
+  if (isDouble(e)) {
+    const step = Math.max(snap(), Math.round(stepAt(p.x) / snap()) * snap());
+    if (pts.some((q) => q.step === step)) return;
+    before();
+    pts.push({ step, bpm: Math.round(bpmAt(song(), step) * 10) / 10, ramp: false });
+    pts.sort((a, b) => a.step - b.step);
+    setTempoPoints(pts);
+    changed();
+  }
+}
+
+function tempoMove(d: Extract<ArrDrag, { kind: 'tempo' }>, p: { x: number; y: number }, e: PointerEvent) {
+  if (!d.moved && Math.hypot(p.x - d.x0, p.y - d.y0) < 3) return;
+  if (!d.moved) {
+    before();
+    d.moved = true;
+  }
+  const pts = tempoPoints();
+  // Up and down: the tempo, to whole beats a minute (tenths with ⇧)
+  const raw = d.bpm + bpmOfY(p.y, d.scale) - bpmOfY(d.y0, d.scale);
+  const bpm = Math.max(TEMPO_MIN, Math.min(TEMPO_MAX, e.shiftKey ? Math.round(raw * 10) / 10 : Math.round(raw)));
+  pts[d.at].bpm = bpm;
+  // Sideways (not the start): between its neighbours
+  if (d.at > 0) {
+    const step = Math.round((d.step + (p.x - d.x0) / view.zoom) / snap()) * snap();
+    const lo = pts[d.at - 1].step + 1;
+    const hi = (pts[d.at + 1]?.step ?? Infinity) - 1;
+    pts[d.at].step = Math.max(lo, Math.min(hi, step));
+  }
+  setTempoPoints(pts);
+  renderArrangement();
+  renderTransport();
+}
+
 /** Double-clicking in a lane makes a clip a bar long there */
 function addClip(p: { x: number; y: number }) {
-  const ti = Math.floor((p.y - RULER_H) / LANE_H);
+  const ti = Math.floor((p.y - TRACKS_TOP) / LANE_H);
   const t = song().tracks[ti];
   if (!t) return;
   before();
@@ -1446,7 +1579,7 @@ function renderTransport() {
   const name = $<HTMLInputElement>('song-name');
   if (document.activeElement !== name) name.value = s.name;
   const tempo = $<HTMLInputElement>('tempo');
-  if (document.activeElement !== tempo) tempo.value = String(s.bpm);
+  if (document.activeElement !== tempo) tempo.value = bpmText(bpmAt(s, Math.floor(playhead)));
 }
 
 function renderTrackNow() {
@@ -1491,8 +1624,13 @@ $<HTMLInputElement>('tempo').addEventListener('change', (e) => {
     input.value = String(song().bpm);
     return;
   }
+  // The tempo where the playhead is: the start's, or the change it's under
   before();
-  song().bpm = bpm;
+  const pts = tempoPoints();
+  let at = 0;
+  pts.forEach((p, i) => p.step <= playhead && (at = i));
+  pts[at].bpm = bpm;
+  setTempoPoints(pts);
   changed();
 });
 

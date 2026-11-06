@@ -13,8 +13,7 @@
       "slides up",
       "slides to notes",
       "vibrato",
-      "wave program changes",
-      "tempo changes"
+      "wave program changes"
     ]
   },
   {
@@ -24,7 +23,6 @@
     "copyright": "",
     "importable": false,
     "needs": [
-      "tempo changes",
       "slides up",
       "slides down",
       "slides to notes",
@@ -43,7 +41,6 @@
     "copyright": "2002 Covert Bitops",
     "importable": false,
     "needs": [
-      "tempo changes",
       "slides up",
       "slides to notes",
       "vibrato",
@@ -57,7 +54,6 @@
     "copyright": "2002 Covert Bitops",
     "importable": false,
     "needs": [
-      "tempo changes",
       "slides up",
       "slides down",
       "slides to notes",
@@ -80,14 +76,13 @@
     "copyright": "2002 Covert Bitops",
     "importable": false,
     "needs": [
-      "tempo changes",
+      "voices at different tempos",
       "slides up",
       "slides down",
       "slides to notes",
       "vibrato",
       "wave program changes",
-      "filter program changes",
-      "funk tempo"
+      "filter program changes"
     ]
   },
   {
@@ -104,8 +99,7 @@
       "sustain/release changes",
       "wave program changes",
       "pulse program changes",
-      "filter program changes",
-      "tempo changes"
+      "filter program changes"
     ]
   },
   {
@@ -133,7 +127,7 @@
     "copyright": "Covert Bitops 2005",
     "importable": false,
     "needs": [
-      "tempo changes",
+      "voices at different tempos",
       "slides up",
       "slides down",
       "slides to notes",
@@ -148,8 +142,7 @@
     "copyright": "",
     "importable": false,
     "needs": [
-      "slides to notes",
-      "tempo changes"
+      "slides to notes"
     ]
   },
   {
@@ -162,8 +155,7 @@
     },
     "importable": false,
     "needs": [
-      "slides to notes",
-      "funk tempo"
+      "slides to notes"
     ]
   },
   {
@@ -173,7 +165,6 @@
     "copyright": "2005 Covert Bitops",
     "importable": false,
     "needs": [
-      "tempo changes",
       "slides up",
       "slides down",
       "slides to notes",
@@ -188,7 +179,7 @@
     "copyright": "2004 Covert Bitops",
     "importable": false,
     "needs": [
-      "tempo changes",
+      "voices at different tempos",
       "slides up",
       "slides down",
       "slides to notes",
