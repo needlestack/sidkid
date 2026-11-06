@@ -989,6 +989,27 @@ try {
   const stretched = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
   report(stretched === '[[3,3]]' && cursors === 'ew-resize grab ew-resize ew-resize grab ew-resize ew-resize' && during === 'ew-resize', 'song note ends and cursors', `${stretched} ${cursors} / ${during}`);
 
+  // ⌘C copies the notes selected, ⌘V pastes them at the playhead (selected); past the clip's end it grows by bars
+  const pressMeta = async (key) => {
+    await sm.keyboard.down('Meta');
+    await sm.keyboard.press(key);
+    await sm.keyboard.up('Meta');
+  };
+  await pressMeta('c');
+  await sm.evaluate(() => window.songMaker.setPlayhead(16 + 8));
+  await pressMeta('v');
+  await sm.evaluate(() => window.songMaker.setPlayhead(16 + 15));
+  await pressMeta('v');
+  const pasted = await sm.evaluate(() => {
+    const c = window.songMaker.openClip();
+    const out = `${JSON.stringify(c.notes.map((n) => [n.start, n.length]))} ${c.length}/${c.span} ${window.songMaker.selectedNotes().map((n) => n.start).join(',')}`;
+    c.notes = c.notes.slice(0, 1);
+    c.length = c.span = 16;
+    window.songMaker.render();
+    return out;
+  });
+  report(pasted === '[[3,3],[8,3],[15,3]] 32/32 15', 'song copies and pastes notes', pasted);
+
   // The editor's ruler numbers the song's bars (this clip starts on bar 2)
   const rollBars = await sm.evaluate(() => [...document.querySelectorAll('#roll-ruler text')].map((t) => t.textContent).join(' '));
   report(rollBars.startsWith('2 2.2 2.3 2.4 3'), 'song editor shows bars', rollBars.slice(0, 40));

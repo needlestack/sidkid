@@ -1735,6 +1735,38 @@ function deleteNotes() {
   changed();
 }
 
+/** Notes copied (⌘C), from the first's start: pasted (⌘V) at the playhead */
+let copiedNotes: SongNote[] = [];
+
+function copyNotes(cut: boolean) {
+  if (!openClip || !selectedNotes.size) return;
+  const notes = [...selectedNotes].sort((a, b) => a.start - b.start || a.note - b.note);
+  const first = notes[0].start;
+  copiedNotes = notes.map((n) => ({ ...(JSON.parse(JSON.stringify(n)) as SongNote), start: n.start - first }));
+  if (cut) deleteNotes();
+}
+
+/**
+ * The notes copied, into the open clip from the playhead (its start if the
+ * playhead is before it; in the pass it's in, if the clip repeats). A clip
+ * that doesn't repeat grows by bars to hold them; a note already at a pasted
+ * one's start and pitch gives way. The pasted notes are selected.
+ */
+function pasteNotes() {
+  const c = openClip;
+  if (!c || !copiedNotes.length) return;
+  let at = Math.max(0, Math.round(playhead) - c.start);
+  if (c.span > c.length) at %= c.length;
+  const pasted = copiedNotes.map((n) => ({ ...(JSON.parse(JSON.stringify(n)) as SongNote), start: n.start + at }));
+  before();
+  const end = Math.max(...pasted.map((n) => n.start + n.length));
+  if (c.span === c.length && end > c.length) c.length = c.span = Math.ceil(end / barSteps()) * barSteps();
+  c.notes = [...c.notes.filter((o) => !pasted.some((n) => n.start === o.start && n.note === o.note)), ...pasted];
+  selectedNotes.clear();
+  for (const n of pasted) selectedNotes.add(n);
+  changed();
+}
+
 function moveNotes(by: number, up: number) {
   const c = openClip;
   if (!c || !selectedNotes.size) return;
@@ -2148,6 +2180,14 @@ window.addEventListener('keydown', (e) => {
     undo(e.shiftKey);
     return;
   }
+  if ((e.metaKey || e.ctrlKey) && ['c', 'x', 'v'].includes(e.key.toLowerCase()) && !typing(e)) {
+    const k = e.key.toLowerCase();
+    if (k === 'v' ? !openClip || !copiedNotes.length : focus !== 'roll' || !selectedNotes.size) return;
+    e.preventDefault();
+    if (k === 'v') pasteNotes();
+    else copyNotes(k === 'x');
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd' && !typing(e)) {
     e.preventDefault();
     duplicateClip();
@@ -2519,5 +2559,10 @@ Object.assign(window, {
     /** The song frame being heard */
     liveFrame,
     openClip: () => openClip,
+    selectedNotes: () => [...selectedNotes],
+    setPlayhead: (step: number) => {
+      playhead = step;
+      render();
+    },
   },
 });
