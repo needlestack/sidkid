@@ -278,7 +278,8 @@ export type FilterAction =
   | { type: 'sweep'; frames: number; speed: number };
 
 export function filterAction(s: Step): FilterAction {
-  if (s.left >= 0x80) return { type: 'setup', passband: s.left & 0x70, resonance: s.right >> 4, voices: s.right & 0x07 };
+  // (voices: bits 0-2, and bit 3 the chip's external input)
+  if (s.left >= 0x80) return { type: 'setup', passband: s.left & 0x70, resonance: s.right >> 4, voices: s.right & 0x0f };
   if (s.left === 0) return { type: 'cutoff', cutoff: s.right };
   return { type: 'sweep', frames: s.left, speed: signed(s.right) };
 }
@@ -286,7 +287,7 @@ export function filterAction(s: Step): FilterAction {
 export function filterStep(a: FilterAction): Step {
   switch (a.type) {
     case 'setup':
-      return { left: 0x80 | (a.passband & 0x70), right: ((a.resonance & 0x0f) << 4) | (a.voices & 0x07) };
+      return { left: 0x80 | (a.passband & 0x70), right: ((a.resonance & 0x0f) << 4) | (a.voices & 0x0f) };
     case 'cutoff':
       return { left: 0, right: Math.max(0, Math.min(255, Math.round(a.cutoff))) };
     case 'sweep':

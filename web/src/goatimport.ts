@@ -197,13 +197,20 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     return !!p && tables[0].right[p - 1] !== PITCH_KEEP && tables[0].left[p - 1] < 0xf0;
   };
   while (leading < end && t.freq[leading] === 0 && other.freq[leading] === 0 && !pitchSet(leading)) leading++;
+  // A step up past the note table plays 0 on the keys traced (it's a pitch
+  // on lower ones): where both are 0, the step the row itself sets
+  const tableStep = (f: number): number | null => {
+    if (t.freq[f] || !pitchSet(f)) return null;
+    const right = tables[0].right[t.pos[0][f] - 1];
+    return right < PITCH_KEEP ? (right < 0x60 ? right : right - 0x80) : null;
+  };
   const span = Math.max(1, end);
-  const sameOnBoth = Array.from({ length: span }, (_, f) => t.freq[f] === other.freq[f]);
+  const sameOnBoth = Array.from({ length: span }, (_, f) => t.freq[f] === other.freq[f] && tableStep(f) === null);
   const fixed = leading < end && sameOnBoth.slice(leading).every(Boolean);
   const absolute = (f: number) => noteOf(t.freq[f]);
   let fixedNote: number | null = null;
   const stepFixed = (f: number) => !fixed && sameOnBoth[Math.min(f, span - 1)];
-  let semis = (f: number) => (stepFixed(f) ? absolute(f) - FIXED_BASE : noteOf(t.freq[f]) - KEY);
+  let semis = (f: number) => tableStep(f) ?? (stepFixed(f) ? absolute(f) - FIXED_BASE : noteOf(t.freq[f]) - KEY);
   if (fixed && end > 0) {
     const notes = Array.from({ length: end - leading }, (_, f) => Math.round(absolute(f + leading)));
     const [lo, hi] = [Math.min(...notes), Math.max(...notes)];
@@ -246,8 +253,10 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     f++;
   }
   if (outside) gaps.push(`pitches beyond ${NOTE_LOW} to +${NOTE_HIGH} semitones`);
-  // With vibrato, setting the pitch it is already on starts the wobble again: those sets too
-  if (speedPtr) {
+  // Setting the pitch it is already on: kept too. It starts vibrato's wobble
+  // again, and in a song it brings in a note slid to (the note changes, the
+  // program's pitch with it)
+  {
     for (let f = leading; f < end; f++) {
       const p = t.pos[0][f];
       const right = p ? tables[0].right[p - 1] : PITCH_KEEP;
@@ -294,8 +303,9 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     const run = runOf(t.pos[2], t.cutoff, t.routing, t.mode);
     const fEnd = run.loop === null ? frames : run.end;
     // Chunks of a type and the voices it filters (GoatTracker's are the same whichever voice plays it)
-    const on = (f: number) => (t.routing[f] & 7 ? ((t.mode[f] & 0x70) << 4) | (t.routing[f] & 7) : null);
-    filter.types = runs(on, 0, fEnd).map((r): FilterChunk => ({ start: r.start, end: run.loop === null && r.end === fEnd ? Math.min(r.end, frames) : r.end, passband: r.value >> 4, voices: r.value & 7 }));
+    // (and the external input, bit 3, as routed)
+    const on = (f: number) => (t.routing[f] & 0x0f ? ((t.mode[f] & 0x70) << 4) | (t.routing[f] & 0x0f) : null);
+    filter.types = runs(on, 0, fEnd).map((r): FilterChunk => ({ start: r.start, end: run.loop === null && r.end === fEnd ? Math.min(r.end, frames) : r.end, passband: r.value >> 4, voices: r.value & 0x0f }));
     const lineEnd = run.loop === null ? Math.max(1, Math.min(frames, lastChange(t.cutoff, t.routing) + 1)) : run.end;
     filter.cutoff = lineOf(t.cutoff, lineEnd, run.loop);
     const res = Array.from(t.routing, (r) => r >> 4);

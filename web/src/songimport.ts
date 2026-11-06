@@ -18,7 +18,7 @@ import { importInstrument, KEY } from './goatimport';
 import { sound, soundTables } from './instruments';
 import type { Shape } from './shape';
 import { parseSong } from './song';
-import { newId, type Clip, type SongDoc, type TempoChange, type Track } from './songdoc';
+import { newId, type Clip, type NoteEffect, type SongDoc, type SongNote, type Speed, type TempoChange, type Track } from './songdoc';
 import { buildTimeline, type Note as GoatNote } from './timeline';
 
 /** Frames after a row is read that its note sounds (its program's first frame) */
@@ -39,6 +39,8 @@ export interface GoatImport {
   length: number;
 }
 
+/** The pattern commands notes' effects are */
+const EFFECTS: Record<number, NoteEffect['kind']> = { 1: 'up', 2: 'down', 3: 'slide', 4: 'vibrato' };
 const FUNK_TEMPO = 14;
 const TEMPO = 15;
 
@@ -76,7 +78,8 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
   const commands = new Set<number>();
   for (const rows of tl.rows) for (const e of rows) if (e.data.command && e.frame < tl.length) commands.add(e.data.command);
   // (tempo and funk tempo are the rows' lengths, which the tempo changes keep)
-  for (const c of [...commands].sort((x, y) => x - y)) if (c !== TEMPO && c !== FUNK_TEMPO) gaps.push(COMMAND_NAMES[c] ?? `command ${c}`);
+  // (tempo and funk tempo are the rows' lengths, kept by the tempo changes; slides, bends and vibrato are the notes' effects)
+  for (const c of [...commands].sort((x, y) => x - y)) if (c !== TEMPO && c !== FUNK_TEMPO && !EFFECTS[c]) gaps.push(COMMAND_NAMES[c] ?? `command ${c}`);
 
   const firstRow = rows[0] ?? 0;
   const lengthAt = (i: number) => (rows[Math.min(i + 1, rows.length - 1)] ?? 6) - (rows[Math.min(i, rows.length - 2)] ?? 0) || 6;
@@ -109,6 +112,30 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
     instruments.set(n, { ...shape, id: newId(), name: `${ins.name || `Instrument ${n}`} (${goat.title || name})` });
   }
 
+  // What each note does to its pitch: its rows' effects (a run of rows with
+  // the same command and speed, one range), and whether it slides in
+  const speedOf = (data: number): Speed | null => (data ? { left: goat.tables[3].left[data - 1] ?? 0, right: goat.tables[3].right[data - 1] ?? 0 } : null);
+  const extras = new Map<GoatNote, Pick<SongNote, 'slide' | 'effects'>>();
+  tl.notes.forEach((notes, voice) => {
+    const rowsOf = tl.rows[voice];
+    for (const n of notes) {
+      const first = steps(n.start);
+      const effects: NoteEffect[] = [];
+      for (const e of rowsOf) {
+        if (e.frame < n.start || e.frame >= n.end) continue;
+        const kind = EFFECTS[e.data.command];
+        if (!kind) continue;
+        const at = steps(e.frame) - first;
+        const last = effects[effects.length - 1];
+        const speed = speedOf(e.data.data);
+        if (last && last.kind === kind && last.to === at && JSON.stringify(last.speed) === JSON.stringify(speed)) last.to = at + 1;
+        else effects.push({ from: at, to: at + 1, kind, speed });
+      }
+      const row = rowsOf.find((e) => e.frame === n.start);
+      extras.set(n, { ...(n.slide ? { slide: speedOf(row?.data.data ?? 0) } : {}), ...(effects.length ? { effects } : {}) });
+    }
+  });
+
   // Tracks: each voice's notes, an instrument a track
   const tracks: Track[] = [];
   tl.notes.forEach((notes, voice) => {
@@ -118,7 +145,7 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
       if (!shape) continue;
       const mine = notes.filter((x) => x.instrument === n && x.start < tl.length);
       if (!mine.length) continue;
-      tracks.push({ id: newId(), instrument: shape.id!, voice, muted: false, clips: clipsOf(mine, patterns, steps, steps(tl.length)) });
+      tracks.push({ id: newId(), instrument: shape.id!, voice, muted: false, clips: clipsOf(mine, patterns, steps, steps(tl.length), (x) => extras.get(x)) });
     }
   });
 
@@ -136,7 +163,7 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
     tracks,
     cycle: tl.loopStart >= 0 && tl.loopStart < tl.length ? { start: Math.max(0, steps(tl.loopStart)), end } : { start: 0, end },
     cycling: false,
-    goat: { patterns: tl.clips.map((cs) => cs.map((c) => steps(c.start))), end },
+    goat: { patterns: tl.clips.map((cs) => cs.map((c) => steps(c.start))), end, ...(settings.pulseOptimization ? {} : { pulseOptimization: false }) },
   };
   return { song, instruments: [...instruments.values()], gaps, firstRow, length: tl.length };
 }
@@ -146,7 +173,7 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
  * a note is held over from one pattern into the next (a clip's notes stop
  * at its end).
  */
-function clipsOf(notes: GoatNote[], patterns: number[], steps: (frame: number) => number, songEnd: number): Clip[] {
+function clipsOf(notes: GoatNote[], patterns: number[], steps: (frame: number) => number, songEnd: number, extra: (n: GoatNote) => Pick<SongNote, 'slide' | 'effects'> | undefined): Clip[] {
   const bounds = [...patterns, songEnd];
   // The pattern a step is in, and where it ends
   const patternAt = (s: number) => {
@@ -163,7 +190,7 @@ function clipsOf(notes: GoatNote[], patterns: number[], steps: (frame: number) =
       clip = { start: bounds[patternAt(start)], length: 0, span: 0, notes: [] };
       clips.push(clip);
     }
-    clip.notes.push({ start: start - clip.start, length: end - start, note: n.note });
+    clip.notes.push({ start: start - clip.start, length: end - start, note: n.note, ...extra(n) });
     clip.length = clip.span = Math.max(clip.length, bounds[patternAt(end - 1) + 1] - clip.start);
   }
   return clips;

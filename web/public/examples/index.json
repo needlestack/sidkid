@@ -10,9 +10,6 @@
     "importable": false,
     "needs": [
       "more than one player call a frame",
-      "slides up",
-      "slides to notes",
-      "vibrato",
       "wave program changes"
     ]
   },
@@ -23,15 +20,11 @@
     "copyright": "",
     "importable": false,
     "needs": [
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "attack/decay changes",
       "sustain/release changes",
       "waveform changes",
       "filter program changes",
-      "pitches beyond -32 to +48 semitones"
+      "pitches beyond -32 to +95 semitones"
     ]
   },
   {
@@ -41,9 +34,6 @@
     "copyright": "2002 Covert Bitops",
     "importable": false,
     "needs": [
-      "slides up",
-      "slides to notes",
-      "vibrato",
       "pulse program changes"
     ]
   },
@@ -54,10 +44,6 @@
     "copyright": "2002 Covert Bitops",
     "importable": false,
     "needs": [
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "wave program changes",
       "filter program changes"
     ]
@@ -77,10 +63,6 @@
     "importable": false,
     "needs": [
       "voices at different tempos",
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "wave program changes",
       "filter program changes"
     ]
@@ -92,10 +74,6 @@
     "copyright": "",
     "importable": false,
     "needs": [
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "sustain/release changes",
       "wave program changes",
       "pulse program changes",
@@ -109,10 +87,6 @@
     "copyright": "2005 :P",
     "importable": false,
     "needs": [
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "attack/decay changes",
       "sustain/release changes",
       "waveform changes",
@@ -128,9 +102,6 @@
     "importable": false,
     "needs": [
       "voices at different tempos",
-      "slides up",
-      "slides down",
-      "slides to notes",
       "sustain/release changes",
       "waveform changes"
     ]
@@ -140,10 +111,7 @@
     "title": "Sixpack of Cola",
     "author": "beek - covered by No-XS",
     "copyright": "",
-    "importable": false,
-    "needs": [
-      "slides to notes"
-    ]
+    "importable": true
   },
   {
     "file": "tempo2test.sng",
@@ -153,10 +121,7 @@
     "settings": {
       "pulseOptimization": false
     },
-    "importable": false,
-    "needs": [
-      "slides to notes"
-    ]
+    "importable": true
   },
   {
     "file": "transylvanian.sng",
@@ -165,10 +130,6 @@
     "copyright": "2005 Covert Bitops",
     "importable": false,
     "needs": [
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "filter program changes"
     ]
   },
@@ -180,10 +141,6 @@
     "importable": false,
     "needs": [
       "voices at different tempos",
-      "slides up",
-      "slides down",
-      "slides to notes",
-      "vibrato",
       "sustain/release changes",
       "filter program changes",
       "volume changes",

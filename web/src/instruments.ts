@@ -230,13 +230,13 @@ export function sound(s: Shape, voices: number, speedBase = 1, ownVoice = false)
  * each (in order). Sounds must be made with `speedBase` where their speed
  * rows land: use `sounds()`.
  */
-export function soundTables(list: Sound[]): { tables: TableData[]; instruments: Instrument[]; rows: number[] } {
+export function soundTables(list: Sound[], extraSpeeds: Step[] = []): { tables: TableData[]; instruments: Instrument[]; rows: number[]; extraSpeedsAt: number } {
   const waves = layOut(list.map((s) => s.wave));
   const pulses = list.filter((s) => s.pulse).map((s) => s.pulse!);
   const filters = list.filter((s) => s.filter).map((s) => s.filter!);
   const pulseLayout = layOut(pulses);
   const filterLayout = layOut(filters);
-  const rows = list.flatMap((s) => s.speeds);
+  const rows = [...list.flatMap((s) => s.speeds), ...extraSpeeds];
   const table = (steps: Step[]) => ({ left: Uint8Array.from(steps, (r) => r.left), right: Uint8Array.from(steps, (r) => r.right) });
   // Where each sound's speed rows start (a variant uses its base's)
   const speedStart = new Map<Sound, number>();
@@ -261,7 +261,8 @@ export function soundTables(list: Sound[]): { tables: TableData[]; instruments: 
   });
   const tables = [waves.table, pulseLayout.table, filterLayout.table, table(rows.slice(0, 255))];
   // Rows each table needs (over 255 doesn't fit)
-  return { tables, instruments, rows: [waves.length, pulseLayout.length, filterLayout.length, rows.length] };
+  // (and where the extra speed rows start: after the sounds')
+  return { tables, instruments, rows: [waves.length, pulseLayout.length, filterLayout.length, rows.length], extraSpeedsAt: rows.length - extraSpeeds.length + 1 };
 }
 
 /** Sounds for instruments on voices (a voice bit mask each), with their speed rows numbered to follow on */

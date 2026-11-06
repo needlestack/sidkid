@@ -16,7 +16,7 @@ import { addInstruments, loadInstruments, sound as soundOf, sounds, soundTables,
 import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
 import { importGoatSong, ROW_TO_NOTE } from './songimport';
-import { bpmAt, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
+import { bpmAt, songSpeeds, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -309,8 +309,19 @@ function songPlan(from: number, cycle: { start: number; end: number } | null, me
     }
     return made.get(key)!;
   };
-  const seq = songSequence(doc, list, numbers, from, cycle, fps, metronome, resume);
-  const t = soundTables(all);
+  // The speeds the notes' slides and effects use, after the instruments' in the speed table
+  const speeds = songSpeeds(doc);
+  const speedKey = (sp: Speed) => `${sp.left}/${sp.right}`;
+  const speedIndex = new Map(speeds.map((sp, i) => [speedKey(sp), i]));
+  const at = () => soundTables(all, speeds).extraSpeedsAt;
+  let speedsAt = at();
+  const seq = songSequence(doc, list, numbers, from, cycle, fps, metronome, resume, (sp) => (sp ? speedsAt + (speedIndex.get(speedKey(sp)) ?? 0) : 0));
+  const t = soundTables(all, speeds);
+  // (resumes added while the sequence was made moved the speeds on: make it again with them where they are)
+  if (t.extraSpeedsAt !== speedsAt) {
+    speedsAt = t.extraSpeedsAt;
+    return { seq: songSequence(doc, list, numbers, from, cycle, fps, metronome, resume, (sp) => (sp ? speedsAt + (speedIndex.get(speedKey(sp)) ?? 0) : 0)), tables: t.tables, instruments: t.instruments, trackSound: numbers };
+  }
   return { seq, tables: t.tables, instruments: t.instruments, trackSound: numbers };
 }
 
@@ -2063,6 +2074,8 @@ Object.assign(window, {
       const mine = a.traceSequence(plan.tables, plan.instruments, plan.seq, frames, at);
       a.load(bytes.slice(0));
       const original = a.traceSong(0, imp.length, at);
+      // (for looking into differences: each frame's wave table position on each voice, both ways)
+      const positions = near ? { original: a.songPositions(0, imp.length, at), mine: a.sequencePositions(plan.tables, plan.instruments, plan.seq, frames, at) } : null;
       const differ: Record<string, number> = {};
       const first: Record<string, number> = {};
       const mark = (what: string, f: number) => {
@@ -2085,9 +2098,11 @@ Object.assign(window, {
       }
       const look = near && first[near] !== undefined ? Array.from({ length: 30 }, (_, k) => {
         const f = Math.max(0, first[near] - 10) + k;
-        const v = Number(near.slice(-1)) - 1;
-        const skips = plan.seq.events.filter((e) => e.frame === f && e.voice === v).map((e) => e.note).join(',');
-        return `${f}: ${pw(original[f + shift], v * 7).toString(16)} ${pw(mine[f], v * 7).toString(16)} f${(original[f + shift][v * 7] | (original[f + shift][v * 7 + 1] << 8)).toString(16)}/${(mine[f][v * 7] | (mine[f][v * 7 + 1] << 8)).toString(16)} w${original[f + shift][v * 7 + 4].toString(16)}/${mine[f][v * 7 + 4].toString(16)} ${skips}`;
+        const v = near === 'filter' ? 0 : Number(near.slice(-1)) - 1;
+        const skips = plan.seq.events.filter((e) => e.frame === f && e.voice === v).map((e) => (e.kind === 'row' ? `r${e.command}:${e.data}` : e.kind === 'slide' ? `s${e.note}:${e.data}` : e.note)).join(',');
+        if (near === 'filter') return `${f}: cut ${original[f + shift][0x16].toString(16)}/${mine[f][0x16].toString(16)} rt ${original[f + shift][0x17].toString(16)}/${mine[f][0x17].toString(16)} md ${original[f + shift][0x18].toString(16)}/${mine[f][0x18].toString(16)}`;
+        const posText = positions ? ` p${positions.original[f + shift][v]}/${positions.mine[f][v]}` : '';
+        return `${f}:${posText} ${pw(original[f + shift], v * 7).toString(16)} ${pw(mine[f], v * 7).toString(16)} f${(original[f + shift][v * 7] | (original[f + shift][v * 7 + 1] << 8)).toString(16)}/${(mine[f][v * 7] | (mine[f][v * 7 + 1] << 8)).toString(16)} w${original[f + shift][v * 7 + 4].toString(16)}/${mine[f][v * 7 + 4].toString(16)} ${skips}`;
       }) : undefined;
       return { gaps: imp.gaps, frames, differ, first, tracks: imp.song.tracks.length, clips: imp.song.tracks.reduce((n, t) => n + t.clips.length, 0), look };
     },

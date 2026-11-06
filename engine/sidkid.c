@@ -360,6 +360,28 @@ void sk_note_on(int voice, int note, int num)
   playtestnote(note + FIRSTNOTE, num, voice);
 }
 
+void sk_row(int voice, int frames, int command, int data)
+{
+  CHN *cptr;
+  if ((voice < 0) || (voice >= MAX_CHN)) return;
+  cptr = &chn[voice];
+  // The next frame is the row's first (tick 0), with its command; the
+  // player counts on to the next row at this row's length
+  cptr->tick = 1;
+  cptr->tempo = (frames >= 3) ? frames - 1 : 2;
+  cptr->newcommand = command;
+  cptr->newcmddata = data;
+}
+
+void sk_slide(int voice, int note, int data)
+{
+  if ((voice < 0) || (voice >= MAX_CHN) || (note < 0) || (note > LASTNOTE - FIRSTNOTE)) return;
+  // A row with a note and tone portamento: the note goes on, sliding to the new pitch
+  chn[voice].newnote = note + FIRSTNOTE;
+  chn[voice].newcommand = CMD_TONEPORTA;
+  chn[voice].newcmddata = data;
+}
+
 void sk_skip_pulse(int voice)
 {
   if ((voice >= 0) && (voice < MAX_CHN)) skippulse[voice] = 1;

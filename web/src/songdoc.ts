@@ -15,7 +15,49 @@ export interface SongNote {
   length: number;
   /** 0 = C-0, as GoatTracker counts */
   note: number;
+  /** Slides here from the note before (which goes on, not starting again), at this speed; null: at once */
+  slide?: Speed | null;
+  /** What it does to its pitch, over steps of it (one thing a step, as GoatTracker's rows) */
+  effects?: NoteEffect[];
 }
+
+/** A speed, as a row of GoatTracker's speed table: a 16-bit amount a frame, or (left $80 up) a fraction of a semitone */
+export interface Speed {
+  left: number;
+  right: number;
+}
+
+/** Bending up or down, sliding on toward the note, or vibrato, over steps [from, to) of a note */
+export interface NoteEffect {
+  from: number;
+  to: number;
+  kind: 'up' | 'down' | 'slide' | 'vibrato';
+  /** null: none (a slide: there at once) */
+  speed: Speed | null;
+}
+
+/** Frames before a step's note sounds that its row starts (tick 0) */
+export const ROW_EARLY = 1;
+/**
+ * In songs imported from GoatTracker, timed as its player does: frames
+ * before a step's frame that the row is read (a note's gate goes off and
+ * it starts, a key-off lets go, the pulse rests); the row's tick 0 comes
+ * the instrument's gate frames after, and its note a frame after that.
+ */
+export const GOAT_READ = 3;
+const gateOf = (s: Shape) => s.gateFrames & 0x3f;
+
+/** The speeds a song's slides and effects use, each once */
+export function songSpeeds(song: SongDoc): Speed[] {
+  const seen = new Map<string, Speed>();
+  for (const t of song.tracks)
+    for (const c of t.clips)
+      for (const n of c.notes) for (const sp of [n.slide, ...(n.effects ?? []).map((e) => e.speed)]) if (sp) seen.set(`${sp.left}/${sp.right}`, sp);
+  return [...seen.values()];
+}
+
+/** GoatTracker's pattern commands for the effects */
+export const EFFECT_COMMANDS: Record<NoteEffect['kind'], number> = { up: 1, down: 2, slide: 3, vibrato: 4 };
 
 /** A stretch of a track: its notes, played for `span` steps, repeating every `length` */
 export interface Clip {
@@ -60,7 +102,7 @@ export interface SongDoc {
    * each pattern's last row (its pulse optimization). Where each voice's
    * patterns start, and the steps the rows run to.
    */
-  goat?: { patterns: number[][]; end: number };
+  goat?: { patterns: number[][]; end: number; /** false: the song was played without it */ pulseOptimization?: boolean };
 }
 
 /** Frames a step lasts at the song's starting tempo, not a whole number in general */
@@ -143,7 +185,7 @@ export function clipNotes(c: Clip): SongNote[] {
       if (n.start >= c.length || at + n.start >= c.span) continue;
       // A note runs to the end of its pass at most
       const length = Math.min(n.length, c.length - n.start, c.span - at - n.start);
-      out.push({ start: c.start + at + n.start, length, note: n.note });
+      out.push({ ...n, start: c.start + at + n.start, length });
     }
   }
   return out;
@@ -157,6 +199,10 @@ export interface Segment {
   track: number;
   /** Frames into the note it starts at: 0 for a note starting, more for one getting its voice back */
   from: number;
+  /** The note's step, and what it does */
+  step: number;
+  slide?: Speed | null;
+  effects?: NoteEffect[];
 }
 
 interface Held {
@@ -165,6 +211,9 @@ interface Held {
   note: number;
   track: number;
   order: number;
+  step: number;
+  slide?: Speed | null;
+  effects?: NoteEffect[];
 }
 
 /**
@@ -179,7 +228,7 @@ export function voiceSegments(song: SongDoc, voice: number, fps: number): Segmen
     if (t.voice !== voice || t.muted) return;
     for (const c of t.clips) {
       for (const n of clipNotes(c)) {
-        held.push({ start: frameAt(song, n.start, fps), end: frameAt(song, n.start + n.length, fps), note: n.note, track: ti, order: order++ });
+        held.push({ start: frameAt(song, n.start, fps), end: frameAt(song, n.start + n.length, fps), note: n.note, track: ti, order: order++, step: n.start, slide: n.slide, effects: n.effects });
       }
     }
   });
@@ -195,7 +244,7 @@ export function voiceSegments(song: SongDoc, voice: number, fps: number): Segmen
     }
     const prev = out[out.length - 1];
     if (top && top === last && prev && prev.end === t) prev.end = times[i + 1];
-    else if (top) out.push({ start: t, end: times[i + 1], note: top.note, track: top.track, from: t - top.start });
+    else if (top) out.push({ start: t, end: times[i + 1], note: top.note, track: top.track, from: t - top.start, step: top.step, ...(top.slide !== undefined ? { slide: top.slide } : {}), ...(top.effects ? { effects: top.effects } : {}) });
     last = top;
   }
   return out;
@@ -254,6 +303,8 @@ export function songSequence(
   /** Clicks on the beats, and a bar of them first (count-in) */
   metronome: { click: boolean; countIn: boolean } = { click: false, countIn: false },
   resume: Resumer = () => null,
+  /** The speed table row a speed is in (0 for none) */
+  speedRow: (speed: Speed | null) => number = () => 0,
 ): Sequence {
   const end = cycle ? cycle.end : frameAt(song, songEnd(song), fps);
   // The first pass, from where playing starts; then the cycle, round and round
@@ -264,7 +315,7 @@ export function songSequence(
   const barSteps = song.stepsPerBeat * song.beatsPerBar;
   const fromStep = stepAt(song, from, fps);
   const bar = exactFrame(song, fromStep, fps) - exactFrame(song, fromStep - barSteps, fps);
-  const preroll = Math.max(1, ...sounds.map((s) => Math.max(leadOf(s.shape), resumeLeadOf(s.shape))), metronome.countIn ? Math.ceil(bar) + 1 : 0);
+  const preroll = Math.max(1, song.goat ? GOAT_READ : 0, ...sounds.map((s) => Math.max(leadOf(s.shape), resumeLeadOf(s.shape))), metronome.countIn ? Math.ceil(bar) + 1 : 0);
   const events: SeqEvent[] = [];
   for (let voice = 0; voice < VOICES; voice++) {
     const all = voiceSegments(song, voice, fps).filter((s) => trackSound[s.track] > 0);
@@ -285,24 +336,72 @@ export function songSequence(
     const round = cycle ? placed(clip(cycle.start, cycle.end, firstLength - cycle.start)) : [];
     const segs = [...first, ...round];
     const sound = (s: Segment) => sounds[trackSound[s.track] - 1].shape;
-    const lead = (s: (typeof segs)[number]) => (s.resumed ? resumeLeadOf(sound(s)) : leadOf(sound(s)));
+    // A note sliding from the one before goes on from it: no start of its own, nor a let-go before it
+    const slides = (s: (typeof segs)[number], before: (typeof segs)[number] | undefined) => s.slide !== undefined && !s.from && !!before && before.end >= s.start;
+    const lead = (s: (typeof segs)[number]) => (song.goat ? GOAT_READ : s.resumed ? resumeLeadOf(sound(s)) : leadOf(sound(s)));
+    // Where a row starts (tick 0) for a step at frame f, its voice playing an instrument
+    const rowFrame = (f: number, shape: Shape) => (song.goat ? f - GOAT_READ + gateOf(shape) : f - ROW_EARLY);
     // The pass coming round again, for the notes ending the cycle
     const again = round.length ? { ...round[0], start: round[0].start + (cycle!.end - cycle!.start), end: round[0].end } : null;
     segs.forEach((s, i) => {
       const shape = sound(s);
-      const on = s.start - lead(s);
-      events.push({ frame: on, voice, note: s.note, instrument: s.instrument, ...(loopFrom !== null && s.start >= loopFrom && on < loopFrom ? { lead: true } : {}) });
+      const sliding = slides(s, segs[i - 1]);
+      // (a slide is a row's note: the frame before the note's own, as rows are)
+      const on = sliding ? rowFrame(s.start, shape) : s.start - lead(s);
+      const early = loopFrom !== null && s.start >= loopFrom && on < loopFrom ? { lead: true } : {};
+      if (sliding) events.push({ frame: on, voice, note: s.note, instrument: 0, kind: 'slide', data: speedRow(s.slide ?? null), ...early });
+      else events.push({ frame: on, voice, note: s.note, instrument: s.instrument, ...early });
       // Let go at the end, unless the next note on the voice starts first
       // (starting a note lets go of the last), or the instrument lets go itself
       const next = segs[i + 1] ?? (cycle ? again : null);
-      if (shape.release !== null) return;
+      // (an instrument that lets go by itself is left to, but GoatTracker's key-offs cut it short in songs imported from it)
+      if (shape.release !== null && !song.goat) return;
+      if (next && slides(next, s)) return;
       // (it lets go the lead before its end, as the player looks ahead to a key-off row as to a note)
       const off = s.end - lead(s);
       if (next && next.start - lead(next) <= off) return;
       events.push({ frame: Math.min(off, length - 1), voice, note: LET_GO, instrument: 0 });
     });
   }
-  if (song.goat) {
+  // Every step a row on each voice, as a song's player reads them: its first
+  // frame is tick 0 (effects rest), and it carries the effect of the note
+  // playing then (GoatTracker's command for that row)
+  for (let voice = 0; voice < VOICES; voice++) {
+    const all = voiceSegments(song, voice, fps);
+    const shapeOf = (sg: Segment) => sounds[(trackSound[sg.track] || 1) - 1]?.shape;
+    const add = (a: number, b: number, shift: number) => {
+      const lo = Math.max(0, Math.floor(stepAt(song, a, fps)) - 1);
+      const hi = Math.ceil(stepAt(song, b, fps)) + 1;
+      let k = 0;
+      // The instrument the voice last started a note with (its gate frames time imported songs' rows)
+      let last = all[0];
+      let j = 0;
+      for (let step = lo; step <= hi; step++) {
+        const f = frameAt(song, step, fps);
+        if (f < a || f >= b) continue;
+        while (k < all.length && all[k].end <= f) k++;
+        for (; j < all.length && all[j].start <= f; j++) if (!all[j].from) last = all[j];
+        const seg = all[k] && all[k].start <= f ? all[k] : null;
+        const fx = seg?.effects?.find((e) => step - seg.step >= e.from && step - seg.step < e.to);
+        const playing = last && shapeOf(last);
+        const frame = (playing ? (song.goat ? f - GOAT_READ + gateOf(playing) : f - ROW_EARLY) : f - ROW_EARLY) + shift;
+        events.push({
+          frame,
+          voice,
+          note: 0,
+          instrument: 0,
+          kind: 'row',
+          frames: frameAt(song, step + 1, fps) - f,
+          command: fx ? EFFECT_COMMANDS[fx.kind] : 0,
+          data: fx ? speedRow(fx.speed) : 0,
+          ...(loopFrom !== null && f + shift >= loopFrom && frame < loopFrom ? { lead: true } : {}),
+        });
+      }
+    };
+    add(from, end, -from);
+    if (cycle) add(cycle.start, cycle.end, firstLength - cycle.start);
+  }
+  if (song.goat && song.goat.pulseOptimization !== false) {
     const skips = goatPulseSkips(song, sounds, trackSound, fps);
     skips.forEach((frames, voice) => {
       const add = (a: number, b: number, shift: number) => {
@@ -312,7 +411,9 @@ export function songSequence(
       if (cycle) add(cycle.start, cycle.end, firstLength - cycle.start);
     });
   }
-  events.sort((a, b) => a.frame - b.frame || (a.note < 0 ? 0 : 1) - (b.note < 0 ? 0 : 1));
+  // Within a frame: letting go first, then the row, then notes and slides (a slide's command is its row's)
+  const order = (e: SeqEvent) => (e.kind === 'row' ? 1 : e.kind === 'slide' || e.note >= 0 ? 2 : 0);
+  events.sort((a, b) => a.frame - b.frame || order(a) - order(b));
   // The metronome on the song's beats: the count-in's bar before `from`, the first pass, the cycle
   const beats: number[] = [];
   const bars: number[] = [];
@@ -350,7 +451,7 @@ function goatPulseSkips(song: SongDoc, sounds: SongSound[], trackSound: number[]
     for (let step = 0; step < goat.end; step++) {
       const at = frameAt(song, step, fps);
       while (k < starts.length && starts[k].frame <= at) lead = starts[k++].lead;
-      out.push(at - lead);
+      out.push(song.goat ? at - GOAT_READ : at - lead);
     }
     // (a pattern's last row is read a step before the next starts, which sounds two frames later: so the frame before that)
     for (const p of goat.patterns[voice] ?? []) if (p > 0) out.push(frameAt(song, p - 1, fps) - 1);

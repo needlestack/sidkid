@@ -89,6 +89,16 @@ void sk_set_instrument(int num, int ad, int sr, int wave, int pulse, int filter,
 void sk_note_on(int voice, int note, int num);
 // Releases the note; if it hasn't started yet, as soon as it does.
 void sk_note_off(int voice);
+// Starts a row on a voice, as the song player does on reading one: the
+// next frame is the row's first (tick 0, when effects rest), the row lasts
+// `frames` (to the next one), and its command (0 for none) and data apply
+// from then, as a pattern row's do. Called each row, it times effects as a
+// song does.
+void sk_row(int voice, int frames, int command, int data);
+// A note row with tone portamento: at the next row's start the voice's
+// note slides to `note` (0 = C-0) at `data`'s speed (0: at once), without
+// starting again.
+void sk_slide(int voice, int note, int data);
 // Holds a voice's pulse program still for the next frame, as the player
 // does itself on the first row of a pattern with pulse optimization on.
 void sk_skip_pulse(int voice);

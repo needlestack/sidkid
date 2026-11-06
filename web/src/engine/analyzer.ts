@@ -124,6 +124,40 @@ export class Analyzer {
     return out;
   }
 
+  /** For looking into songs: each frame's wave table position on each voice, playing the loaded song (as traceSong) */
+  songPositions(subsong: number, frames: number, settings: Settings): number[][] {
+    const { sk } = this;
+    configure(sk, settings);
+    sk._sk_play(subsong);
+    const out: number[][] = [];
+    for (let f = 0; f < frames; f++) {
+      out.push([0, 1, 2].map((v) => sk._sk_table_pos(v, 0)));
+      sk._sk_tick();
+    }
+    sk._sk_stop();
+    sk._sk_reset();
+    return out;
+  }
+
+  /** The same, playing a sequence (as traceSequence) */
+  sequencePositions(tables: TableData[], instruments: Instrument[], seq: Sequence, frames: number, settings: Settings): number[][] {
+    const { sk } = this;
+    configure(sk, settings);
+    sk._sk_reset();
+    writeTables(sk, tables);
+    instruments.forEach((ins, i) => writeInstrument(sk, i + 1, ins));
+    const sequencer = new Sequencer();
+    sequencer.load(seq);
+    const out: number[][] = [];
+    for (let f = -seq.preroll; f < frames; f++) {
+      sequencer.tick(sk);
+      if (f >= 0) out.push([0, 1, 2].map((v) => sk._sk_table_pos(v, 0)));
+      sk._sk_tick();
+    }
+    sk._sk_reset();
+    return out;
+  }
+
   /**
    * Plays a sequence silently with instruments 1, 2, ... and returns the 25
    * SID registers after each frame, from the sequence's frame 0 (its preroll

@@ -38,7 +38,8 @@ export const arrival = (n: Note) => n.start + (n.glide ?? 0);
 
 /** The range of the notes, in semitones from the note played */
 export const NOTE_LOW = -32;
-export const NOTE_HIGH = 48;
+/** (as far up as GoatTracker's relative pitches go) */
+export const NOTE_HIGH = 95;
 
 /** A pulse width (0-4095) at a time, in frames from the start of the note. */
 export interface PulsePoint {

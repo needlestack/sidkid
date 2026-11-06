@@ -13,6 +13,15 @@ export interface SeqEvent {
   instrument: number;
   /** A note's start for the repeat's first frames: on each repeat it plays this early, before the jump back */
   lead?: boolean;
+  /**
+   * A row starting next frame on the voice (see sk_row: frames to the next
+   * row, its command and data), or a slide to `note` at `data`'s speed
+   * (sk_slide); otherwise a note starts or lets go, or the pulse skips
+   */
+  kind?: 'row' | 'slide';
+  frames?: number;
+  command?: number;
+  data?: number;
 }
 
 export interface Sequence {
@@ -91,7 +100,9 @@ export class Sequencer {
 }
 
 function play(sk: SidKidModule, e: SeqEvent) {
-  if (e.note === SKIP_PULSE) sk._sk_skip_pulse(e.voice);
+  if (e.kind === 'row') sk._sk_row(e.voice, e.frames ?? 6, e.command ?? 0, e.data ?? 0);
+  else if (e.kind === 'slide') sk._sk_slide(e.voice, e.note, e.data ?? 0);
+  else if (e.note === SKIP_PULSE) sk._sk_skip_pulse(e.voice);
   else if (e.note < 0) sk._sk_note_off(e.voice);
   else sk._sk_note_on(e.voice, e.note, e.instrument);
 }
