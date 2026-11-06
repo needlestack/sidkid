@@ -557,6 +557,30 @@ try {
   });
   report(restart === '2 82', 'maker2 hard restart', restart);
 
+  // A step fixed on its own (a drum hit before a bass): the same on any key, the rest from the key
+  const steps = await m2.evaluate(() => {
+    const m = window.maker2;
+    const s = m.state();
+    const ins = s.instruments[s.current];
+    ins.notes = [{ start: 0, semis: 12, fixed: true }, { start: 3, semis: 0 }];
+    const f = [24, 60].map((key) => (m.setKey(key), m.trace(6).freq));
+    ins.notes = [];
+    m.setKey(48);
+    return `${f[0][1] === f[1][1] ? 'fixed' : 'moves'} then ${f[0][4] !== f[1][4] ? 'played' : 'stuck'}`;
+  });
+  report(steps === 'fixed then played', 'maker2 fixed steps', steps);
+
+  // Ring modulation and sync: the register's bits, for the whole note or a stretch
+  const bitsSet = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    ins.bits = [{ wave: 0x04, start: 0, end: null }, { wave: 0x02, start: 1, end: 3 }];
+    const c = Array.from(window.maker2.trace(6).control, (v) => (v & 6).toString(16)).join('');
+    ins.bits = [];
+    return c;
+  });
+  report(bitsSet === '466444', 'maker2 ring and sync', bitsSet);
+
   // Song instruments imported: those with nothing the shapes can't hold play just as they did
   const imported = await m2.evaluate(async () => {
     const out = [];
@@ -671,6 +695,17 @@ try {
   const ntscRelease = await releaseText();
   await m2.click('#clock [data-ntsc="0"]');
   report(palRelease === 'Release 761 ms' && ntscRelease === 'Release 733 ms', 'maker2 clock changes envelope times', `${palRelease} → ${ntscRelease}`);
+
+  // Saved and loaded again, glides and fixed steps stay
+  const kept = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    s.instruments[0].notes = [{ start: 0, semis: 5, fixed: true }, { start: 4, semis: 0, glide: 6 }];
+    localStorage.setItem('sidkid.maker2.v1', JSON.stringify(s));
+  });
+  await m2.reload();
+  await m2.waitForFunction(() => window.maker2?.ready());
+  const reloaded = await m2.evaluate(() => JSON.stringify(window.maker2.state().instruments[0].notes));
+  report(reloaded === '[{"start":0,"semis":5,"fixed":true},{"start":4,"semis":0,"glide":6}]', 'maker2 keeps glides and fixed steps', reloaded);
 
   await colorScheme(m2, 'dark');
   await m2.screenshot({ path: `${OUT}/${BROWSER}-maker2-dark.png` });

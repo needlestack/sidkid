@@ -7,7 +7,7 @@
 // shape repeats too. What a shape can't hold is listed as gaps.
 
 import type { Trace } from './engine/analyzer';
-import { defaultFilter, defaultPulse, NOTE_HIGH, NOTE_LOW, type Bar, type FilterChunk, type Note, type PulsePoint, type Shape } from './shape';
+import { defaultFilter, defaultPulse, FIXED_BASE, NOTE_HIGH, NOTE_LOW, type Bar, type FilterChunk, type Note, type PulsePoint, type Shape } from './shape';
 import type { Instrument } from './song';
 import { WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { freqOf } from './vibrato';
@@ -77,6 +77,15 @@ function corners(v: ArrayLike<number>, from: number, to: number, slack: number):
   return out;
 }
 
+/**
+ * The note a frequency register value plays: a note's own value where it
+ * is one (the top notes all clamp to $FFFF), else in between by its pitch
+ */
+function noteOf(freq: number): number {
+  for (let n = 0; n < 96; n++) if (Math.abs(freqOf(n) - freq) <= 2) return n;
+  return 12 * Math.log2(freq / freqOf(0));
+}
+
 /** A line over frames [0, end) as points, with its repeat from `loop` (frames loop..end-1 going round) */
 function lineOf(v: ArrayLike<number>, end: number, loop: number | null, slack = 0): { points: PulsePoint[]; loop: number | null } {
   if (loop === null) return { points: corners(v, 0, Math.max(0, end - 1), slack), loop: null };
@@ -143,27 +152,31 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   // After it stops, the player keeps the last waveform: held, unless that was silence
   const hold = loop !== null || (end > 0 && (t.control[end - 1] & 0xf0) !== 0);
 
-  const used = (bit: number) => Array.from(t.control).some((c) => c & bit);
-  if (used(SYNC)) gaps.push('sync');
-  if (used(RING)) gaps.push('ring modulation');
-  if (Array.from(t.control).some((c, f) => f > 0 && c & TEST)) gaps.push('the test bit partway through');
+  // The register's other bits, the same way (on all the way through, held: on for the whole note)
+  const bits: Bar[] = [];
+  for (const bit of [TEST, RING, SYNC]) {
+    const on = runs((f) => (t.control[f] & bit ? true : null), 0, end);
+    if (on.length === 1 && on[0].start === 0 && on[0].end === end && hold) bits.push({ wave: bit, start: 0, end: null });
+    else for (const r of on) bits.push({ wave: bit, start: r.start, end: r.end });
+  }
 
   // Letting go of the key itself: the gate going off and staying off
   let release: number | null = null;
   const off = Array.from(t.control).findIndex((c) => !(c & GATE));
   if (off >= 0) {
-    release = Math.max(1, off);
+    release = off;
     if (Array.from(t.control).slice(off).some((c) => c & GATE)) gaps.push('the gate going back on after letting go');
   }
 
-  // Pitch: fixed when another key plays the same, else from the key played
+  // Pitch: fixed where another key plays the same (all of it: the whole
+  // instrument, else those steps), else from the key played
   const span = Math.max(1, end);
   const sameOnBoth = Array.from({ length: span }, (_, f) => t.freq[f] === other.freq[f]);
   const fixed = sameOnBoth.every(Boolean);
-  if (!fixed && sameOnBoth.some(Boolean) && end > 0) gaps.push('pitches both fixed and from the key played');
-  const absolute = (f: number) => 12 * Math.log2(t.freq[f] / freqOf(0));
+  const absolute = (f: number) => noteOf(t.freq[f]);
   let fixedNote: number | null = null;
-  let semis = (f: number) => 12 * Math.log2(t.freq[f] / freqOf(KEY));
+  const stepFixed = (f: number) => !fixed && sameOnBoth[Math.min(f, span - 1)];
+  let semis = (f: number) => (stepFixed(f) ? absolute(f) - FIXED_BASE : noteOf(t.freq[f]) - KEY);
   if (fixed && end > 0) {
     const notes = Array.from({ length: end }, (_, f) => Math.round(absolute(f)));
     const [lo, hi] = [Math.min(...notes), Math.max(...notes)];
@@ -173,7 +186,10 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   }
   const notes: Note[] = [];
   let cur = 0;
+  let curFixed = false;
+  const step = (start: number, n: number, f: number, glide = 0): Note => ({ start, semis: n, ...(glide ? { glide } : {}), ...(stepFixed(f) ? { fixed: true } : {}) });
   let outside = false;
+  if (Array.from(t.freq.subarray(0, end)).some((f, i) => f === 0 && t.control[i] & 0xf0)) gaps.push('a pitch of 0 (left from before, or off the note table)');
   const keep = (n: number) => {
     if (n < NOTE_LOW || n > NOTE_HIGH) outside = true;
     return Math.max(NOTE_LOW, Math.min(NOTE_HIGH, n));
@@ -182,8 +198,9 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   for (let f = 0; f < end; ) {
     if (whole(f)) {
       const n = keep(Math.round(semis(f)));
-      if (n !== cur) notes.push({ start: f, semis: n });
+      if (n !== cur || stepFixed(f) !== curFixed) notes.push(step(f, n, f));
       cur = n;
+      curFixed = stepFixed(f);
       f++;
       continue;
     }
@@ -193,12 +210,13 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     if (f >= end) {
       gaps.push('slides that don’t land on a note');
       const n = keep(Math.round(semis(end - 1)));
-      notes.push({ start: from, semis: n, glide: Math.max(1, end - 1 - from) });
+      notes.push(step(from, n, end - 1, Math.max(1, end - 1 - from)));
       break;
     }
     const n = keep(Math.round(semis(f)));
-    notes.push({ start: from, semis: n, glide: f - from });
+    notes.push(step(from, n, f, f - from));
     cur = n;
+    curFixed = stepFixed(f);
     f++;
   }
   if (outside) gaps.push(`pitches beyond ${NOTE_LOW} to +${NOTE_HIGH} semitones`);
@@ -213,7 +231,7 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
       if (!finishes || right === PITCH_KEEP || left >= 0xf0) continue;
       if (!notes.some((n) => n.start <= f && f <= n.start + (n.glide ?? 0))) {
         const n = keep(Math.round(semis(f)));
-        notes.push({ start: f, semis: n });
+        notes.push(step(f, n, f));
       }
     }
     notes.sort((a, b) => a.start - b.start);
@@ -231,7 +249,7 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
   if (pulsePtr) {
     const run = runOf(t.pos[1], t.pulse);
     pulse = lineOf(t.pulse, Math.max(1, run.end), run.loop, 1);
-  } else if (bars.some((b) => b.wave === WAVE_PULSE)) gaps.push('pulse width left to the song');
+  }
 
   // The filter
   const filter = defaultFilter();
@@ -257,9 +275,6 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     if (l >= 0xf0 && l < 0xff && COMMAND_NAMES[l & 0xf]) commands.add(COMMAND_NAMES[l & 0xf]);
   }
   gaps.push(...commands);
-  if (ins.firstWave !== 0x09) gaps.push(`a first frame of $${ins.firstWave.toString(16).padStart(2, '0')}`);
-  if (ins.gateTimer & 0x40) gaps.push('notes running on without letting go');
-  if ((ins.gateTimer & 0x3f) !== 2) gaps.push(`letting go ${ins.gateTimer & 0x3f} frames before a note`);
 
   const shape: Shape = {
     name: ins.name || 'Imported',
@@ -275,6 +290,11 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     fixedNote,
     release,
     hardRestart: !(ins.gateTimer & 0x80),
+    bits,
+    legato: (ins.gateTimer & 0x40) !== 0,
+    gateFrames: ins.gateTimer & 0x3f,
+    firstWave: ins.firstWave,
+    pulseFromSong: !pulsePtr,
   };
   return { shape, gaps };
 }

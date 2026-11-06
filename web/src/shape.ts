@@ -26,14 +26,19 @@ export interface Note {
   semis: number;
   /** Frames it slides over from the pitch before, arriving at start + glide (none: it jumps) */
   glide?: number;
+  /** Always this pitch, whatever key is played: its semitones are then from C-4 (FIXED_BASE) */
+  fixed?: boolean;
 }
+
+/** The note a fixed step's semitones are from: C-4 */
+export const FIXED_BASE = 48;
 
 /** Where a change of pitch arrives: after its glide */
 export const arrival = (n: Note) => n.start + (n.glide ?? 0);
 
 /** The range of the notes, in semitones from the note played */
-export const NOTE_LOW = -12;
-export const NOTE_HIGH = 24;
+export const NOTE_LOW = -32;
+export const NOTE_HIGH = 48;
 
 /** A pulse width (0-4095) at a time, in frames from the start of the note. */
 export interface PulsePoint {
@@ -85,7 +90,26 @@ export interface Shape {
   release: number | null;
   /** Each note silences the one before for a moment first (GoatTracker's hard restart), for a clean attack */
   hardRestart: boolean;
+  /**
+   * The waveform register's other bits over time: test, ring modulation and
+   * sync (bars like the waveforms', each one bit). Ring and sync on for the
+   * whole note are a bar from 0 with no end.
+   */
+  bits: Bar[];
+  /** Notes run into each other without letting go (GoatTracker's gate timer bit $40) */
+  legato: boolean;
+  /** Frames before the next note that this one lets go (GoatTracker's gate timer, 2 by default) */
+  gateFrames: number;
+  /** The waveform for the frame before the program starts ($09 by default: test bit and gate) */
+  firstWave: number;
+  /** Leaves pulse width to the song (or whatever played before): no pulse program */
+  pulseFromSong: boolean;
 }
+
+/** The waveform register's bits that aren't oscillators */
+export const TEST_BIT = 0x08;
+export const RING_BIT = 0x04;
+export const SYNC_BIT = 0x02;
 
 /**
  * The filter as an instrument sets it, over time: its type (low, band, high
@@ -145,11 +169,13 @@ export function lineAt(line: PulseShape, t: number): number {
 }
 
 /** The parts of a shape that make its wave program */
-export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'> & Partial<Pick<Shape, 'fixedNote' | 'release'>>;
+export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'> & Partial<Pick<Shape, 'fixedNote' | 'release' | 'bits'>>;
 
 /** Where the wave program's bars and notes end, or null if there are none. */
-export function programEnd(s: Pick<Shape, 'bars' | 'notes'>): number | null {
-  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...s.notes.map((n) => arrival(n) + 1)];
+export function programEnd(s: Pick<Shape, 'bars' | 'notes'> & Partial<Pick<Shape, 'bits'>>): number | null {
+  // (a bit on for the whole note, with no end, doesn't make the program longer)
+  const bits = (s.bits ?? []).filter((b) => b.end !== null);
+  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...bits.map((b) => b.end!), ...s.notes.map((n) => arrival(n) + 1)];
   return ends.length ? Math.max(...ends) : null;
 }
 
@@ -281,13 +307,14 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
   const end = programEnd(s);
   const fixed = s.fixedNote ?? null;
   const release = s.release ?? null;
-  const pitchByte = (semis: number) => pitchRight(fixed === null ? { type: 'relative', semitones: semis } : { type: 'fixed', note: fixed + semis });
+  const pitchByte = (semis: number, step: boolean) =>
+    pitchRight(fixed !== null ? { type: 'fixed', note: fixed + semis } : step ? { type: 'fixed', note: FIXED_BASE + semis } : { type: 'relative', semitones: semis });
   // Letting go of the key itself: the waveform written without its gate from then on
   const gate = (f: number) => (release !== null && f >= release ? 0 : WAVE_GATE);
   const steps: Step[] = [];
   const speeds: Step[] = [];
   if (end === null) {
-    steps.push({ left: waveLeft({ type: 'wave', wave: gate(0) }), right: pitchByte(0) });
+    steps.push({ left: waveLeft({ type: 'wave', wave: gate(0) }), right: pitchByte(0, false) });
     return { program: { name, steps, next: null }, speeds };
   }
   const looping = waveLooping(s);
@@ -305,8 +332,14 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
   const notes = [...s.notes].sort((a, b) => a.start - b.start);
   const waveAt = (t: number) => {
     let w = 0;
-    for (const b of s.bars) if (b.start <= t && t < (b.end ?? Infinity)) w |= b.wave;
+    for (const b of [...s.bars, ...(s.bits ?? [])]) if (b.start <= t && t < (b.end ?? Infinity)) w |= b.wave;
     return w;
+  };
+  // Whether the step heard at a frame is fixed (gliding, the one it glides to)
+  const fixedAt = (t: number) => {
+    let at: Note | null = null;
+    for (const n of notes) if (n.start <= t) at = n;
+    return !!at?.fixed;
   };
   const gliding = (t: number) => notes.some((n) => n.start <= t && t < arrival(n));
   // Where a pitch is set: even the one it is already on (that starts vibrato's wobble again)
@@ -336,6 +369,7 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
   // The pitch now (between semitones while gliding), and the semitone last set (glides go in fractions of the one above it)
   let wave = -1;
   let cur = 0;
+  let curFixed = false;
   let last = 0;
   let back = 0;
   for (let f = 0; f < frames; f++) {
@@ -343,24 +377,29 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     const past = !looping && t >= end;
     const w = (past ? (s.hold ? waveAt(end - 1) : 0) : waveAt(t)) | gate(f);
     const want = glidePitchAt(notes, past ? end - 1 : t);
+    const wantFixed = fixedAt(past ? end - 1 : t);
     // The first row sets both (the player sets the pitch only from the
     // program), and so does the one the repeat comes back to
     const all = f === 0 || f === target;
     if (all || w !== wave) {
       const n = Math.round(want);
-      const set = all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur || (!past && sets.has(t)));
+      const set = all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur || wantFixed !== curFixed || (!past && sets.has(t)));
       flush();
       if (f === target) back = steps.length;
-      steps.push({ left: waveLeft({ type: 'wave', wave: w }), right: set ? pitchByte(n) : PITCH_KEEP });
+      steps.push({ left: waveLeft({ type: 'wave', wave: w }), right: set ? pitchByte(n, wantFixed) : PITCH_KEEP });
       wave = w;
-      if (set) cur = last = n;
+      if (set) {
+        cur = last = n;
+        curFixed = wantFixed;
+      }
       continue;
     }
     if (past || !gliding(t)) {
-      if (want !== cur || (!past && sets.has(t))) {
+      if (want !== cur || wantFixed !== curFixed || (!past && sets.has(t))) {
         flush();
-        steps.push({ left: WAVE_KEEP, right: pitchByte(want) });
+        steps.push({ left: WAVE_KEEP, right: pitchByte(want, wantFixed) });
         cur = last = want;
+        curFixed = wantFixed;
       } else idle++;
       continue;
     }
@@ -370,7 +409,7 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     // same interval on any key)
     const n = Math.round(want);
     let best: { err: number; to: number; step: Step | null; shift: number } = { err: Math.abs(cur - want), to: cur, step: null, shift: -1 };
-    if (Math.abs(n - want) < best.err - NEAR) best = { err: Math.abs(n - want), to: n, step: { left: WAVE_KEEP, right: pitchByte(n) }, shift: -1 };
+    if (Math.abs(n - want) < best.err - NEAR) best = { err: Math.abs(n - want), to: n, step: { left: WAVE_KEEP, right: pitchByte(n, wantFixed) }, shift: -1 };
     const semitone = 2 ** (last / 12) * (2 ** (1 / 12) - 1);
     for (let shift = 0; shift < 8; shift++) {
       for (const dir of [1, -1]) {
@@ -388,7 +427,10 @@ export function waveProgram(s: WaveParts, name: string, speedBase = 1): { progra
     flush();
     steps.push(best.step);
     cur = best.to;
-    if (best.shift < 0) last = n;
+    if (best.shift < 0) {
+      last = n;
+      curFixed = wantFixed;
+    }
   }
   // Waits before going round again (a jump takes no frame); otherwise the last row holds
   if (looping) flush();

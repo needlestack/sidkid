@@ -19,7 +19,7 @@ import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAV
 import { waveIcon, waveRun } from './waveicon';
 import { filterScope, modeIcon } from './filtercurve';
 import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { arrival, chunkAt, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
+import { arrival, chunkAt, FIXED_BASE, RING_BIT, SYNC_BIT, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -33,6 +33,9 @@ let FPS = ntsc ? 60 : 50;
 /** Chip clock cycles per second */
 let CLOCK = ntsc ? 1022727 : 985248;
 let settings: Settings = { ...DEFAULT_SETTINGS, ntsc };
+/** How a new instrument's notes start: as GoatTracker's do by default */
+const NOTE_START = { bits: [] as Bar[], legato: false, gateFrames: 2, firstWave: 0x09, pulseFromSong: false };
+
 const STORAGE_KEY = 'sidkid.maker2.v1';
 const TEST_INSTRUMENT = 1;
 /** The timeline's length: 32 seconds, the slowest attack (8 s) and decay (24 s) together */
@@ -75,6 +78,8 @@ interface State {
   notesOpen: boolean;
   /** Whether the filter is open, at the bottom */
   filterOpen: boolean;
+  /** The lowest pitch the roll shows (it shows ROLL_SPAN semitones up from it) */
+  rollLow: number;
 }
 
 function defaults(): State {
@@ -102,6 +107,7 @@ function defaults(): State {
         fixedNote: null,
         release: null,
         hardRestart: true,
+        ...NOTE_START,
       },
       {
         name: 'Bass',
@@ -125,6 +131,7 @@ function defaults(): State {
         fixedNote: null,
         release: null,
         hardRestart: true,
+        ...NOTE_START,
       },
       {
         name: 'Snare',
@@ -144,6 +151,7 @@ function defaults(): State {
         fixedNote: null,
         release: null,
         hardRestart: true,
+        ...NOTE_START,
       },
     ],
     current: 0,
@@ -153,6 +161,7 @@ function defaults(): State {
     waveOpen: false,
     notesOpen: false,
     filterOpen: false,
+    rollLow: -12,
   };
 }
 
@@ -171,11 +180,16 @@ function load(): State {
         ins.pulse ??= defaultPulse();
         ins.waveLoop ??= null;
         // Notes had ends, which the player never heard (a pitch holds): now just their starts
-        ins.notes = (ins.notes ?? []).map((n) => ({ start: n.start, semis: n.semis }));
+        ins.notes = (ins.notes ?? []).map(({ end: _end, ...n }: Note & { end?: number }) => n);
         ins.vibrato ??= null;
         ins.fixedNote ??= null;
         ins.release ??= null;
         ins.hardRestart ??= true;
+        ins.bits ??= [];
+        ins.legato ??= false;
+        ins.gateFrames ??= 2;
+        ins.firstWave ??= 0x09;
+        ins.pulseFromSong ??= false;
         // Filters saved before they came in chunks: a type from the start, as one chunk to the end
         const old = ins.filter as unknown as { passband?: number; resonance: number | PulseShape; cutoff: PulseShape; types?: { start: number; end?: number; passband: number }[] } | null;
         if (!old) ins.filter = defaultFilter();
@@ -253,6 +267,8 @@ interface Audition {
 
 /** The gate timer's bit that leaves out the hard restart (the gate still goes off the frames before a note) */
 const NO_HARD_RESTART = 0x80;
+/** The gate timer's bit that keeps the gate on into the next note */
+const NO_GATE_OFF = 0x40;
 
 /** Where the key goes up: the instrument's own place when fixed, else the view's (how long the note is played) */
 function keyUp(): number {
@@ -266,7 +282,7 @@ function setKeyUp(f: number) {
 }
 
 function audition(s: Shape = shape()): Audition {
-  const pulse = pulseProgram(s.bars, s.pulse, s.name);
+  const pulse = s.pulseFromSong ? null : pulseProgram(s.bars, s.pulse, s.name);
   const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
   // Vibrato reads its speed from a row of the speed table, and glides from the rows after it
   const v = s.vibrato;
@@ -278,7 +294,7 @@ function audition(s: Shape = shape()): Audition {
   const filter = s.filter.types.length ? filterProgram(s.filter, s.name, 1) : null;
   return {
     tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, filter ? layOut([filter]).table : empty, speed ?? empty],
-    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, filter ? 1 : 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: s.hardRestart ? 2 : 2 | NO_HARD_RESTART, firstWave: 0x09 },
+    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, filter ? 1 : 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: (s.gateFrames & 0x3f) | (s.hardRestart ? 0 : NO_HARD_RESTART) | (s.legato ? NO_GATE_OFF : 0), firstWave: s.firstWave },
   };
 }
 
@@ -436,7 +452,26 @@ const rowOf = (wave: number | null) => rows()!.find((r) => r.wave === wave)!;
 /** Each semitone's height in the notes, and the room above and below them */
 const SEMI = 6;
 const ROLL_PAD = 6;
-const ROLL_H = (NOTE_HIGH - NOTE_LOW + 1) * SEMI + 2 * ROLL_PAD;
+/** The roll shows three octaves of pitches at a time, moved an octave at a time */
+const ROLL_SPAN = 36;
+const ROLL_H = (ROLL_SPAN + 1) * SEMI + 2 * ROLL_PAD;
+const rollHigh = () => state.rollLow + ROLL_SPAN;
+/** The lowest the roll goes: the octave below the lowest pitch a step can have */
+const ROLL_LOWEST = Math.floor(NOTE_LOW / 12) * 12;
+/** Moves the roll an octave up or down, within the pitches a step can have */
+function moveRoll(by: number) {
+  state.rollLow = Math.max(ROLL_LOWEST, Math.min(NOTE_HIGH - ROLL_SPAN, state.rollLow + by));
+  persist();
+  render();
+}
+/** The roll moved to show an instrument's pitches, if they are out of sight: from its lowest octave */
+function fitRoll() {
+  const s = shape();
+  const pitches = s.notes.map((n) => n.semis);
+  if (!pitches.length || pitches.every((p) => p >= state.rollLow && p <= rollHigh())) return;
+  const lo = Math.floor(Math.min(...pitches) / 12) * 12;
+  state.rollLow = Math.max(ROLL_LOWEST, Math.min(NOTE_HIGH - ROLL_SPAN, lo));
+}
 
 /** The notes' band: under the waveform's band and its rows */
 function notesTop(): number {
@@ -446,11 +481,11 @@ function notesTop(): number {
 
 const rollTop = () => notesTop() + PAD_BOTTOM;
 /** The top of a semitone's row in the notes */
-const noteY = (semis: number) => rollTop() + ROLL_PAD + (NOTE_HIGH - semis) * SEMI;
+const noteY = (semis: number) => rollTop() + ROLL_PAD + (rollHigh() - semis) * SEMI;
 
 function semiAt(e: PointerEvent): number {
-  const s = NOTE_HIGH - Math.floor((yAt(e) - rollTop() - ROLL_PAD) / SEMI);
-  return Math.max(NOTE_LOW, Math.min(NOTE_HIGH, s));
+  const s = rollHigh() - Math.floor((yAt(e) - rollTop() - ROLL_PAD) / SEMI);
+  return Math.max(NOTE_LOW, Math.min(NOTE_HIGH, Math.max(state.rollLow, Math.min(rollHigh(), s))));
 }
 
 function inRoll(e: PointerEvent): boolean {
@@ -656,6 +691,8 @@ function pitchChoice(box: HTMLElement) {
         pick: () => {
           before();
           s.fixedNote = test.note;
+          // Steps fixed on their own were from C-4: now from the instrument's note
+          s.notes = s.notes.map(({ fixed, ...n }) => (fixed ? { ...n, semis: n.semis + FIXED_BASE - test.note } : n));
           changed();
         },
       },
@@ -669,7 +706,7 @@ function pitchChoice(box: HTMLElement) {
     b.title = by < 0 ? 'A semitone lower' : 'A semitone higher';
     b.addEventListener('click', () => {
       before();
-      s.fixedNote = Math.max(1 - NOTE_LOW, Math.min(0x5f - NOTE_HIGH, s.fixedNote! + by));
+      s.fixedNote = Math.max(1, Math.min(0x5f, s.fixedNote! + by));
       changed();
       fillChoice();
       playShape();
@@ -692,7 +729,7 @@ function render(keepReadout = false) {
   $<HTMLInputElement>('name').value = document.activeElement === $('name') ? $<HTMLInputElement>('name').value : s.name;
   $('zoom-label').textContent = `${timeText(scroller.clientWidth / state.zoom)} shown`;
   if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
-  $<HTMLInputElement>('hard-restart').checked = s.hardRestart;
+  renderOptions();
   $('tab-hint').textContent =
     [
       state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
@@ -797,7 +834,7 @@ function renderGutter() {
   toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
   if (state.notesOpen) {
     const fixed = shape().fixedNote;
-    for (const semis of [24, 12, 0, -12]) {
+    for (let semis = rollHigh(); semis >= state.rollLow; semis -= 12) {
       const label = fixed !== null ? noteName(fixed + semis) : semis === 0 ? 'played' : semitoneText(semis);
       // Where the pitches go from: a capsule, to show it can be changed
       let content: string | Node = label;
@@ -807,7 +844,18 @@ function renderGutter() {
         chip.textContent = fixed !== null ? `fixed ${label}` : label;
         content = chip;
       }
-      const row = add(noteY(semis) + SEMI / 2 - 7, 14, [content], `semi${semis === 0 ? ' pitch-from' : ''}`);
+      // The top and bottom octaves have arrows beside them, moving the roll
+      const arrow = (by: number) => {
+        const b = document.createElement('button');
+        b.className = 'roll-move';
+        b.textContent = by > 0 ? '▲' : '▼';
+        b.title = by > 0 ? 'Show higher pitches' : 'Show lower pitches';
+        b.disabled = by > 0 ? rollHigh() >= NOTE_HIGH : state.rollLow <= NOTE_LOW;
+        b.addEventListener('click', () => moveRoll(by));
+        return b;
+      };
+      const ends = semis === rollHigh() ? [arrow(12)] : semis === state.rollLow ? [arrow(-12)] : [];
+      const row = add(noteY(semis) + SEMI / 2 - 7, 14, [...ends, content], `semi${semis === 0 ? ' pitch-from' : ''}`);
       // Over where the pitches go from, a choice beside it: as played, or fixed
       if (semis === 0) {
         row.addEventListener('pointerenter', () => showChoice(row, pitchChoice));
@@ -1120,7 +1168,7 @@ function drawNotes() {
   const top = notesTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
-  const py = (semis: number) => top + LINE_PAD + ((NOTE_HIGH - semis) / (NOTE_HIGH - NOTE_LOW)) * (PAD_BOTTOM - 2 * LINE_PAD);
+  const py = (semis: number) => top + LINE_PAD + ((rollHigh() - Math.max(state.rollLow, Math.min(rollHigh(), semis))) / ROLL_SPAN) * (PAD_BOTTOM - 2 * LINE_PAD);
   el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);
   // (gliding into a pitch, a slope from the one before)
   heardSpans(s, TOTAL).forEach((sp, k, all) => {
@@ -1133,11 +1181,13 @@ function drawNotes() {
   if (!state.notesOpen) return;
 
   const roll = rollTop();
-  for (let semis = NOTE_LOW; semis <= NOTE_HIGH; semis += 12) {
+  for (let semis = state.rollLow; semis <= rollHigh(); semis += 12) {
     el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: noteY(semis) + SEMI / 2, y2: noteY(semis) + SEMI / 2, class: `roll-line${semis === 0 ? ' zero' : ''}` }, plot);
   }
   // The shared repeat runs through the notes too (its ↻ here when the waveform rows are closed)
   const icon = drawWaveRepeat(roll, roll + ROLL_H, true, false);
+  // What's drawn in the roll stays in it: steps out of sight are cut off at its edges
+  const firstInRoll = plot.childNodes.length;
   // The pitch all the way through, one continuous line of steps: the key
   // played until the first change, then each pitch until the next (its
   // repeats faint)
@@ -1177,7 +1227,7 @@ function drawNotes() {
     el('rect', { x: x1 - 3, y: y - 3, width: grip + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'start' }, g);
     // Its end is the next change: grabbed here too
     if (s.notes[i + 1]) el('rect', { x: x2 - grip, y: y - 3, width: grip + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'end' }, g);
-    el('text', { x: x1 + 3, y: y - 2, class: 'note-label' }, g).textContent = semitoneText(note.semis);
+    el('text', { x: x1 + 3, y: y - 2, class: 'note-label' }, g).textContent = note.fixed && s.fixedNote === null ? noteName(FIXED_BASE + note.semis) : semitoneText(note.semis);
   });
   // The pitch as the player makes it, frame by frame: vibrato and all
   const heard = heardPitch();
@@ -1188,11 +1238,15 @@ function drawNotes() {
     const pts: string[] = [];
     heard.forEach((semis, f) => {
       if (f >= until) return;
-      const y = noteY(Math.max(NOTE_LOW - 0.5, Math.min(NOTE_HIGH + 0.5, semis))) + SEMI / 2;
+      const y = noteY(Math.max(state.rollLow - 0.5, Math.min(rollHigh() + 0.5, semis))) + SEMI / 2;
       pts.push(`${x(f).toFixed(1)},${y.toFixed(1)}`, `${x(f + 1).toFixed(1)},${y.toFixed(1)}`);
     });
     el('polyline', { points: pts.join(' '), class: 'pitch-trace' }, plot);
   }
+  const clip = el('clipPath', { id: 'roll-clip' }, plot);
+  el('rect', { x: 0, y: roll, width: x(TOTAL) + ORIGIN, height: ROLL_H }, clip);
+  const inRoll = el('g', { 'clip-path': 'url(#roll-clip)' }, plot);
+  inRoll.append(...Array.from(plot.childNodes).slice(firstInRoll, -2));
   icon();
   drawVibrato();
 }
@@ -1576,13 +1630,35 @@ function renderReadout() {
     const n = s.notes[selectedNote];
     const text = document.createElement('span');
     const from = s.fixedNote === null ? 'the note played' : noteName(s.fixedNote);
-    const pitch = n.semis ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}${s.fixedNote === null ? '' : ` (${noteName(s.fixedNote + n.semis)})`}` : from;
+    const pitch =
+      n.fixed && s.fixedNote === null
+        ? noteName(FIXED_BASE + n.semis)
+        : n.semis
+          ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}${s.fixedNote === null ? '' : ` (${noteName(s.fixedNote + n.semis)})`}`
+          : from;
     text.textContent = `From ${timeText(n.start)}: ${pitch}${n.glide ? `, gliding there over ${timeText(n.glide)}` : ''}`;
     const del = document.createElement('button');
     del.className = 'mini danger';
     del.textContent = 'Delete';
     del.addEventListener('click', deleteNote);
-    box.append(text, del);
+    box.append(text);
+    // On its own, a step can be one pitch whatever key is played (a drum hit before a bass, say)
+    if (s.fixedNote === null) {
+      const label = document.createElement('label');
+      label.className = 'step-fixed';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!n.fixed;
+      input.addEventListener('change', () => {
+        before();
+        if (input.checked) n.fixed = true;
+        else delete n.fixed;
+        changed();
+      });
+      label.append(input, ` Fixed to ${noteName(FIXED_BASE + n.semis)}`);
+      box.append(label);
+    }
+    box.append(del);
     return;
   }
   if (state.filterOpen && s.filter.types[selectedType]) {
@@ -2423,6 +2499,7 @@ function renderInstruments() {
 
 function pick(i: number) {
   state.current = i;
+  fitRoll();
   selected = -1;
   selectedPoint = -1;
   selectedNote = -1;
@@ -2435,7 +2512,7 @@ function pick(i: number) {
 $<HTMLSelectElement>('instrument').addEventListener('change', (e) => pick(Number((e.target as HTMLSelectElement).value)));
 $('new-instrument').addEventListener('click', () => {
   before();
-  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, filter: defaultFilter(), pulse: defaultPulse(), waveLoop: null, fixedNote: null, release: null, hardRestart: true });
+  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, filter: defaultFilter(), pulse: defaultPulse(), waveLoop: null, fixedNote: null, release: null, hardRestart: true, ...NOTE_START });
   pick(state.instruments.length - 1);
 });
 $('duplicate-instrument').addEventListener('click', () => {
@@ -2684,11 +2761,46 @@ $('octave-up').addEventListener('click', () => {
   renderKeyboard();
 });
 $('play').addEventListener('click', playShape);
-$('hard-restart').addEventListener('change', () => {
-  before();
-  shape().hardRestart = $<HTMLInputElement>('hard-restart').checked;
-  changed();
-});
+/**
+ * The instrument's checkboxes, under the timeline: how its notes start and
+ * run into each other, and sync and ring modulation (whole note on or off;
+ * partly, as imported, shows as neither)
+ */
+function renderOptions() {
+  const s = shape();
+  const box = $('instrument-options');
+  box.replaceChildren();
+  const option = (name: string, about: string, on: boolean | 'partly', flip: (on: boolean) => void, disabled = false) => {
+    const label = document.createElement('label');
+    label.className = 'instrument-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = on === true;
+    input.indeterminate = on === 'partly';
+    input.disabled = disabled;
+    input.addEventListener('change', () => {
+      before();
+      flip(input.checked);
+      changed();
+    });
+    const text = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = name;
+    text.append(strong, ` ${about}`);
+    label.append(input, text);
+    box.append(label);
+  };
+  option('Hard restart', 'Silences the note before for a moment, so each attack starts clean.', s.hardRestart && !s.legato, (on) => (s.hardRestart = on), s.legato);
+  option('Legato', 'Notes run into each other without the volume starting again.', s.legato, (on) => (s.legato = on));
+  const bitOn = (bit: number): boolean | 'partly' => {
+    const bars = s.bits.filter((b) => b.wave === bit);
+    if (!bars.length) return false;
+    return bars.length === 1 && bars[0].start === 0 && bars[0].end === null ? true : 'partly';
+  };
+  const setBit = (bit: number, on: boolean) => (s.bits = [...s.bits.filter((b) => b.wave !== bit), ...(on ? [{ wave: bit, start: 0, end: null }] : [])]);
+  option('Sync', 'Restarts the waveform with the voice before it, for hard, tearing tones (heard in a song).', bitOn(SYNC_BIT), (on) => setBit(SYNC_BIT, on));
+  option('Ring modulation', 'Mixes the triangle with the voice before it, for bell-like, metallic tones (heard in a song).', bitOn(RING_BIT), (on) => setBit(RING_BIT, on));
+}
 
 // The clock: PAL or NTSC, remembered for the instrument pages
 function renderClock() {
@@ -2815,6 +2927,11 @@ Object.assign(window, {
     ready: () => analyzer !== null,
     status: () => lastStatus,
     importSong,
+    /** A song's instrument played on a key, for looking into imports */
+    traceSongInstrument: (bytes: Uint8Array, n: number, frames: number) => {
+      const song = parseSong(bytes);
+      return analyzer!.trace(song.tables, song.instruments[n], IMPORT_KEY, frames, settings);
+    },
     /** Sets the key the traces play */
     setKey: (note: number) => (test.note = note),
   },

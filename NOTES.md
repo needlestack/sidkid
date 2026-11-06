@@ -155,7 +155,22 @@ zoomable timeline, aiming for a GarageBand feel.
   the earliest-starting repeat wins); then traces the shape and compares frame by frame.
   Vibrato delay is re-searched so it starts where the original's does; pitch re-sets kept
   for vibrato (a delay row sets its pitch on its last frame). `node scripts/importsurvey.mjs`
-  surveys the examples: 160/226 play the same. No Import button yet (loaded things must
-  load as they are). Biggest gaps: drum+instrument combos (fixed pitch per step, 48),
-  drum pitch range beyond -12..+24 (17 more), first-frame waveform ($19 mostly, 34),
-  sync/ring (27), test bit mid-note (8).
+  surveys the examples: 213/226 play the same (notes read from the note table, the top
+  notes all clamp to $FFFF). No Import button yet (loaded things must load as they are).
+  Left: a pitch of 0, envelope changes partway, very long sweeps, late vibrato drift.
+- Per-step fixed (`Note.fixed`: semis from C-4, `FIXED_BASE`), "Fixed to C-4" in a selected
+  step's readout; the master As played/Fixed stays (hides the per-step option). The roll
+  shows 36 semitones (`state.rollLow`, ▲▼ in the gutter, `fitRoll` on switching), steps
+  -32..+48, clipped to the roll. `Shape.bits`: test/ring/sync stretches (no rows; ring and
+  sync are checkboxes: whole note, or partly as imported). Also kept without UI:
+  `legato`, `gateFrames`, `firstWave`, `pulseFromSong`.
+
+## Song construction: stack and pre-empt (the plan)
+
+The user's direction: pre-planning every voice breaks how musicians think. Any number of
+tracks; the 3 voices do their best to recreate them, stealing from each other, gating and
+overriding (the newest note takes a voice). Normal flow: make a bass sound, make a drum
+sound, run two tracks that share a voice and take turns, mostly transparent to the
+composer. Instruments that put the track logic inside ("drum & bass" instruments) are
+still supported, but aren't the way you have to work. Experimental: departs from
+GoatTracker where it must.
