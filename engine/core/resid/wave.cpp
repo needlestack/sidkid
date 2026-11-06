@@ -48,6 +48,7 @@ void WaveformGenerator::set_sync_source(WaveformGenerator* source)
 // ----------------------------------------------------------------------------
 void WaveformGenerator::set_chip_model(chip_model model)
 {
+  shift_register_fade = model == MOS6581 ? 0x8000 : 0x950000;
   if (model == MOS6581) {
     wave__ST = wave6581__ST;
     wave_P_T = wave6581_P_T;
@@ -95,24 +96,24 @@ void WaveformGenerator::writeCONTROL_REG(reg8 control)
   reg8 test_next = control & 0x08;
 
   // Test bit set.
-  // The accumulator and the shift register are both cleared.
-  // NB! The shift register is not really cleared immediately. It seems like
-  // the individual bits in the shift register start to fade down towards
-  // zero when test is set. All bits reach zero within approximately
-  // $2000 - $4000 cycles.
-  // This is not modeled. There should fortunately be little audible output
-  // from this peculiar behavior.
+  // The accumulator is cleared. The shift register isn't cleared at once:
+  // its bits fade towards zero while test is held, and only once they have
+  // (some $8000 cycles on the 6581, far longer on the 8580, as measured for
+  // reSIDfp) does it come back from the test bit reset.
+  // SIDKid: modeled, as a held time before the reset. reSID reset it on
+  // any test bit, so every note started by one (GoatTracker's first frame)
+  // started the same noise, whose first thousand or so steps from the reset
+  // value repeat: a short tone a little over an octave below the note.
   if (test_next) {
     accumulator = 0;
-    shift_register = 0;
+    if (!test) {
+      shift_register_reset = shift_register_fade;
+    }
   }
   // Test bit cleared.
   // The accumulator starts counting, and the shift register is reset to
-  // the value 0x7ffff8.
-  // NB! The shift register will not actually be set to this exact value if the
-  // shift register bits have not had time to fade to zero.
-  // This is not modeled.
-  else if (test) {
+  // the value 0x7ffff8 if it has faded.
+  else if (test && shift_register_reset == 0) {
     shift_register = 0x7ffff8;
   }
 
@@ -133,6 +134,7 @@ void WaveformGenerator::reset()
 {
   accumulator = 0;
   shift_register = 0x7ffff8;
+  shift_register_reset = 0;
   freq = 0;
   pw = 0;
 

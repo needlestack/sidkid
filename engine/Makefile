@@ -28,6 +28,8 @@ RESID := envelope extfilt filter pot sid voice wave \
 RESIDFP := envelopefp extfiltfp filterfp potfp sidfp voicefp wavefp
 
 CORE_C := gsong gplay gtables gglue
+# The headers the C++ sources share (reSID's inline clocking among them)
+CORE_CXX_H := $(wildcard core/*.h core/resid/*.h core/resid-fp/*.h)
 CORE_CXX := gsid $(addprefix resid/,$(RESID)) $(addprefix resid-fp/,$(RESIDFP))
 API := sidkid.o sidkid_sid.o
 
@@ -51,7 +53,7 @@ $(NATIVE)/core/%.o: core/%.c core/*.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Icore -c -o $@ $<
 
-$(NATIVE)/core/%.o: core/%.cpp
+$(NATIVE)/core/%.o: core/%.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -Icore -c -o $@ $<
 
@@ -59,28 +61,32 @@ $(NATIVE)/%.o: %.c sidkid.h core/*.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Icore -I. -c -o $@ $<
 
-$(NATIVE)/%.o: %.cpp
+$(NATIVE)/%.o: %.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -Icore -c -o $@ $<
 
 # --- reference: vendor gsong.c/gplay.c/gsid.cpp/reSID, our shim + glue -----
 #
 # The vendor files are copied next to our shim so their #include "goattrk2.h"
-# picks up the shim rather than the editor's header.
+# picks up the shim rather than the editor's header. Our reSID changes
+# (REF_RESID: the noise surviving a short test bit) are copied over theirs,
+# so the comparison is of the players, on the same chip.
 
 REF := $(BUILD)/ref
 REF_VENDOR := gsong.c gplay.c gsid.cpp gcommon.h gsong.h gplay.h gsid.h gsound.h
 REF_OURS := goattrk2.h gtables.c gglue.c
+REF_RESID := resid/wave.cpp resid/wave.h
 REF_OBJS := $(addprefix $(REF)/obj/,$(addsuffix .o,$(CORE_C) $(CORE_CXX))) $(addprefix $(REF)/obj/,$(API))
 
 ref: $(REF)/sngrender
 
-$(REF)/src/.stamp: $(addprefix $(VENDOR)/,$(REF_VENDOR)) $(addprefix core/,$(REF_OURS))
+$(REF)/src/.stamp: $(addprefix $(VENDOR)/,$(REF_VENDOR)) $(addprefix core/,$(REF_OURS) $(REF_RESID))
 	@mkdir -p $(REF)/src/resid $(REF)/src/resid-fp
 	cp $(addprefix $(VENDOR)/,$(REF_VENDOR)) $(REF)/src/
 	cp $(VENDOR)/resid/*.cpp $(VENDOR)/resid/*.h $(REF)/src/resid/
 	cp $(VENDOR)/resid-fp/*.cpp $(VENDOR)/resid-fp/*.h $(REF)/src/resid-fp/
 	cp $(addprefix core/,$(REF_OURS)) $(REF)/src/
+	cp $(addprefix core/,$(REF_RESID)) $(REF)/src/resid/
 	@touch $@
 
 $(REF)/sngrender: $(REF_OBJS) $(REF)/obj/tools/sngrender.o
@@ -144,7 +150,7 @@ $(WASM)/core/%.o: core/%.c core/*.h
 	@mkdir -p $(dir $@)
 	$(EMCC) $(CFLAGS) -Icore -c -o $@ $<
 
-$(WASM)/core/%.o: core/%.cpp
+$(WASM)/core/%.o: core/%.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
 	$(EMXX) $(CXXFLAGS) -Icore -c -o $@ $<
 
@@ -152,7 +158,7 @@ $(WASM)/%.o: %.c sidkid.h core/*.h
 	@mkdir -p $(dir $@)
 	$(EMCC) $(CFLAGS) -Icore -I. -c -o $@ $<
 
-$(WASM)/%.o: %.cpp
+$(WASM)/%.o: %.cpp $(CORE_CXX_H)
 	@mkdir -p $(dir $@)
 	$(EMXX) $(CXXFLAGS) -Icore -c -o $@ $<
 

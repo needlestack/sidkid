@@ -63,6 +63,12 @@ protected:
   reg24 accumulator;
   reg24 shift_register;
 
+  // SIDKid: cycles the test bit has yet to be held before the shift
+  // register has faded and resets (see writeCONTROL_REG), and how long
+  // that takes on this chip model.
+  cycle_count shift_register_reset;
+  cycle_count shift_register_fade;
+
   // Fout  = (Fn*Fclk/16777216)Hz
   reg16 freq;
   // PWout = (PWn/40.95)%
@@ -131,8 +137,9 @@ friend class SID;
 RESID_INLINE
 void WaveformGenerator::clock()
 {
-  // No operation if test bit is set.
+  // No operation if test bit is set (but the shift register fading).
   if (test) {
+    if (shift_register_reset > 0) shift_register_reset--;
     return;
   }
 
@@ -160,8 +167,9 @@ void WaveformGenerator::clock()
 RESID_INLINE
 void WaveformGenerator::clock(cycle_count delta_t)
 {
-  // No operation if test bit is set.
+  // No operation if test bit is set (but the shift register fading).
   if (test) {
+    shift_register_reset = shift_register_reset > delta_t ? shift_register_reset - delta_t : 0;
     return;
   }
 
