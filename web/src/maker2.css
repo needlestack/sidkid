@@ -949,3 +949,70 @@
   stroke-opacity: 0.3;
   pointer-events: none;
 }
+
+.note.glide {
+  stroke: none;
+}
+
+.tl-keyup.fixed {
+  stroke-dasharray: none;
+}
+
+.tl-keyup-tab.fixed rect,
+.tl-keyup-tab.fixed .tl-keyup-point {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.tl-keyup-tab.fixed text {
+  fill: var(--on-accent);
+}
+
+.tl-gutter-row.pitch-from {
+  cursor: default;
+  font-weight: 600;
+}
+
+.choice-popup {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.choice-popup[hidden] {
+  display: none;
+}
+
+.fixed-note-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.fixed-note {
+  min-width: 3em;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.instrument-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.instrument-option input {
+  accent-color: var(--accent);
+}

@@ -139,3 +139,15 @@ zoomable timeline, aiming for a GarageBand feel.
 - The program name input doesn't update if it has focus while a song loads.
 - Undecided: a README note about attack/decay ≈ 0.
 - Safari is untested.
+
+- Drums (maker2): `release` (fixed key up: wave rows lose the gate bit from that frame; a
+  release inside a waveform repeat unrolls the repeat to there, then loops a gate-off copy),
+  `fixedNote` (pitch rows written as absolute notes), `hardRestart` (gate timer bit $80).
+  Both choices are "As played" / "Fixed" in a hover popup (`showChoice`) on the key-up tab and
+  on the Pitch gutter's "played" label. A song key-off still cuts a fixed key up short.
+- Glides: `Note.glide` frames from `start`, arriving at `arrival(n)`. `waveProgram` is now
+  frame by frame: each glide frame picks the nearest of wait, a semitone set, or portamento
+  (wave cmd 1/2) by a calculated speed row (left $80, right = shift: a fraction of the
+  semitone above the last note set), so it is the same on every key. One row per glide frame.
+  `waveProgram` returns the speed rows it used; the audition puts vibrato's row first.
+- Next: the GoatTracker importer (.sng instruments into maker2), to find the gaps.

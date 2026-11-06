@@ -492,6 +492,71 @@ try {
   });
   report(vib === 'waits, wobbles', 'maker2 vibrato', vib);
 
+  // A glide: the same slide on any key, arriving on its pitch where it ends
+  const glide = await m2.evaluate(() => {
+    const m = window.maker2;
+    const s = m.state();
+    const ins = s.instruments[s.current];
+    ins.bars = [{ wave: 0x20, start: 0, end: 40 }];
+    ins.notes = [{ start: 0, semis: 0 }, { start: 10, semis: 12, glide: 20 }];
+    const curves = [24, 48, 72].map((key) => {
+      m.setKey(key);
+      const f = Array.from(m.trace(35).freq);
+      return [12, 20, 26, 30].map((t) => (12 * Math.log2(f[t] / f[0])).toFixed(1)).join(' ');
+    });
+    m.setKey(48);
+    ins.notes = [];
+    return curves.every((c) => c === curves[0]) ? curves[0] : `differs by key: ${curves.join(' / ')}`;
+  });
+  report(/^1\.\d [56]\.\d [89]\.\d 12\.0$/.test(glide), 'maker2 glide', glide);
+
+  // Fixed pitch: the same note whatever key is played
+  const fixed = await m2.evaluate(() => {
+    const m = window.maker2;
+    const s = m.state();
+    const ins = s.instruments[s.current];
+    ins.fixedNote = 36;
+    const f = [24, 60].map((key) => (m.setKey(key), m.trace(5).freq[3]));
+    ins.fixedNote = null;
+    m.setKey(48);
+    return f[0] === f[1] && f[0] > 0 ? 'same' : `${f[0]} vs ${f[1]}`;
+  });
+  report(fixed === 'same', 'maker2 fixed pitch', fixed);
+
+  // A fixed key up: the instrument lets go itself, there, also partway through a repeat
+  const letGo = await m2.evaluate(() => {
+    const m = window.maker2;
+    const s = m.state();
+    const ins = s.instruments[s.current];
+    ins.release = 6;
+    const plain = Array.from(m.trace(10).control, (v) => v & 1).join('');
+    ins.bars = [{ wave: 0x20, start: 0, end: 3 }];
+    ins.notes = [{ start: 0, semis: 0 }, { start: 1, semis: 4 }, { start: 2, semis: 7 }];
+    ins.waveLoop = 0;
+    ins.release = 7;
+    const t = m.trace(14);
+    const base = t.freq[0];
+    const arp = `${Array.from(t.control, (v) => v & 1).join('')} ${Array.from(t.freq, (f) => Math.round(12 * Math.log2(f / base))).join(',')}`;
+    ins.release = null;
+    ins.waveLoop = null;
+    ins.notes = [];
+    ins.bars = [{ wave: 0x20, start: 0, end: 4 }];
+    return `${plain} / ${arp}`;
+  });
+  report(letGo === '1111110000 / 11111110000000 0,4,7,0,4,7,0,4,7,0,4,7,0,4', 'maker2 fixed key up', letGo);
+
+  // Hard restart: on by default, off in the gate timer's top bit
+  const restart = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    const on = window.maker2.audition().instrument.gateTimer;
+    ins.hardRestart = false;
+    const off = window.maker2.audition().instrument.gateTimer;
+    ins.hardRestart = true;
+    return `${on.toString(16)} ${off.toString(16)}`;
+  });
+  report(restart === '2 82', 'maker2 hard restart', restart);
+
   // The filter: set up on the first frame (band pass, resonance, voice 1), its cutoff following the line
   const filt = await m2.evaluate(() => {
     const s = window.maker2.state();

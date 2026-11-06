@@ -24,7 +24,12 @@ export interface Bar {
 export interface Note {
   start: number;
   semis: number;
+  /** Frames it slides over from the pitch before, arriving at start + glide (none: it jumps) */
+  glide?: number;
 }
+
+/** Where a change of pitch arrives: after its glide */
+export const arrival = (n: Note) => n.start + (n.glide ?? 0);
 
 /** The range of the notes, in semitones from the note played */
 export const NOTE_LOW = -12;
@@ -74,6 +79,12 @@ export interface Shape {
   vibrato: { delay: number; turn: number; even: boolean; depth: number } | null;
   /** The filter: used where its type has chunks (none: the instrument leaves the filter alone) */
   filter: FilterShape;
+  /** The note its pitches are from: null for the key played, else always this note (GoatTracker's numbering) */
+  fixedNote: number | null;
+  /** Where the instrument lets go of the key itself (a frame), however long the note; null: when the key goes up */
+  release: number | null;
+  /** Each note silences the one before for a moment first (GoatTracker's hard restart), for a clean attack */
+  hardRestart: boolean;
 }
 
 /**
@@ -134,11 +145,11 @@ export function lineAt(line: PulseShape, t: number): number {
 }
 
 /** The parts of a shape that make its wave program */
-export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'>;
+export type WaveParts = Pick<Shape, 'bars' | 'notes' | 'waveLoop' | 'hold'> & Partial<Pick<Shape, 'fixedNote' | 'release'>>;
 
 /** Where the wave program's bars and notes end, or null if there are none. */
 export function programEnd(s: Pick<Shape, 'bars' | 'notes'>): number | null {
-  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...s.notes.map((n) => n.start + 1)];
+  const ends = [...s.bars.map((b) => b.end ?? b.start + 1), ...s.notes.map((n) => arrival(n) + 1)];
   return ends.length ? Math.max(...ends) : null;
 }
 
@@ -164,6 +175,18 @@ export function pitchAt(notes: Note[], t: number): number {
     }
   }
   return pitch;
+}
+
+/** The pitch heard at a frame: the last change's, or part way along a glide to it */
+export function glidePitchAt(notes: Note[], t: number): number {
+  let before = 0;
+  for (const n of [...notes].sort((a, b) => a.start - b.start)) {
+    if (n.start > t) break;
+    const g = n.glide ?? 0;
+    if (t < n.start + g) return before + ((n.semis - before) * (t - n.start + 1)) / (g + 1);
+    before = n.semis;
+  }
+  return before;
 }
 
 /** A stretch of time with one waveform and one pitch: a row of the wave program. */
@@ -238,6 +261,13 @@ export const DELAY_FRAMES = (left: number) => left + 1;
 const LONGEST_DELAY = 15;
 const PITCH_KEEP = 0x80;
 const WAVE_KEEP = 0;
+/** Wave program commands that slide the pitch, by a speed table row */
+const CMD_PORTA_UP = 1;
+const CMD_PORTA_DOWN = 2;
+/** A speed row worked out from the note: the semitone above it, halved by the right byte's count */
+const CALCULATED = 0x80;
+/** How much nearer a row must bring a glide to the line than waiting does (semitones) */
+const NEAR = 0.005;
 
 /**
  * The wave program for a shape: a row for each stretch, setting what
@@ -247,31 +277,47 @@ const WAVE_KEEP = 0;
  * since); holding, the program just stops, leaving the pitch free for
  * effects; or a silent waveform, then stop.
  */
-export function waveProgram(s: WaveParts, name: string): Program {
+export function waveProgram(s: WaveParts, name: string, speedBase = 1): { program: Program; speeds: Step[] } {
+  const end = programEnd(s);
+  const fixed = s.fixedNote ?? null;
+  const release = s.release ?? null;
+  const pitchByte = (semis: number) => pitchRight(fixed === null ? { type: 'relative', semitones: semis } : { type: 'fixed', note: fixed + semis });
+  // Letting go of the key itself: the waveform written without its gate from then on
+  const gate = (f: number) => (release !== null && f >= release ? 0 : WAVE_GATE);
   const steps: Step[] = [];
+  const speeds: Step[] = [];
+  if (end === null) {
+    steps.push({ left: waveLeft({ type: 'wave', wave: gate(0) }), right: pitchByte(0) });
+    return { program: { name, steps, next: null }, speeds };
+  }
   const looping = waveLooping(s);
-  const list = stretches(s);
-  let back = 0;
-  let wave = -1;
-  let pitch: number | null = null;
-  list.forEach((st, i) => {
-    const target = looping && st.start === s.waveLoop;
-    if (looping && st.start <= s.waveLoop!) back = steps.length;
-    // The first row always sets both: the player sets the pitch only from the program
-    const all = i === 0 || target;
-    steps.push({
-      left: all || st.wave !== wave ? waveLeft({ type: 'wave', wave: st.wave | WAVE_GATE }) : WAVE_KEEP,
-      right: all || st.pitch !== pitch ? pitchRight({ type: 'relative', semitones: st.pitch }) : PITCH_KEEP,
-    });
-    wave = st.wave;
-    pitch = st.pitch;
-    // Holding, the last stretch lasts as long as the note
-    if (i === list.length - 1 && !looping && s.hold) return;
-    let rest = st.end! - st.start - 1;
+  const loop = looping ? s.waveLoop! : null;
+  const period = end - (loop ?? 0);
+  // Where the program jumps back to, and the frames it plays first
+  let target = loop;
+  let frames = end;
+  if (looping && release !== null && release > loop!) {
+    // Letting go during the repeats: they play on to there, then a copy of
+    // the repeat without the key goes round instead
+    target = loop! + Math.ceil((release - loop!) / period) * period;
+    frames = target + period;
+  } else if (!looping) frames = Math.max(end + (s.hold ? 0 : 1), release !== null ? release + 1 : 0);
+  const notes = [...s.notes].sort((a, b) => a.start - b.start);
+  const waveAt = (t: number) => {
+    let w = 0;
+    for (const b of s.bars) if (b.start <= t && t < (b.end ?? Infinity)) w |= b.wave;
+    return w;
+  };
+  const gliding = (t: number) => notes.some((n) => n.start <= t && t < arrival(n));
+  // Frames without a row of their own wait, after the last row
+  let idle = 0;
+  const flush = () => {
+    let rest = idle;
+    idle = 0;
     while (rest > 0) {
       if (rest === 1) {
         // A row that changes nothing takes a single frame
-        steps.push({ left: 0, right: PITCH_KEEP });
+        steps.push({ left: WAVE_KEEP, right: PITCH_KEEP });
         rest = 0;
       } else {
         const left = Math.min(LONGEST_DELAY, rest - 1);
@@ -279,12 +325,74 @@ export function waveProgram(s: WaveParts, name: string): Program {
         rest -= DELAY_FRAMES(left);
       }
     }
-  });
-  if (!list.length) steps.push({ left: waveLeft({ type: 'wave', wave: WAVE_GATE }), right: pitchRight({ type: 'relative', semitones: 0 }) });
-  else if (!looping && !s.hold) steps.push({ left: waveLeft({ type: 'wave', wave: WAVE_GATE }), right: PITCH_KEEP });
+  };
+  const speedRow = (shift: number) => {
+    let i = speeds.findIndex((r) => r.right === shift);
+    if (i < 0) i = speeds.push({ left: CALCULATED, right: shift }) - 1;
+    return speedBase + i;
+  };
+  // The pitch now (between semitones while gliding), and the semitone last set (glides go in fractions of the one above it)
+  let wave = -1;
+  let cur = 0;
+  let last = 0;
+  let back = 0;
+  for (let f = 0; f < frames; f++) {
+    const t = looping && f >= end ? loop! + ((f - loop!) % period) : f;
+    const past = !looping && t >= end;
+    const w = (past ? (s.hold ? waveAt(end - 1) : 0) : waveAt(t)) | gate(f);
+    const want = glidePitchAt(notes, past ? end - 1 : t);
+    // The first row sets both (the player sets the pitch only from the
+    // program), and so does the one the repeat comes back to
+    const all = f === 0 || f === target;
+    if (all || w !== wave) {
+      const n = Math.round(want);
+      const set = all || (gliding(t) ? Math.abs(n - want) < Math.abs(cur - want) : want !== cur);
+      flush();
+      if (f === target) back = steps.length;
+      steps.push({ left: waveLeft({ type: 'wave', wave: w }), right: set ? pitchByte(n) : PITCH_KEEP });
+      wave = w;
+      if (set) cur = last = n;
+      continue;
+    }
+    if (past || !gliding(t)) {
+      if (want !== cur) {
+        flush();
+        steps.push({ left: WAVE_KEEP, right: pitchByte(want) });
+        cur = last = want;
+      } else idle++;
+      continue;
+    }
+    // Gliding: whichever comes nearest the line: staying, a semitone, or a
+    // slide up or down by a fraction of the semitone above the last one set
+    // (a speed the player works out from the note, so the glide covers the
+    // same interval on any key)
+    const n = Math.round(want);
+    let best: { err: number; to: number; step: Step | null; shift: number } = { err: Math.abs(cur - want), to: cur, step: null, shift: -1 };
+    if (Math.abs(n - want) < best.err - NEAR) best = { err: Math.abs(n - want), to: n, step: { left: WAVE_KEEP, right: pitchByte(n) }, shift: -1 };
+    const semitone = 2 ** (last / 12) * (2 ** (1 / 12) - 1);
+    for (let shift = 0; shift < 8; shift++) {
+      for (const dir of [1, -1]) {
+        const freq = 2 ** (cur / 12) + (dir * semitone) / 2 ** shift;
+        if (freq <= 0) continue;
+        const to = 12 * Math.log2(freq);
+        if (Math.abs(to - want) < best.err - NEAR) best = { err: Math.abs(to - want), to, step: { left: waveLeft({ type: 'command', command: dir > 0 ? CMD_PORTA_UP : CMD_PORTA_DOWN }), right: 0 }, shift };
+      }
+    }
+    if (!best.step) {
+      idle++;
+      continue;
+    }
+    if (best.shift >= 0) best.step.right = speedRow(best.shift);
+    flush();
+    steps.push(best.step);
+    cur = best.to;
+    if (best.shift < 0) last = n;
+  }
+  // Waits before going round again (a jump takes no frame); otherwise the last row holds
+  if (looping) flush();
   const program: Program = { name, steps, next: null };
   if (looping) program.next = { program, step: back };
-  return program;
+  return { program, speeds };
 }
 
 /**

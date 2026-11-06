@@ -18,7 +18,7 @@ import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAV
 import { waveIcon, waveRun } from './waveicon';
 import { filterScope, modeIcon } from './filtercurve';
 import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { chunkAt, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
+import { arrival, chunkAt, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -98,6 +98,9 @@ function defaults(): State {
           loop: 0,
         },
         waveLoop: null,
+        fixedNote: null,
+        release: null,
+        hardRestart: true,
       },
       {
         name: 'Bass',
@@ -118,6 +121,9 @@ function defaults(): State {
         },
         pulse: defaultPulse(),
         waveLoop: null,
+        fixedNote: null,
+        release: null,
+        hardRestart: true,
       },
       {
         name: 'Snare',
@@ -134,6 +140,9 @@ function defaults(): State {
         filter: defaultFilter(),
         pulse: defaultPulse(),
         waveLoop: null,
+        fixedNote: null,
+        release: null,
+        hardRestart: true,
       },
     ],
     current: 0,
@@ -163,6 +172,9 @@ function load(): State {
         // Notes had ends, which the player never heard (a pitch holds): now just their starts
         ins.notes = (ins.notes ?? []).map((n) => ({ start: n.start, semis: n.semis }));
         ins.vibrato ??= null;
+        ins.fixedNote ??= null;
+        ins.release ??= null;
+        ins.hardRestart ??= true;
         // Filters saved before they came in chunks: a type from the start, as one chunk to the end
         const old = ins.filter as unknown as { passband?: number; resonance: number | PulseShape; cutoff: PulseShape; types?: { start: number; end?: number; passband: number }[] } | null;
         if (!old) ins.filter = defaultFilter();
@@ -238,19 +250,35 @@ interface Audition {
   instrument: Instrument;
 }
 
+/** The gate timer's bit that leaves out the hard restart (the gate still goes off the frames before a note) */
+const NO_HARD_RESTART = 0x80;
+
+/** Where the key goes up: the instrument's own place when fixed, else the view's (how long the note is played) */
+function keyUp(): number {
+  return shape().release ?? state.keyUp;
+}
+function setKeyUp(f: number) {
+  const at = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
+  const s = shape();
+  if (s.release !== null) s.release = at;
+  else state.keyUp = at;
+}
+
 function audition(): Audition {
   const s = shape();
-  const wave = waveProgram(s, s.name);
   const pulse = pulseProgram(s.bars, s.pulse, s.name);
   const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
-  // Vibrato reads its speed from a row of the speed table
+  // Vibrato reads its speed from a row of the speed table, and glides from the rows after it
   const v = s.vibrato;
-  const speed = v ? wobbleRow(v) : null;
+  const wobble = v ? wobbleRow(v) : null;
+  const { program: wave, speeds } = waveProgram(s, s.name, wobble ? 2 : 1);
+  const rows = [...(wobble ? [{ left: wobble[0], right: wobble[1] }] : []), ...speeds];
+  const speed = rows.length ? { left: Uint8Array.from(rows, (r) => r.left), right: Uint8Array.from(rows, (r) => r.right) } : null;
   // The test note plays on voice 1, so that is the voice it filters
   const filter = s.filter.types.length ? filterProgram(s.filter, s.name, 1) : null;
   return {
-    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, filter ? layOut([filter]).table : empty, speed ? { left: new Uint8Array([speed[0]]), right: new Uint8Array([speed[1]]) } : empty],
-    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, filter ? 1 : 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: 2, firstWave: 0x09 },
+    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, filter ? layOut([filter]).table : empty, speed ?? empty],
+    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, filter ? 1 : 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: s.hardRestart ? 2 : 2 | NO_HARD_RESTART, firstWave: 0x09 },
   };
 }
 
@@ -469,7 +497,7 @@ const viewWidth = () => scroller.clientWidth - 2 * ORIGIN;
 function dataEnd(volume = true, waves = true): number {
   const s = shape();
   let end = 0;
-  if (volume) end = Math.max(state.keyUp, releaseEnd(s.ad, s.sr, state.keyUp));
+  if (volume) end = Math.max(keyUp(), releaseEnd(s.ad, s.sr, keyUp()));
   if (waves) end = Math.max(end, ...s.bars.map((b) => b.end ?? b.start + 10), ...s.notes.map((n) => n.start + 1), ...(s.filter.types.length ? [...s.filter.cutoff.points, ...s.filter.resonance.points].map((p) => p.t + 10) : []), ...s.filter.types.map((c) => c.end));
   return Math.min(TOTAL, Math.max(5, end));
 }
@@ -521,6 +549,142 @@ function tickStep(): number {
   return steps.find((s) => s * state.zoom >= 56) ?? 10 * FPS;
 }
 
+// --- Choices beside things: how the key up and the pitch go ---------------------
+
+/** A small menu beside something, shown while the pointer is over either */
+const choice = document.createElement('div');
+choice.className = 'choice-popup';
+choice.hidden = true;
+document.body.append(choice);
+let choiceTimer = 0;
+let choiceBuild: ((box: HTMLElement) => void) | null = null;
+function showChoice(anchor: Element, build: (box: HTMLElement) => void) {
+  clearTimeout(choiceTimer);
+  if (dragging) return;
+  choiceBuild = build;
+  fillChoice();
+  choice.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const w = choice.offsetWidth;
+  // Beside it on the right, or on the left where there is no room
+  const left = r.right + 8 + w < window.innerWidth ? r.right + 8 : Math.max(8, r.left - 8 - w);
+  choice.style.left = `${left + window.scrollX}px`;
+  choice.style.top = `${r.top + r.height / 2 - choice.offsetHeight / 2 + window.scrollY}px`;
+}
+function fillChoice() {
+  choice.replaceChildren();
+  choiceBuild?.(choice);
+}
+function hideChoiceSoon() {
+  clearTimeout(choiceTimer);
+  choiceTimer = window.setTimeout(hideChoice, 250);
+}
+function hideChoice() {
+  choice.hidden = true;
+  choiceBuild = null;
+}
+choice.addEventListener('pointerenter', () => clearTimeout(choiceTimer));
+choice.addEventListener('pointerleave', hideChoiceSoon);
+
+/** Two or more buttons, one on, in a row */
+function segmented(options: { label: string; on: boolean; title: string; pick: () => void }[]): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'segmented small';
+  for (const o of options) {
+    const b = document.createElement('button');
+    b.textContent = o.label;
+    b.title = o.title;
+    b.classList.toggle('on', o.on);
+    b.addEventListener('click', () => {
+      if (!o.on) o.pick();
+      fillChoice();
+    });
+    box.append(b);
+  }
+  return box;
+}
+
+/** The key up: when the note's key goes up (as played), or always at its place (fixed: drums) */
+function keyUpChoice(box: HTMLElement) {
+  const s = shape();
+  box.append(
+    segmented([
+      {
+        label: 'As played',
+        on: s.release === null,
+        title: 'The note lets go when its key goes up',
+        pick: () => {
+          before();
+          state.keyUp = s.release!;
+          s.release = null;
+          changed();
+        },
+      },
+      {
+        label: 'Fixed',
+        on: s.release !== null,
+        title: 'The instrument lets go here however long the note is held, as drums do',
+        pick: () => {
+          before();
+          s.release = state.keyUp;
+          changed();
+        },
+      },
+    ]),
+  );
+}
+
+/** The pitch: from the key played, or always from one note (fixed: drums), stepped a semitone at a time */
+function pitchChoice(box: HTMLElement) {
+  const s = shape();
+  box.append(
+    segmented([
+      {
+        label: 'As played',
+        on: s.fixedNote === null,
+        title: 'Pitches go from the key played',
+        pick: () => {
+          before();
+          s.fixedNote = null;
+          changed();
+        },
+      },
+      {
+        label: 'Fixed',
+        on: s.fixedNote !== null,
+        title: 'Pitches go from one note, whatever key is played, as drums do',
+        pick: () => {
+          before();
+          s.fixedNote = test.note;
+          changed();
+        },
+      },
+    ]),
+  );
+  if (s.fixedNote === null) return;
+  const step = (by: number, label: string) => {
+    const b = document.createElement('button');
+    b.className = 'mini';
+    b.textContent = label;
+    b.title = by < 0 ? 'A semitone lower' : 'A semitone higher';
+    b.addEventListener('click', () => {
+      before();
+      s.fixedNote = Math.max(1 - NOTE_LOW, Math.min(0x5f - NOTE_HIGH, s.fixedNote! + by));
+      changed();
+      fillChoice();
+      playShape();
+    });
+    return b;
+  };
+  const name = document.createElement('span');
+  name.className = 'fixed-note';
+  name.textContent = noteName(s.fixedNote);
+  const row = document.createElement('div');
+  row.className = 'fixed-note-row';
+  row.append(step(-1, '‹'), name, step(1, '›'));
+  box.append(row);
+}
+
 /** Redraws the page; `keepReadout` leaves the controls under the timeline alone (a slider there is being dragged). */
 function render(keepReadout = false) {
   if (!state.zoom) state.zoom = Math.max(wholeZoom(), scroller.clientWidth / 100);
@@ -528,11 +692,12 @@ function render(keepReadout = false) {
   $<HTMLInputElement>('name').value = document.activeElement === $('name') ? $<HTMLInputElement>('name').value : s.name;
   $('zoom-label').textContent = `${timeText(scroller.clientWidth / state.zoom)} shown`;
   if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
+  $<HTMLInputElement>('hard-restart').checked = s.hardRestart;
   $('tab-hint').textContent =
     [
       state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
       state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them; bars that overlap play together.' : '',
-      state.notesOpen ? 'Draw pitches in semitones from the key played; each holds until the next.' : '',
+      state.notesOpen ? `Draw pitches in semitones from ${shape().fixedNote === null ? 'the key played' : noteName(shape().fixedNote!)}; each holds until the next. Drag a step’s end or start apart to glide.` : '',
       state.filterOpen ? 'Draw chunks of filtering in the Type row (gaps aren’t filtered); shape the cutoff and resonance under it.' : '',
     ]
       .join(' ')
@@ -556,20 +721,26 @@ function render(keepReadout = false) {
     label.textContent = f === 0 ? '0' : `${Math.round((f / FPS) * 100) / 100} s`;
   }
 
-  const curve = level(s.ad, s.sr, state.keyUp);
+  const curve = level(s.ad, s.sr, keyUp());
   drawVolume(curve);
 
   // The key going up, with a tab just under the ruler to drag it by,
   // pointing up at its time
-  const ku = x(state.keyUp);
-  el('line', { x1: ku, x2: ku, y1: RULER, y2: HEIGHT, class: 'tl-keyup' }, plot);
+  // Fixed, it is the instrument letting go itself, however long the note
+  const ku = x(keyUp());
+  const fixedUp = s.release !== null;
+  el('line', { x1: ku, x2: ku, y1: RULER, y2: HEIGHT, class: `tl-keyup${fixedUp ? ' fixed' : ''}` }, plot);
   // (Over the folded volume preview there is no room for it)
   if (state.volumeOpen) {
-    const tab = el('g', { class: `tl-keyup-tab${dragging === 'keyup' ? ' dragging' : ''}`, 'data-drag': 'keyup', tabindex: 0, role: 'slider', 'aria-label': `Key up at ${timeText(state.keyUp)}` }, plot);
+    const tab = el('g', { class: `tl-keyup-tab${fixedUp ? ' fixed' : ''}${dragging === 'keyup' ? ' dragging' : ''}`, 'data-drag': 'keyup', tabindex: 0, role: 'slider', 'aria-label': `Key up at ${timeText(keyUp())}${fixedUp ? ', fixed' : ''}` }, plot);
     const tabTop = RULER + 6;
-    el('rect', { x: ku - 28, y: tabTop, width: 56, height: 16, rx: 6 }, tab);
+    const w = fixedUp ? 84 : 56;
+    el('rect', { x: ku - w / 2, y: tabTop, width: w, height: 16, rx: 6 }, tab);
     el('path', { d: `M${ku - 5},${tabTop + 0.5}L${ku},${RULER + 1}L${ku + 5},${tabTop + 0.5}Z`, class: 'tl-keyup-point' }, tab);
-    el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = 'key up';
+    el('text', { x: ku, y: tabTop + 12, 'text-anchor': 'middle' }, tab).textContent = fixedUp ? 'fixed key up' : 'key up';
+    // Over it, a choice beside it: as played, or fixed
+    tab.addEventListener('pointerenter', () => showChoice(tab, keyUpChoice));
+    tab.addEventListener('pointerleave', hideChoiceSoon);
   }
 
   plot.append(playheadLine);
@@ -625,7 +796,16 @@ function renderGutter() {
   }
   toggle(notesTop(), PAD_BOTTOM, 'Pitch', state.notesOpen, () => openNotes(!state.notesOpen), 'rule');
   if (state.notesOpen) {
-    for (const semis of [24, 12, 0, -12]) add(noteY(semis) + SEMI / 2 - 7, 14, [semis === 0 ? 'played' : semitoneText(semis)], 'semi');
+    const fixed = shape().fixedNote;
+    for (const semis of [24, 12, 0, -12]) {
+      const label = fixed !== null ? noteName(fixed + semis) : semis === 0 ? 'played' : semitoneText(semis);
+      const row = add(noteY(semis) + SEMI / 2 - 7, 14, [label], `semi${semis === 0 ? ' pitch-from' : ''}`);
+      // Over where the pitches go from, a choice beside it: as played, or fixed
+      if (semis === 0) {
+        row.addEventListener('pointerenter', () => showChoice(row, pitchChoice));
+        row.addEventListener('pointerleave', hideChoiceSoon);
+      }
+    }
     add(vibTop(), VIB_H, ['Vibrato'], 'lane width rule-thin');
   }
   toggle(filterTop(), PAD_BOTTOM, 'Filter', state.filterOpen, () => openFilter(!state.filterOpen), 'rule');
@@ -690,7 +870,7 @@ function drawVolume(curve: Float32Array) {
   }
   const s = shape();
   const [a, d, sus] = [s.ad >> 4, s.ad & 15, s.sr >> 4];
-  const end = releaseEnd(s.ad, s.sr, state.keyUp);
+  const end = releaseEnd(s.ad, s.sr, keyUp());
   const line = areaPath(curve, 0, Math.min(TOTAL, end + 2));
   el('path', { d: `${line}L${x(Math.min(TOTAL, end + 2))},${plotY(0)}L${x(0)},${plotY(0)}Z`, class: 'env-area' }, plot);
   // The whole decay, faintly: how it would fall all the way to silence with
@@ -712,7 +892,7 @@ function drawVolume(curve: Float32Array) {
   };
   // Low down, sustain's label sits above its dot, beside release's: apart if the dots are close
   const sustainLow = s.sr >> 4 <= 2;
-  const crowded = sustainLow && x(handlePos('r', s.ad, s.sr).f) - x(state.keyUp) < 90;
+  const crowded = sustainLow && x(handlePos('r', s.ad, s.sr).f) - x(keyUp()) < 90;
   const above = (v: number) => plotY(v) - 12;
   const below = (v: number) => plotY(v) + 21;
   drawWaveBand();
@@ -763,7 +943,7 @@ function arrows(parent: Element, cx: number, cy: number, ways: 'side' | 'all') {
 /** The volume envelope folded into a thin picture of its shape; clicking it opens it. */
 function drawVolumePreview(curve: Float32Array) {
   const s = shape();
-  const end = Math.min(TOTAL, releaseEnd(s.ad, s.sr, state.keyUp) + 2);
+  const end = Math.min(TOTAL, releaseEnd(s.ad, s.sr, keyUp()) + 2);
   const py = (v: number) => RULER + 5 + (1 - v) * (VOLUME_PREVIEW - 10);
   const pts: string[] = [];
   for (let i = 0; i <= Math.min(curve.length - 1, Math.round(end * ENV_STEPS)); i++) pts.push(`${x(i / ENV_STEPS).toFixed(1)},${py(curve[i]).toFixed(1)}`);
@@ -934,9 +1114,14 @@ function drawNotes() {
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
   const py = (semis: number) => top + LINE_PAD + ((NOTE_HIGH - semis) / (NOTE_HIGH - NOTE_LOW)) * (PAD_BOTTOM - 2 * LINE_PAD);
   el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);
-  for (const sp of heardSpans(s, TOTAL)) {
-    el('line', { x1: x(sp.start), x2: x(sp.end ?? TOTAL), y1: py(sp.pitch), y2: py(sp.pitch), class: `notes-line${sp.again ? ' again' : ''}` }, plot);
-  }
+  // (gliding into a pitch, a slope from the one before)
+  heardSpans(s, TOTAL).forEach((sp, k, all) => {
+    const glide = s.notes.find((n) => n.start === sp.from)?.glide ?? 0;
+    const from = Math.min(sp.start + glide, sp.end ?? TOTAL);
+    const cls = `notes-line${sp.again ? ' again' : ''}`;
+    if (glide && all[k - 1]?.end === sp.start) el('line', { x1: x(sp.start), x2: x(from), y1: py(all[k - 1].pitch), y2: py(sp.pitch), class: cls }, plot);
+    el('line', { x1: x(from), x2: x(sp.end ?? TOTAL), y1: py(sp.pitch), y2: py(sp.pitch), class: cls }, plot);
+  });
   if (!state.notesOpen) return;
 
   const roll = rollTop();
@@ -956,16 +1141,26 @@ function drawNotes() {
     if (last && last.pitch === sp.pitch && !!last.again === !!sp.again && last.end === sp.start) last.end = sp.end;
     else steps.push({ ...sp });
   }
-  for (const sp of steps) {
+  // A step reached by a glide starts after it, the glide a slope up to it from the pitch before
+  steps.forEach((sp, k) => {
+    const glide = s.notes.find((n) => n.start === sp.from)?.glide ?? 0;
+    const from = Math.min(sp.start + glide, sp.end ?? TOTAL);
     const x2 = x(sp.end ?? TOTAL);
-    el('rect', { x: x(sp.start), y: noteY(sp.pitch) + 0.5, width: Math.max(1, x2 - x(sp.start)), height: SEMI - 1, rx: 2, class: `note${sp.again ? ' ghost' : ''}` }, plot);
-  }
-  // Each change, to grab: its step to move in time and pitch, its start to move in time
+    el('rect', { x: x(from), y: noteY(sp.pitch) + 0.5, width: Math.max(1, x2 - x(from)), height: SEMI - 1, rx: 2, class: `note${sp.again ? ' ghost' : ''}` }, plot);
+    if (glide) {
+      const before = steps[k - 1]?.end === sp.start ? steps[k - 1].pitch : 0;
+      const [y1, y2] = [noteY(before) + 0.5, noteY(sp.pitch) + 0.5];
+      const [g1, g2] = [x(sp.start), x(from)];
+      el('path', { d: `M${g1},${y1}L${g2},${y2}L${g2},${y2 + SEMI - 1}L${g1},${y1 + SEMI - 1}Z`, class: `note glide${sp.again ? ' ghost' : ''}` }, plot);
+    }
+  });
+  // Each change, to grab: its step to move in time and pitch, its start
+  // (where it arrives) and end (where the next sets off) to move in time
   const lastEnd = spansHeard.filter((sp) => !sp.again).at(-1)?.end ?? null;
   s.notes.forEach((note, i) => {
     const next = s.notes[i + 1]?.start ?? lastEnd ?? TOTAL;
-    const x1 = x(note.start);
-    const x2 = x(Math.max(note.start + 1, next));
+    const x1 = x(arrival(note));
+    const x2 = x(Math.max(arrival(note) + 1, next));
     const y = noteY(note.semis);
     const g = el('g', { class: `note-bar${i === selectedNote ? ' selected' : ''}`, 'data-note': i }, plot);
     el('rect', { x: x1, y: y - 3, width: x2 - x1, height: SEMI + 6, class: 'hit' }, g);
@@ -1126,8 +1321,8 @@ function handlePos(key: string, ad: number, sr: number): { f: number; v: number 
   if (key === 'a') return { f: attackFrames(a), v: 1 };
   if (key === 'd') return { f: decayEnd(a, d, sus), v: sus / 15 };
   // At the level held, where the key goes up
-  if (key === 's') return { f: state.keyUp, v: sus / 15 };
-  return { f: releaseEnd(ad, sr, state.keyUp), v: 0 };
+  if (key === 's') return { f: keyUp(), v: sus / 15 };
+  return { f: releaseEnd(ad, sr, keyUp()), v: 0 };
 }
 
 function handleText(key: string, ad: number, sr: number): string {
@@ -1373,7 +1568,9 @@ function renderReadout() {
   if (state.notesOpen && s.notes[selectedNote]) {
     const n = s.notes[selectedNote];
     const text = document.createElement('span');
-    text.textContent = `From ${timeText(n.start)}: ${n.semis ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}` : 'the note played'}`;
+    const from = s.fixedNote === null ? 'the note played' : noteName(s.fixedNote);
+    const pitch = n.semis ? `${semitoneText(n.semis)} semitone${Math.abs(n.semis) === 1 ? '' : 's'}${s.fixedNote === null ? '' : ` (${noteName(s.fixedNote + n.semis)})`}` : from;
+    text.textContent = `From ${timeText(n.start)}: ${pitch}${n.glide ? `, gliding there over ${timeText(n.glide)}` : ''}`;
     const del = document.createElement('button');
     del.className = 'mini danger';
     del.textContent = 'Delete';
@@ -1669,10 +1866,10 @@ plot.addEventListener('pointerdown', (e) => {
     dragging = key;
     // Selected from the moment it is grabbed
     if (key !== 'keyup') free = { key, ...handlePos(key, s.ad, s.sr) };
-    grabOffset = start - state.keyUp;
+    grabOffset = start - keyUp();
     origin = key === 'a' ? s.ad >> 4 : key === 'd' ? s.ad & 15 : s.sr & 15;
-    // Where the key goes up is a view setting, not part of the instrument
-    if (key !== 'keyup') before();
+    // Where the key goes up is a view setting, not part of the instrument (unless fixed)
+    if (key !== 'keyup' || s.release !== null) before();
     move = (e) => dragHandle(key, e);
   } else if (target.closest('[data-wave-loop-edge]')) {
     // Where the waveform repeats from: on a place it changes, settling there
@@ -1740,10 +1937,10 @@ plot.addEventListener('pointerdown', (e) => {
     const i = edge === 'end' ? at + 1 : at;
     const note = original[i];
     const following = edge ? null : original[i + 1] ?? null;
-    // Kept between the changes either side
-    const lo = i > 0 ? original[i - 1].start + 1 : 0;
+    // Kept between the changes either side (and clear of their glides)
+    const lo = i > 0 ? arrival(original[i - 1]) + 1 : 0;
     const beyond = original[i + (following ? 2 : 1)];
-    const hi = (beyond ? beyond.start - 1 : TOTAL - 1) - (following ? following.start - note.start : 0);
+    const hi = (beyond ? beyond.start - 1 : TOTAL - 1) - ((following ? arrival(following) : arrival(note)) - note.start);
     selectedNote = i;
     selected = -1;
     selectedPoint = -1;
@@ -1754,8 +1951,20 @@ plot.addEventListener('pointerdown', (e) => {
     plot.style.cursor = edge ? 'ew-resize' : 'grabbing';
     move = (e) => {
       const df = Math.round(frameAt(e) - start);
-      const moveBy = Math.max(lo, Math.min(hi, note.start + df)) - note.start;
-      const next: Note = { start: note.start + moveBy, semis: edge ? note.semis : semiAt(e) };
+      let next: Note;
+      if (edge) {
+        // An end pulled away from where the pitch before it ends makes a
+        // glide between them; pushed together, it jumps again
+        const ends = (beyond ? beyond.start : TOTAL) - 1;
+        const at = Math.max(lo, Math.min(ends, (edge === 'start' ? arrival(note) : note.start) + df));
+        if (edge === 'start') next = at >= note.start ? { ...note, glide: at - note.start } : { ...note, start: at, glide: 0 };
+        else next = at <= arrival(note) ? { ...note, start: at, glide: arrival(note) - at } : { ...note, start: at, glide: 0 };
+        if (!next.glide) delete next.glide;
+      } else {
+        const moveBy = Math.max(lo, Math.min(hi, note.start + df)) - note.start;
+        next = { ...note, start: note.start + moveBy, semis: semiAt(e) };
+      }
+      const moveBy = edge ? 0 : next.start - note.start;
       s.notes = original.map((o) => (o === note ? next : o === following ? { ...o, start: o.start + moveBy } : o));
       // The step grabbed stays selected (for its right end, that is the step before the change moved)
       selectedNote = edge === 'end' ? at : s.notes.indexOf(next);
@@ -1999,6 +2208,7 @@ plot.addEventListener('pointerdown', (e) => {
   }
 
   e.preventDefault();
+  hideChoice();
   plot.setPointerCapture(e.pointerId);
   const onMove = (e: PointerEvent) => {
     // A drag starts once the pointer has moved a few pixels, any way
@@ -2052,7 +2262,7 @@ function dragHandle(key: string, e: PointerEvent) {
   const [a, d, sus, r] = [s.ad >> 4, s.ad & 15, s.sr >> 4, s.sr & 15];
   const settle = (position: (v: number) => number, at: number) => settleAt(Array.from({ length: 16 }, (_, v) => position(v)), at, origin);
   let v = 0;
-  if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f)));
+  if (key === 'keyup') setKeyUp(f);
   else if (key === 'a') {
     s.ad = (settle(attackFrames, f) << 4) | d;
     v = 1;
@@ -2064,9 +2274,9 @@ function dragHandle(key: string, e: PointerEvent) {
     // sideways is when the key goes up, for Play and the picture
     v = Math.max(0, Math.min(1, 1 - (yAt(e) - RULER - PAD_TOP) / LEVEL_H));
     s.sr = (Math.round(v * 15) << 4) | r;
-    state.keyUp = Math.max(1, Math.min(TOTAL - 1, Math.round(f - grabOffset)));
+    setKeyUp(f - grabOffset);
   } else if (key === 'r') {
-    const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, state.keyUp);
+    const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, keyUp());
     s.sr = (sus << 4) | settle(releaseAt, f);
   }
   // Sustain's dot stays on the key going up
@@ -2132,11 +2342,11 @@ plot.addEventListener('keydown', (e) => {
   const s = shape();
   const clamp = (v: number) => Math.max(0, Math.min(15, v));
   before();
-  if (key === 'keyup') state.keyUp = Math.max(1, Math.min(TOTAL - 1, state.keyUp + dir * 5));
+  if (key === 'keyup') setKeyUp(keyUp() + dir * 5);
   else if (key === 'a') s.ad = (clamp((s.ad >> 4) + dir) << 4) | (s.ad & 15);
   else if (key === 'd') s.ad = (s.ad & 0xf0) | clamp((s.ad & 15) + dir);
   else if (key === 's' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) s.sr = (clamp((s.sr >> 4) + dir) << 4) | (s.sr & 15);
-  else if (key === 's') state.keyUp = Math.max(1, Math.min(TOTAL - 1, state.keyUp + dir));
+  else if (key === 's') setKeyUp(keyUp() + dir);
   else if (key === 'r') s.sr = (s.sr & 0xf0) | clamp((s.sr & 15) + dir);
   changed();
   (plot.querySelector(`[data-drag="${key}"]`) as SVGGElement | null)?.focus();
@@ -2218,7 +2428,7 @@ function pick(i: number) {
 $<HTMLSelectElement>('instrument').addEventListener('change', (e) => pick(Number((e.target as HTMLSelectElement).value)));
 $('new-instrument').addEventListener('click', () => {
   before();
-  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, filter: defaultFilter(), pulse: defaultPulse(), waveLoop: null });
+  state.instruments.push({ name: `Instrument ${state.instruments.length + 1}`, ad: 0x09, sr: 0x00, bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }], notes: [], hold: true, vibrato: null, filter: defaultFilter(), pulse: defaultPulse(), waveLoop: null, fixedNote: null, release: null, hardRestart: true });
   pick(state.instruments.length - 1);
 });
 $('duplicate-instrument').addEventListener('click', () => {
@@ -2280,8 +2490,10 @@ async function noteOn(note: number) {
 function noteOff(note?: number) {
   if (held === null || (note !== undefined && note !== held)) return;
   held = null;
-  releaseAt = Math.max(1, liveFrame());
-  if (player.started) player.noteOff(0);
+  // With the key up fixed, the instrument lets go itself, there
+  const fixedUp = shape().release;
+  releaseAt = fixedUp ?? Math.max(1, liveFrame());
+  if (player.started && fixedUp === null) player.noteOff(0);
   renderKeyboard();
 }
 
@@ -2297,7 +2509,7 @@ function playShape() {
   const note = test.note;
   void noteOn(note).then(() => {
     clearTimeout(playTimer);
-    playTimer = window.setTimeout(() => noteOff(note), (state.keyUp / FPS) * 1000);
+    playTimer = window.setTimeout(() => noteOff(note), (keyUp() / FPS) * 1000);
   });
 }
 
@@ -2465,6 +2677,11 @@ $('octave-up').addEventListener('click', () => {
   renderKeyboard();
 });
 $('play').addEventListener('click', playShape);
+$('hard-restart').addEventListener('change', () => {
+  before();
+  shape().hardRestart = $<HTMLInputElement>('hard-restart').checked;
+  changed();
+});
 
 // The clock: PAL or NTSC, remembered for the instrument pages
 function renderClock() {
@@ -2483,6 +2700,7 @@ $('clock').addEventListener('click', (e) => {
   saveNtsc(ntsc);
   player.setSettings(settings);
   state.keyUp = Math.min(state.keyUp, TOTAL - 1);
+  for (const ins of state.instruments) if (ins.release !== null) ins.release = Math.min(ins.release, TOTAL - 1);
   simCache.clear();
   renderClock();
   render();
@@ -2529,5 +2747,7 @@ Object.assign(window, {
     audition,
     ready: () => analyzer !== null,
     status: () => lastStatus,
+    /** Sets the key the traces play */
+    setKey: (note: number) => (test.note = note),
   },
 });
