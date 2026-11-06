@@ -82,7 +82,10 @@ zoomable timeline, aiming for a GarageBand feel.
   played as steps (16 levels, no sweep). One filter program, so one repeat: dragged on the
   Cutoff row but its band spans all three rows, and type chunks and resonance steps are
   drawn coming round after it (`filterRepeat`/`filterSource`). A chunk ending on the
-  repeat's end covers that frame too (else one unfiltered frame per pass). One filter program, so the cutoff's repeat is shared; setup rows
+  repeat's end covers that frame too (else one unfiltered frame per pass). Without a
+  repeat, the filter stays on after the last chunk (drawn faint to the end; `stayingOn`):
+  switching a 6581 voice's routing jumps its DC level, a pop even in silence, and in songs
+  notes run together. Imported instruments whose filter goes off keep `FilterShape.stops`. One filter program, so the cutoff's repeat is shared; setup rows
   for type/resonance changes share a frame with a cutoff set (`filterProgram`). A scope
   under the timeline shows the response at the playhead or the hovered moment, from the
   engine trace. The setup row routes voice 1

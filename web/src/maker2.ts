@@ -20,7 +20,7 @@ import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAV
 import { waveIcon, waveRun } from './waveicon';
 import { filterScope, modeIcon } from './filtercurve';
 import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { arrival, chunkAt, FIXED_BASE, RING_BIT, SYNC_BIT, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
+import { arrival, chunkAt, stayingOn, FIXED_BASE, RING_BIT, SYNC_BIT, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -929,7 +929,8 @@ function drawFilter() {
     // The cutoff, where it filters, coming round with the repeat
     const py = (v: number) => top + LINE_PAD + (1 - v / CUTOFF_MAX) * (PAD_BOTTOM - 2 * LINE_PAD);
     const rep = filterRepeat();
-    const filtering = (f: number) => s.filter.types.some((c) => c.start <= f && (f < c.end || (rep !== null && f === rep.to && c.end === rep.to)));
+    const on = stayingOn(s.filter);
+    const filtering = (f: number) => (on !== null && f >= on.start) || s.filter.types.some((c) => c.start <= f && (f < c.end || (rep !== null && f === rep.to && c.end === rep.to)));
     let pts: string[] = [];
     const flush = () => {
       if (pts.length > 1) el('polyline', { points: pts.join(' '), class: 'cutoff-preview' }, plot);
@@ -987,6 +988,9 @@ function drawTypes() {
       }
     }
   }
+  // The filter staying on after its last stretch (faint, to the end)
+  const on = stayingOn(f);
+  if (on && on.end < TOTAL) el('rect', { x: x(on.end) + 1, y: top + 5, width: Math.max(1, x(TOTAL) - x(on.end) - 2), height: TYPE_H - 10, rx: 6, class: 'type-body ghost' }, plot);
   f.types.forEach((c, i) => {
     const x1 = x(c.start);
     const x2 = x(c.end);

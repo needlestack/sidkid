@@ -133,6 +133,8 @@ export interface FilterShape {
   types: FilterChunk[];
   cutoff: PulseShape;
   resonance: PulseShape;
+  /** After its last stretch the filter goes off, as an imported instrument's may; without, it stays as that stretch left it (no pop as it lets go); no UI */
+  stops?: true;
 }
 
 /** A stretch of filtering of one type */
@@ -172,6 +174,13 @@ export const CUTOFF_MAX = 0xff;
 export const RESONANCE_MAX = 15;
 
 /** The chunk of filtering at a frame, if any */
+/** The stretch the filter stays on with after the last, if it does: without a repeat (coming round, its stretches play each time) or `stops` */
+export function stayingOn(filter: FilterShape): FilterChunk | null {
+  const looping = filter.cutoff.loop !== null && filter.cutoff.loop < filter.cutoff.points.length - 1;
+  if (looping || filter.stops || !filter.types.length) return null;
+  return filter.types.reduce((a, c) => (c.end > a.end ? c : a));
+}
+
 export function chunkAt(types: FilterChunk[], t: number): FilterChunk | null {
   return types.find((c) => c.start <= t && t < c.end) ?? null;
 }
@@ -492,7 +501,9 @@ export function filterProgram(filter: FilterShape, name: string, voices = 1, own
   // A chunk ending on the repeat's end covers that frame too: it is the
   // repeat's last, so the chunk stays on all the way round
   const loopEnd = filter.cutoff.loop !== null && filter.cutoff.loop < filter.cutoff.points.length - 1 ? filter.cutoff.points[filter.cutoff.points.length - 1].t : null;
-  filter = { ...filter, types: filter.types.map((c) => (c.end === loopEnd ? { ...c, end: c.end + 1 } : c)) };
+  // The last stretch, staying on, goes on for good: its end changes nothing
+  const on = stayingOn(filter);
+  filter = { ...filter, types: filter.types.map((c) => (c === on ? { ...c, end: Infinity } : c.end === loopEnd ? { ...c, end: c.end + 1 } : c)) };
   const res = (t: number) => Math.max(0, Math.min(RESONANCE_MAX, Math.round(lineAt(filter.resonance, t))));
   // Outside the chunks the voice goes past the filter (keeping the last type, which is then unheard)
   const typeFor = (t: number) => chunkAt(filter.types, t)?.passband ?? [...filter.types].reverse().find((c) => c.start <= t)?.passband ?? filter.types[0]?.passband ?? 0;
@@ -509,7 +520,7 @@ export function filterProgram(filter: FilterShape, name: string, voices = 1, own
   const changes = new Set<number>();
   for (const c of filter.types) {
     if (c.start > 0) changes.add(c.start);
-    changes.add(c.end);
+    if (c.end !== Infinity) changes.add(c.end);
   }
   const resEnd = Math.max(last, filter.resonance.points[filter.resonance.points.length - 1].t);
   for (let t = 1; t <= resEnd + 1; t++) if (res(t) !== res(t - 1)) changes.add(t);

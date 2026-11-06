@@ -603,14 +603,20 @@ try {
       types: [{ start: 0, end: 10, passband: 0x20 }, { start: 10, end: 20, passband: 0x50 }],
     };
     const t = window.maker2.trace(50);
-    // A gap between chunks isn't filtered
-    ins.filter = { ...ins.filter, cutoff: { points: [{ t: 0, w: 0x80 }], loop: null }, types: [{ start: 0, end: 5, passband: 0x10 }] };
-    const gap = window.maker2.trace(10).routing[6] & 1;
+    // A gap between chunks isn't filtered; after the last, the filter stays on (unless it stops, as an imported one may)
+    ins.filter = { ...ins.filter, cutoff: { points: [{ t: 0, w: 0x80 }], loop: null }, types: [{ start: 0, end: 5, passband: 0x10 }, { start: 8, end: 10, passband: 0x10 }] };
+    const after = window.maker2.trace(20).routing;
+    const gap = after[6] & 1;
+    const stayed = after[15] & 1;
+    ins.filter = { ...ins.filter, stops: true };
+    const stopped = window.maker2.trace(20).routing[15] & 1;
     // A chunk ending on the repeat's end stays on all the way round (its last frame too)
     ins.filter = { ...ins.filter, cutoff: { points: [{ t: 0, w: 0x80 }, { t: 5, w: 0x40 }, { t: 15, w: 0xc0 }], loop: 1 }, types: [{ start: 0, end: 15, passband: 0x10 }] };
     const round = window.maker2.trace(60).routing.slice(0, 60).every((r) => r & 1);
     ins.filter = was;
     if (gap) return 'still filtered after its chunk';
+    if (!stayed) return 'not filtered after the last chunk';
+    if (stopped) return 'still filtered after a stopping last chunk';
     if (!round) return 'a gap in the filter as it repeats';
     // The type changes on its frame (and again each time round), the cutoff undisturbed
     const types = [0, 9, 10, 20, 21, 30].map((f) => (t.mode[f] >> 4).toString(16)).join('');

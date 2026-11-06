@@ -306,6 +306,8 @@ export function importInstrument(ins: Instrument, tables: { left: Uint8Array; ri
     // (and the external input, bit 3, as routed)
     const on = (f: number) => (t.routing[f] & 0x0f ? ((t.mode[f] & 0x70) << 4) | (t.routing[f] & 0x0f) : null);
     filter.types = runs(on, 0, fEnd).map((r): FilterChunk => ({ start: r.start, end: run.loop === null && r.end === fEnd ? Math.min(r.end, frames) : r.end, passband: r.value >> 4, voices: r.value & 0x0f }));
+    // (going off after its last, where it does)
+    if (run.loop === null && filter.types.length && filter.types[filter.types.length - 1].end < frames) filter.stops = true;
     const lineEnd = run.loop === null ? Math.max(1, Math.min(frames, lastChange(t.cutoff, t.routing) + 1)) : run.end;
     filter.cutoff = lineOf(t.cutoff, lineEnd, run.loop);
     const res = Array.from(t.routing, (r) => r >> 4);
