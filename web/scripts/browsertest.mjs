@@ -624,6 +624,30 @@ try {
   });
   report(filt === 'c1 225525 10 80 f0 1b f0', 'maker2 filter', filt);
 
+  // A cutoff point picked under a chunk of filtering shows that chunk's low/band/high too, to change
+  await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    window.__filterWas = ins.filter;
+    ins.filter = { cutoff: { points: [{ t: 0, w: 0x40 }, { t: 15, w: 0xc0 }], loop: null }, resonance: { points: [{ t: 0, w: 8 }], loop: null }, types: [{ start: 10, end: 30, passband: 0x10 }] };
+    s.filterOpen = true;
+    window.maker2.changed();
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  const cutPoint = await m2.$eval('[data-line="cutoff"][data-point="1"] circle.dot', (e) => e.getBoundingClientRect().toJSON());
+  await m2.mouse.click(cutPoint.x + cutPoint.width / 2, cutPoint.y + cutPoint.height / 2);
+  const pointTypes = await m2.$$eval('#readout .segmented button', (bs) => bs.map((b) => `${b.textContent}${b.classList.contains('on') ? '*' : ''}`).join(' '));
+  await m2.evaluate(() => [...document.querySelectorAll('#readout .segmented button')].find((b) => b.textContent === 'Band').click());
+  const pointBand = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    const out = `${ins.filter.types[0].passband.toString(16)} ${ins.filter.cutoff.points[1].t}`;
+    ins.filter = window.__filterWas;
+    window.maker2.changed();
+    return out;
+  });
+  report(pointTypes === 'Low* Band High' && pointBand === '30 15', 'maker2 cutoff point shows its filter type', `${pointTypes}; ${pointBand}`);
+
   // A key held plays: the worklet runs the note at a pitch, gate on
   await m2.keyboard.down('k');
   const sounding = await m2

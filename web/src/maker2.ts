@@ -1715,6 +1715,15 @@ function typeReadout(box: HTMLElement) {
   const c = f.types[selectedType];
   const text = document.createElement('span');
   text.textContent = `${passbandText(c.passband)} from ${timeText(c.start)} for ${timeText(c.end - c.start)}`;
+  const del = document.createElement('button');
+  del.className = 'mini danger';
+  del.textContent = 'Delete';
+  del.addEventListener('click', deleteType);
+  box.append(text, ...passbandSwitches(c), del);
+}
+
+/** A chunk of filtering's switches for low, band and high (they combine), and its shape */
+function passbandSwitches(c: FilterChunk): Element[] {
   const types = document.createElement('div');
   types.className = 'segmented small';
   for (const [bit, name] of PASSBAND_NAMES) {
@@ -1731,11 +1740,7 @@ function typeReadout(box: HTMLElement) {
   }
   const icon = modeIcon(c.passband, 60, 26);
   icon.classList.add('type-shape');
-  const del = document.createElement('button');
-  del.className = 'mini danger';
-  del.textContent = 'Delete';
-  del.addEventListener('click', deleteType);
-  box.append(text, types, icon, del);
+  return [types, icon];
 }
 
 function deleteType() {
@@ -1755,6 +1760,13 @@ function pointReadout(box: HTMLElement) {
   const text = document.createElement('span');
   text.textContent = `${l.text(p.w)} at ${timeText(p.t)}`;
   box.append(text);
+  // A cutoff or resonance point under a chunk of filtering: that chunk's switches too
+  if (l.key !== 'pulse') {
+    const f = shape().filter;
+    const on = stayingOn(f);
+    const under = chunkAt(f.types, p.t) ?? (on && p.t >= on.end ? on : null);
+    if (under) box.append(...passbandSwitches(under));
+  }
   if (i > 0) {
     const del = document.createElement('button');
     del.className = 'mini danger';
