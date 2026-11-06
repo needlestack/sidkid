@@ -687,6 +687,21 @@ try {
   const env = await m2.evaluate(() => window.maker2.state().instruments[0]);
   report(env.sr >> 4 < 10 && (env.ad & 15) === 9, 'maker2 drag the sustain', `sustain ${env.sr >> 4}, decay ${env.ad & 15}`);
 
+  // The key played's step, before the first change, has its end to drag too (moving that change)
+  await m2.evaluate(() => {
+    const s = window.maker2.state();
+    s.instruments[s.current].notes = [{ start: 20, semis: 5 }];
+    s.notesOpen = true;
+    window.maker2.changed();
+  });
+  const firstEnd = await m2.$eval('[data-note="-1"] [data-note-edge=end]', (e) => {
+    const r = e.getBoundingClientRect();
+    return [r.x + 2, r.y + r.height / 2];
+  });
+  await dragTo(firstEnd, [(await plotPoint(30, 0))[0], firstEnd[1]]);
+  const moved = await m2.evaluate(() => JSON.stringify(window.maker2.state().instruments[window.maker2.state().current].notes));
+  report(moved === '[{"start":30,"semis":5}]', 'maker2 drag the first pitch step\'s end', moved);
+
   // Clicking the waveform strip under the volume opens the rows there, to draw in
   const strip = await m2.$eval('[data-span="0"] rect', (e) => {
     const r = e.getBoundingClientRect();

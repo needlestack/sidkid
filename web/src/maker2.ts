@@ -1115,6 +1115,14 @@ function drawNotes() {
   // Each change, to grab: its step to move in time and pitch, its start
   // (where it arrives) and end (where the next sets off) to move in time
   const lastEnd = spansHeard.filter((sp) => !sp.again).at(-1)?.end ?? null;
+  // The key played's step, before the first change: only its end to grab (the first change's start)
+  if (s.notes[0]?.start > 0) {
+    const x2 = x(s.notes[0].start);
+    const grip = Math.min(EDGE, (x2 - x(0)) / 3);
+    const y = noteY(steps[0]?.pitch ?? 0);
+    const g = el('g', { class: 'note-bar', 'data-note': -1 }, plot);
+    el('rect', { x: x2 - grip, y: y - 3, width: grip + 3, height: SEMI + 6, class: 'bar-edge', 'data-note-edge': 'end' }, g);
+  }
   s.notes.forEach((note, i) => {
     const next = s.notes[i + 1]?.start ?? lastEnd ?? TOTAL;
     const x1 = x(arrival(note));
