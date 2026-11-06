@@ -702,6 +702,18 @@ try {
   });
   report(releaseDot > 20, 'maker2 release without sustain', `${releaseDot}px past the key up`);
 
+  // Space plays the note wherever the focus is: never pressing the focused button (here Delete)
+  const spaceBefore = await m2.evaluate(() => window.maker2.state().instruments.length);
+  await m2.focus('#delete-instrument');
+  await m2.keyboard.down(' ');
+  const spacePlayed = await m2.waitForSelector('.key.down', { timeout: 2000 }).then(() => true, () => false);
+  await new Promise((r) => setTimeout(r, 300));
+  const spaceHeld = await m2.$('.key.down').then((k) => k !== null);
+  await m2.keyboard.up(' ');
+  const spaceLetGo = await m2.waitForSelector('.key.down', { hidden: true, timeout: 2000 }).then(() => true, () => false);
+  const spaceAfter = await m2.evaluate(() => window.maker2.state().instruments.length);
+  report(spacePlayed && spaceHeld && spaceLetGo && spaceAfter === spaceBefore, 'maker2 space plays as a key, not the focused button', `played ${spacePlayed}, held ${spaceHeld}, let go ${spaceLetGo}, ${spaceBefore} → ${spaceAfter} instruments`);
+
   // The key played's step, before the first change, has its end to drag too (moving that change)
   await m2.evaluate(() => {
     const s = window.maker2.state();
@@ -1044,6 +1056,17 @@ try {
     return `${window.songMaker.playhead()} ${s.cycling ? s.cycle.start : 0}`;
   });
   report(rtz.split(' ')[0] === rtz.split(' ')[1], 'song Z goes back to the start', rtz);
+
+  // Space plays and stops wherever the focus is: never pressing the focused button (here Delete)
+  const songBefore = await sm.evaluate(() => JSON.stringify(window.songMaker.song()));
+  await sm.focus('#delete-song');
+  await sm.keyboard.press(' ');
+  const spacePlays = await sm.evaluate(() => window.songMaker.playing());
+  await sm.keyboard.press(' ');
+  const spaceStops = await sm.evaluate(() => !window.songMaker.playing());
+  const songAfter = await sm.evaluate(() => JSON.stringify(window.songMaker.song()));
+  const spaceAsked = await sm.evaluate(() => [...document.querySelectorAll('.ask')].some((e) => !e.hidden));
+  report(spacePlays && spaceStops && songAfter === songBefore && !spaceAsked, 'song space plays, not the focused button', `plays ${spacePlays}, stops ${spaceStops}, song kept ${songAfter === songBefore}, asked ${spaceAsked}`);
 
   // The editor's ruler numbers the song's bars (this clip starts on bar 2)
   const rollBars = await sm.evaluate(() => [...document.querySelectorAll('#roll-ruler text')].map((t) => t.textContent).join(' '));

@@ -2199,6 +2199,22 @@ function typing(e: KeyboardEvent) {
   return t.matches('input:not([type=range]):not([type=checkbox]):not([type=radio]), textarea') || t.isContentEditable;
 }
 
+// Space plays and stops, wherever the focus is: never a focused button or menu (only typing takes it)
+for (const type of ['keydown', 'keyup'] as const) {
+  window.addEventListener(
+    type,
+    (e) => {
+      if (e.key !== ' ' || typing(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (type !== 'keydown' || e.repeat) return;
+      if (transport.playing) stop();
+      else void play();
+    },
+    { capture: true },
+  );
+}
+
 window.addEventListener('keydown', (e) => {
   // A question open: Escape leaves it; other keys are its buttons'
   if (!ask.hidden) {
@@ -2253,13 +2269,6 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.repeat) return;
-  // Space plays and stops wherever the focus is (not pressing a focused button or opening a menu)
-  if (e.key === ' ') {
-    e.preventDefault();
-    if (transport.playing) stop();
-    else void play();
-    return;
-  }
   if (e.key === 'Enter' || e.key === 'Home') {
     e.preventDefault();
     toStart();

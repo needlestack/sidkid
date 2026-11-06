@@ -693,7 +693,7 @@ function renderGutter() {
     t.tabIndex = 0;
     t.addEventListener('click', flip);
     t.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.key !== 'Enter') return;
       e.preventDefault();
       e.stopPropagation();
       flip();
@@ -2631,6 +2631,21 @@ function typing(e: KeyboardEvent) {
   return t.matches('input:not([type=range]):not([type=checkbox]):not([type=radio]), textarea') || t.isContentEditable;
 }
 
+// Space plays the note as a key does (held while it's down), wherever the focus is: never a focused button, fold or menu (only typing takes it)
+for (const type of ['keydown', 'keyup'] as const) {
+  window.addEventListener(
+    type,
+    (e) => {
+      if (e.key !== ' ' || typing(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (type === 'keyup') noteOff(test.note);
+      else if (!e.repeat) void noteOn(test.note);
+    },
+    { capture: true },
+  );
+}
+
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !typing(e)) {
     e.preventDefault();
@@ -2678,11 +2693,6 @@ window.addEventListener('keydown', (e) => {
   if ((e.key === 'Delete' || e.key === 'Backspace') && rows() && selected >= 0) {
     e.preventDefault();
     deleteSelected();
-    return;
-  }
-  if (e.key === ' ' && !(e.target as HTMLElement).matches('button, select')) {
-    e.preventDefault();
-    playShape();
     return;
   }
   const offset = KEYS[e.key.toLowerCase()];
