@@ -5,7 +5,10 @@ Notes for picking the work up again. Last updated 2026-11-05.
 ## How we work
 
 - Commit locally; don't push unless asked. The owner prefers running it locally
-  (`cd web && npx vite --port 5173 --strictPort`, then http://localhost:5173/instruments.html).
+  (`cd web && npx vite --port 5173 --strictPort`, then http://localhost:5173/songs.html).
+- Two pages (2026-11-05): Instrument Maker (`instruments2.html`) and Song Maker (`songs.html`),
+  switched in the middle of the top bar. The old song player (`index.html`) and first
+  instrument maker (`instruments.html`) are set aside: unlinked, still built and tested.
 - Commit as `Jonathan Field <needlestack@users.noreply.github.com>`.
 - No warnings in the UI. Make it clear enough that they aren't needed: sane
   defaults that can be bypassed, and loaded songs load exactly as they are.

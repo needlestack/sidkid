@@ -3,12 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SIDKid Instrument Maker 2</title>
+    <title>SIDKid Instrument Maker</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237c6cf2'/><path d='M4 11V5l4 3 4-3v6' stroke='white' stroke-width='1.6' fill='none'/></svg>" />
   </head>
   <body class="instrumentmaker maker2">
     <header class="topbar">
-      <div class="brand">SIDKid <span>Instrument maker 2</span></div>
+      <div class="brand">SIDKid <span>C64 music, made friendly</span></div>
+      <nav class="segmented pages" aria-label="Page">
+        <a href="./instruments2.html" class="on" aria-current="page">Instrument Maker</a>
+        <a href="./songs.html">Song Maker</a>
+      </nav>
       <nav class="files">
         <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
           <span class="segmented-label">Chip</span>
@@ -20,9 +24,6 @@
           <button data-ntsc="0" class="on" title="European C64s: 50 frames a second">PAL</button>
           <button data-ntsc="1" title="American C64s: 60 frames a second, and a slightly faster chip">NTSC</button>
         </div>
-        <a class="button secondary" href="./songs.html">Song maker</a>
-        <a class="button secondary" href="./instruments.html">Instrument maker</a>
-        <a class="button secondary" href="./">Song player</a>
       </nav>
     </header>
 

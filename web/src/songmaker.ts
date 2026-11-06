@@ -1,5 +1,5 @@
 // The song maker: tracks of notes along a timeline, each for an instrument
-// from Instrument Maker 2, played on one of the chip's three voices. Tracks
+// from the Instrument Maker, played on one of the chip's three voices. Tracks
 // sharing a voice take turns (see songdoc.ts). Notes are recorded by playing
 // along, or drawn in the editor under the arrangement. Clips repeat by
 // pulling out their upper right edge.
@@ -194,7 +194,7 @@ async function startAudio(): Promise<boolean> {
   return true;
 }
 
-// Instruments edited in Instrument Maker 2 (another tab) come straight over
+// Instruments edited in the Instrument Maker (another tab) come straight over
 window.addEventListener('storage', (e) => {
   if (e.key !== INSTRUMENTS_KEY) return;
   instruments = loadInstruments(INSTRUMENT_SECONDS * FPS);

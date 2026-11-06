@@ -8,7 +8,11 @@
   </head>
   <body class="instrumentmaker songmaker">
     <header class="topbar">
-      <div class="brand">SIDKid <span>Song maker</span></div>
+      <div class="brand">SIDKid <span>C64 music, made friendly</span></div>
+      <nav class="segmented pages" aria-label="Page">
+        <a href="./instruments2.html">Instrument Maker</a>
+        <a href="./songs.html" class="on" aria-current="page">Song Maker</a>
+      </nav>
       <nav class="files">
         <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
           <span class="segmented-label">Chip</span>
@@ -20,8 +24,6 @@
           <button data-ntsc="0" class="on" title="European C64s: 50 frames a second">PAL</button>
           <button data-ntsc="1" title="American C64s: 60 frames a second, and a slightly faster chip">NTSC</button>
         </div>
-        <a class="button secondary" href="./instruments2.html">Instrument maker 2</a>
-        <a class="button secondary" href="./">Song player</a>
       </nav>
     </header>
 
