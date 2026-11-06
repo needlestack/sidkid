@@ -687,6 +687,21 @@ try {
   const env = await m2.evaluate(() => window.maker2.state().instruments[0]);
   report(env.sr >> 4 < 10 && (env.ad & 15) === 9, 'maker2 drag the sustain', `sustain ${env.sr >> 4}, decay ${env.ad & 15}`);
 
+  // Silent by the key going up (no sustain), release's dot is still there to set, a whole release on from it
+  const releaseDot = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    const was = [ins.ad, ins.sr];
+    [ins.ad, ins.sr] = [0x05, 0x09];
+    window.maker2.changed();
+    const at = (key) => document.querySelector(`[data-drag=${key}] circle.dot`).getAttribute('cx');
+    const gap = Number(at('r')) - Number(at('s'));
+    [ins.ad, ins.sr] = was;
+    window.maker2.changed();
+    return gap;
+  });
+  report(releaseDot > 20, 'maker2 release without sustain', `${releaseDot}px past the key up`);
+
   // The key played's step, before the first change, has its end to drag too (moving that change)
   await m2.evaluate(() => {
     const s = window.maker2.state();
@@ -694,6 +709,8 @@ try {
     s.notesOpen = true;
     window.maker2.changed();
   });
+  // (once the opened roll has settled)
+  await new Promise((r) => setTimeout(r, 500));
   const firstEnd = await m2.$eval('[data-note="-1"] [data-note-edge=end]', (e) => {
     const r = e.getBoundingClientRect();
     return [r.x + 2, r.y + r.height / 2];

@@ -1292,7 +1292,10 @@ function handlePos(key: string, ad: number, sr: number): { f: number; v: number 
   if (key === 'd') return { f: decayEnd(a, d, sus), v: sus / 15 };
   // At the level held, where the key goes up
   if (key === 's') return { f: keyUp(), v: sus / 15 };
-  return { f: releaseEnd(ad, sr, keyUp()), v: 0 };
+  // Silent by the key going up, there is nothing to release: the dot sits a whole release on
+  // from it (still setting how a note let go sooner fades)
+  const end = releaseEnd(ad, sr, keyUp());
+  return { f: end > keyUp() ? end : keyUp() + realFrames(DECAY_MS[sr & 15]), v: 0 };
 }
 
 function handleText(key: string, ad: number, sr: number): string {
@@ -2268,7 +2271,7 @@ function dragHandle(key: string, e: PointerEvent) {
     s.sr = (Math.round(v * 15) << 4) | r;
     setKeyUp(f - grabOffset);
   } else if (key === 'r') {
-    const releaseAt = (rv: number) => releaseEnd(s.ad, (sus << 4) | rv, keyUp());
+    const releaseAt = (rv: number) => handlePos('r', s.ad, (sus << 4) | rv).f;
     s.sr = (sus << 4) | settle(releaseAt, f);
   }
   // Sustain's dot stays on the key going up
