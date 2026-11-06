@@ -181,6 +181,11 @@ export class Player {
     this.send({ type: 'noteOn', voice, note, instrument });
   }
 
+  /** Turns the filter off (as a note left it), for an instrument without one played after one with. */
+  clearFilter() {
+    this.send({ type: 'clearFilter' });
+  }
+
   noteOff(voice: number) {
     this.send({ type: 'noteOff', voice });
   }

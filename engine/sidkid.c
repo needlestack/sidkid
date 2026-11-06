@@ -387,6 +387,12 @@ void sk_skip_pulse(int voice)
   if ((voice >= 0) && (voice < MAX_CHN)) skippulse[voice] = 1;
 }
 
+void sk_clear_filter(void)
+{
+  // No voice routed and no type, as a program with nothing to filter leaves it (written next frame)
+  filterctrl = filtertype = filtercutoff = filtertime = filterptr = 0;
+}
+
 void sk_note_off(int voice)
 {
   if ((voice < 0) || (voice >= MAX_CHN)) return;

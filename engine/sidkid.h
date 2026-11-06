@@ -102,6 +102,8 @@ void sk_slide(int voice, int note, int data);
 // Holds a voice's pulse program still for the next frame, as the player
 // does itself on the first row of a pattern with pulse optimization on.
 void sk_skip_pulse(int voice);
+/* Turns the filter off: no voice routed through it, no type */
+void sk_clear_filter(void);
 
 // Runs one frame of the playroutine without rendering audio.
 void sk_tick(void);

@@ -2495,6 +2495,8 @@ async function noteOn(note: number) {
     }
     sendToPlayer();
   }
+  // The filter a note left on stays on (no pop as it lets go): one without a filter starts with it off
+  if (!shape().filter.types.length) player.clearFilter();
   player.noteOn(0, note, TEST_INSTRUMENT);
   noteStart = performance.now();
   releaseAt = null;
@@ -2852,6 +2854,8 @@ function differences(a: Trace, b: Trace): string[] {
 Object.assign(window, {
   maker2: {
     state: () => state,
+    /** After changing the state: redraws, saves and updates the player */
+    changed,
     trace,
     traceWith,
     audition,

@@ -63,6 +63,7 @@ export type Command =
   | { type: 'noteOn'; voice: number; note: number; instrument: number }
   | { type: 'noteOff'; voice: number }
   | { type: 'silence' }
+  | { type: 'clearFilter' }
   | { type: 'sequence'; sequence: Sequence | null; keep: boolean };
 
 export type Event =

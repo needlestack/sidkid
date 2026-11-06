@@ -635,6 +635,23 @@ try {
   await m2.keyboard.up('k');
   report(sounding, 'maker2 a key plays the note');
 
+  // The filter a note leaves on stays on; a note without a filter starts with it off
+  const unfilter = async (types) => {
+    await m2.evaluate((types) => {
+      const s = window.maker2.state();
+      s.instruments[s.current].filter = { types, cutoff: { points: [{ t: 0, w: 0x40 }], loop: null }, resonance: { points: [{ t: 0, w: 8 }], loop: null } };
+      window.maker2.changed();
+    }, types);
+    await m2.keyboard.down('k');
+    await new Promise((r) => setTimeout(r, 400));
+    const routed = await m2.evaluate(() => window.maker2.status().regs[0x17] & 1);
+    await m2.keyboard.up('k');
+    return routed;
+  };
+  const leftOn = await unfilter([{ start: 0, end: 3, passband: 0x10 }]);
+  const unfiltered = await unfilter([]);
+  report(leftOn === 1 && unfiltered === 0, 'maker2 a note without a filter plays unfiltered', `${leftOn} ${unfiltered}`);
+
   // Dragging the attack dot to the right makes the attack slower
   const plotPoint = (frame, y) =>
     m2.evaluate(

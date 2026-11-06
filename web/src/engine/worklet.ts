@@ -109,6 +109,9 @@ class SidKidProcessor extends AudioWorkletProcessor {
       case 'noteOn':
         sk._sk_note_on(cmd.voice, cmd.note, cmd.instrument);
         break;
+      case 'clearFilter':
+        sk._sk_clear_filter();
+        break;
       case 'noteOff':
         sk._sk_note_off(cmd.voice);
         break;
