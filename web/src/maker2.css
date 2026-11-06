@@ -187,9 +187,10 @@
   border-top: 1px solid var(--border);
 }
 
-/* An open section's header row: shaded from its top down to the rows under it */
+/* An open section's header row: shaded from its top down to the row headers' shade (over the gutter's edge, one band across) */
 .tl-gutter-row.head {
-  background: linear-gradient(var(--head-top), var(--surface));
+  right: -1px;
+  background: linear-gradient(var(--head-top), var(--surface-2));
 }
 
 .head-fade-top {
@@ -197,11 +198,11 @@
 }
 
 .head-fade-bottom {
-  stop-color: var(--surface);
+  stop-color: var(--surface-2);
 }
 
 .timeline {
-  --head-top: color-mix(in srgb, var(--surface-2), var(--text) 10%);
+  --head-top: color-mix(in srgb, var(--surface-2), var(--text) 16%);
 }
 
 .tl-gutter-row svg {
