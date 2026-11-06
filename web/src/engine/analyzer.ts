@@ -7,6 +7,7 @@ import createSidKid, { type SidKidModule } from '@engine/sidkid.js';
 import type { Instrument } from '../song';
 import { configure, writeInstrument, writeTables, type TableData } from './configure';
 import type { Settings } from './protocol';
+import { Sequencer, type Sequence } from './sequencer';
 import { wasmBytes } from './wasm';
 
 const SONG_PATH = '/song.sng';
@@ -102,6 +103,30 @@ export class Analyzer {
     }
     sk._sk_reset();
     return trace;
+  }
+
+  /**
+   * Plays a sequence silently with instruments 1, 2, ... and returns the 25
+   * SID registers after each frame, from the sequence's frame 0 (its preroll
+   * comes first, unrecorded).
+   */
+  traceSequence(tables: TableData[], instruments: Instrument[], seq: Sequence, frames: number, settings: Settings): Uint8Array[] {
+    const { sk } = this;
+    configure(sk, settings);
+    sk._sk_reset();
+    writeTables(sk, tables);
+    instruments.forEach((ins, i) => writeInstrument(sk, i + 1, ins));
+    const sequencer = new Sequencer();
+    sequencer.load(seq);
+    const regs = sk._sk_sidregs();
+    const out: Uint8Array[] = [];
+    for (let f = -seq.preroll; f < frames; f++) {
+      sequencer.tick(sk);
+      sk._sk_tick();
+      if (f >= 0) out.push(sk.HEAPU8.slice(regs, regs + 25));
+    }
+    sk._sk_reset();
+    return out;
   }
 }
 

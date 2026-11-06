@@ -14,6 +14,7 @@ import { DEFAULT_SETTINGS, type Settings, type Status } from './engine/protocol'
 import { ATTACK_MS, DECAY_MS } from './adsr';
 import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, parseSong, type Instrument } from './song';
+import { defaultInstruments, giveIds, migrate, NOTE_START, sound, soundTables, STORAGE_KEY } from './instruments';
 import { importInstrument, KEY as IMPORT_KEY, type Tracer } from './goatimport';
 import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
@@ -34,9 +35,7 @@ let FPS = ntsc ? 60 : 50;
 let CLOCK = ntsc ? 1022727 : 985248;
 let settings: Settings = { ...DEFAULT_SETTINGS, ntsc };
 /** How a new instrument's notes start: as GoatTracker's do by default */
-const NOTE_START = { bits: [] as Bar[], legato: false, gateFrames: 2, firstWave: 0x09, pulseFromSong: false };
 
-const STORAGE_KEY = 'sidkid.maker2.v1';
 const TEST_INSTRUMENT = 1;
 /** The timeline's length: 32 seconds, the slowest attack (8 s) and decay (24 s) together */
 const SECONDS = 32;
@@ -84,76 +83,7 @@ interface State {
 
 function defaults(): State {
   return {
-    instruments: [
-      {
-        name: 'Lead',
-        ad: 0x09,
-        sr: 0xa9,
-        bars: [{ wave: WAVE_PULSE, start: 0, end: 10 }],
-        notes: [],
-        hold: true,
-        vibrato: null,
-        filter: defaultFilter(),
-        // The classic sweep: narrow to wide and back, over and over
-        pulse: {
-          points: [
-            { t: 0, w: 0x300 },
-            { t: 25, w: 0xc00 },
-            { t: 50, w: 0x300 },
-          ],
-          loop: 0,
-        },
-        waveLoop: null,
-        fixedNote: null,
-        release: null,
-        hardRestart: true,
-        ...NOTE_START,
-      },
-      {
-        name: 'Bass',
-        ad: 0x08,
-        sr: 0x88,
-        bars: [
-          { wave: WAVE_PULSE, start: 0, end: 3 },
-          { wave: WAVE_SAW, start: 3, end: 13 },
-        ],
-        notes: [],
-        hold: true,
-        vibrato: null,
-        // A resonant low pass closing down: the classic bass pluck
-        filter: {
-          types: [{ start: 0, end: 30, passband: FILTER_LOW }],
-          cutoff: { points: [{ t: 0, w: 0xd0 }, { t: 25, w: 0x28 }], loop: null },
-          resonance: { points: [{ t: 0, w: 10 }], loop: null },
-        },
-        pulse: defaultPulse(),
-        waveLoop: null,
-        fixedNote: null,
-        release: null,
-        hardRestart: true,
-        ...NOTE_START,
-      },
-      {
-        name: 'Snare',
-        ad: 0x08,
-        sr: 0x00,
-        bars: [
-          { wave: WAVE_NOISE, start: 0, end: 1 },
-          { wave: WAVE_PULSE, start: 1, end: 3 },
-          { wave: WAVE_NOISE, start: 3, end: 13 },
-        ],
-        notes: [],
-        hold: true,
-        vibrato: null,
-        filter: defaultFilter(),
-        pulse: defaultPulse(),
-        waveLoop: null,
-        fixedNote: null,
-        release: null,
-        hardRestart: true,
-        ...NOTE_START,
-      },
-    ],
+    instruments: defaultInstruments(),
     current: 0,
     zoom: 0,
     keyUp: 50,
@@ -173,39 +103,7 @@ function load(): State {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
     if (saved?.instruments?.length) {
-      // Bars from before drawing stopped at 0 could start before the note did
-      for (const ins of saved.instruments as Shape[]) {
-        ins.bars = ins.bars.filter((b) => b.end === null || b.end > 0).map((b) => ({ ...b, start: Math.max(0, b.start) }));
-        // Saved before pulse width had a shape: a square, as they played
-        ins.pulse ??= defaultPulse();
-        ins.waveLoop ??= null;
-        // Notes had ends, which the player never heard (a pitch holds): now just their starts
-        ins.notes = (ins.notes ?? []).map(({ end: _end, ...n }: Note & { end?: number }) => n);
-        ins.vibrato ??= null;
-        ins.fixedNote ??= null;
-        ins.release ??= null;
-        ins.hardRestart ??= true;
-        ins.bits ??= [];
-        ins.legato ??= false;
-        ins.gateFrames ??= 2;
-        ins.firstWave ??= 0x09;
-        ins.pulseFromSong ??= false;
-        // Filters saved before they came in chunks: a type from the start, as one chunk to the end
-        const old = ins.filter as unknown as { passband?: number; resonance: number | PulseShape; cutoff: PulseShape; types?: { start: number; end?: number; passband: number }[] } | null;
-        if (!old) ins.filter = defaultFilter();
-        else if (old.passband !== undefined && typeof old.resonance === 'number') {
-          ins.filter = { cutoff: old.cutoff, resonance: { points: [{ t: 0, w: old.resonance }], loop: null }, types: [{ start: 0, end: TOTAL, passband: old.passband }] };
-        } else if (old.types?.some((c) => c.end === undefined)) {
-          ins.filter.types = old.types.map((c, k) => ({ start: c.start, end: old.types![k + 1]?.start ?? TOTAL, passband: c.passband }));
-        }
-        // Bars that kept going until the note ended: now the waveform holds after its last bar
-        const open = ins.bars.some((b) => b.end === null);
-        if (ins.hold === undefined) ins.hold = open;
-        if (open) {
-          const end = Math.max(0, ...ins.bars.map((b) => b.end ?? b.start + 10));
-          ins.bars = ins.bars.map((b) => (b.end === null ? { ...b, end: Math.max(end, b.start + 1) } : b));
-        }
-      }
+      migrate(saved.instruments, TOTAL);
       return { ...defaults(), ...saved };
     }
   } catch {
@@ -215,6 +113,7 @@ function load(): State {
 }
 
 function persist() {
+  giveIds(state.instruments);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
@@ -260,15 +159,8 @@ function changed() {
 
 // --- For the player -----------------------------------------------------------
 
-interface Audition {
-  tables: TableData[];
-  instrument: Instrument;
-}
+type Audition = { tables: TableData[]; instrument: Instrument };
 
-/** The gate timer's bit that leaves out the hard restart (the gate still goes off the frames before a note) */
-const NO_HARD_RESTART = 0x80;
-/** The gate timer's bit that keeps the gate on into the next note */
-const NO_GATE_OFF = 0x40;
 
 /** Where the key goes up: the instrument's own place when fixed, else the view's (how long the note is played) */
 function keyUp(): number {
@@ -282,20 +174,9 @@ function setKeyUp(f: number) {
 }
 
 function audition(s: Shape = shape()): Audition {
-  const pulse = s.pulseFromSong ? null : pulseProgram(s.bars, s.pulse, s.name);
-  const empty = { left: new Uint8Array(0), right: new Uint8Array(0) };
-  // Vibrato reads its speed from a row of the speed table, and glides from the rows after it
-  const v = s.vibrato;
-  const wobble = v ? wobbleRow(v) : null;
-  const { program: wave, speeds } = waveProgram(s, s.name, wobble ? 2 : 1);
-  const rows = [...(wobble ? [{ left: wobble[0], right: wobble[1] }] : []), ...speeds];
-  const speed = rows.length ? { left: Uint8Array.from(rows, (r) => r.left), right: Uint8Array.from(rows, (r) => r.right) } : null;
   // The test note plays on voice 1, so that is the voice it filters
-  const filter = s.filter.types.length ? filterProgram(s.filter, s.name, 1) : null;
-  return {
-    tables: [layOut([wave]).table, pulse ? layOut([pulse]).table : empty, filter ? layOut([filter]).table : empty, speed ?? empty],
-    instrument: { name: s.name, ad: s.ad, sr: s.sr, tables: [1, pulse ? 1 : 0, filter ? 1 : 0, v ? 1 : 0], vibratoDelay: v ? v.delay : 0, gateTimer: (s.gateFrames & 0x3f) | (s.hardRestart ? 0 : NO_HARD_RESTART) | (s.legato ? NO_GATE_OFF : 0), firstWave: s.firstWave },
-  };
+  const t = soundTables([sound(s, 1)]);
+  return { tables: t.tables, instrument: t.instruments[0] };
 }
 
 let analyzer: Analyzer | null = null;

@@ -66,6 +66,8 @@ export function defaultPulse(): PulseShape {
 }
 
 export interface Shape {
+  /** Its own id, which songs refer to it by */
+  id?: string;
   name: string;
   ad: number;
   sr: number;

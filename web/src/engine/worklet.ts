@@ -6,6 +6,7 @@
 import createSidKid, { type SidKidModule } from '@engine/sidkid.js';
 import { configure, writeInstrument, writeTables } from './configure';
 import type { Command, Event, ProcessorOptions } from './protocol';
+import { Sequencer } from './sequencer';
 
 // AudioWorkletGlobalScope is not in TypeScript's DOM lib
 declare const sampleRate: number;
@@ -25,6 +26,7 @@ class SidKidProcessor extends AudioWorkletProcessor {
   private envelopes = 0;
   private path = 0;
   private sinceStatus = 0;
+  private sequencer = new Sequencer();
 
   constructor(options: { processorOptions: ProcessorOptions }) {
     super();
@@ -107,7 +109,12 @@ class SidKidProcessor extends AudioWorkletProcessor {
         break;
       case 'silence':
         // Clears the SID registers: gates off with the fastest release
+        this.sequencer.stop();
         sk._sk_reset();
+        break;
+      case 'sequence':
+        if (cmd.sequence) this.sequencer.load(cmd.sequence, cmd.keep);
+        else this.sequencer.stop();
         break;
     }
   }
@@ -127,7 +134,15 @@ class SidKidProcessor extends AudioWorkletProcessor {
     if (!sk) return true;
 
     const n = out[0].length;
-    sk._sk_render(this.buffer, n);
+    // Rendered a frame at a time where a new one starts, so a sequence's
+    // notes go in just before their frame
+    for (let done = 0; done < n; ) {
+      if (sk._sk_frame_left() <= 0) this.sequencer.tick(sk);
+      const left = sk._sk_frame_left();
+      const amount = left > 0 ? Math.min(left, n - done) : 1;
+      sk._sk_render(this.buffer + done * 2, amount);
+      done += amount;
+    }
     const samples = sk.HEAP16.subarray(this.buffer >> 1, (this.buffer >> 1) + n);
     for (let i = 0; i < n; i++) out[0][i] = samples[i] / 32768;
     for (let c = 1; c < out.length; c++) out[c].set(out[0]);
@@ -146,6 +161,7 @@ class SidKidProcessor extends AudioWorkletProcessor {
           regs: sk.HEAPU8.slice(regs, regs + 25),
           envelopes: sk.HEAPU8.slice(this.envelopes, this.envelopes + 3),
           tablePos: [0, 1, 2].map((t) => sk._sk_table_pos(0, t)),
+          sequence: this.sequencer.playing ? this.sequencer.frame : null,
         },
       });
     }

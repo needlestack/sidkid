@@ -714,6 +714,136 @@ try {
   const overflow2 = await m2.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   report(overflow2 <= 0, 'maker2 fits a phone screen', overflow2 > 0 ? `${overflow2}px too wide` : '');
   report(m2Errors.length === 0, 'maker2 without errors', m2Errors.join(' | '));
+
+  // --- 5. Song maker --------------------------------------------------------
+  const sm = await browser.newPage();
+  const smErrors = [];
+  sm.on('pageerror', (err) => smErrors.push(err.message));
+  sm.on('console', (msg) => msg.type() === 'error' && smErrors.push(msg.text()));
+  await sm.setViewport({ width: 1280, height: 1000, deviceScaleFactor: 2 });
+  await sm.goto(`${base}songs.html`);
+  await sm.evaluate(() => localStorage.clear());
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready(), { timeout: 5000 });
+  report(true, 'song maker page loads');
+
+  // Frequency (hex) and gate of a voice, frame by frame: "freq:gate", runs collapsed to "xN"
+  const voiceRuns = (regs, v) => {
+    const out = [];
+    for (const r of regs) {
+      const k = `${(r[v * 7] | (r[v * 7 + 1] << 8)).toString(16)}:${r[v * 7 + 4] & 1}`;
+      if (out.length && out[out.length - 1][0] === k) out[out.length - 1][1]++;
+      else out.push([k, 1]);
+    }
+    return out.map(([k, n]) => `${k}x${n}`).join(' ');
+  };
+
+  // A note starts on its frame: step 4 at 6 frames a step is frame 24 (the gate goes off two frames before, for the hard restart)
+  const onTime = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.tracks.forEach((t) => (t.clips = []));
+    s.tracks[0].clips = [{ start: 0, length: 16, span: 16, notes: [{ start: 4, length: 4, note: 48 }] }];
+    window.songMaker.render();
+    return window.songMaker.trace(60);
+  });
+  const onRuns = voiceRuns(onTime, 0);
+  report(onRuns === '0:0x23 0:1x1 1168:1x24 1168:0x12', 'song notes play on their frames', onRuns);
+
+  // Two tracks on one voice take turns: the newer note takes it, and the held one comes back after
+  const turns = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.tracks[1].voice = 0;
+    s.tracks[1].clips = [{ start: 0, length: 16, span: 16, notes: [{ start: 0, length: 16, note: 31 }] }];
+    window.songMaker.render();
+    return window.songMaker.trace(100);
+  });
+  const turnRuns = voiceRuns(turns, 0);
+  report(turnRuns === '685:1x21 685:0x2 685:1x1 1168:1x21 1168:0x2 1168:1x1 685:1x48 685:0x4', 'song tracks on one voice take turns', turnRuns);
+
+  // Other voices play at the same time
+  const together = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.tracks[1].voice = 1;
+    window.songMaker.render();
+    return window.songMaker.trace(30);
+  });
+  report(voiceRuns(together, 1) === '685:1x30', 'song voices play together', voiceRuns(together, 1));
+
+  // Cycling repeats exactly: each pass of a bar is the same, frame for frame
+  const cycled = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.tracks[1].clips = [];
+    s.tracks[0].clips = [{ start: 0, length: 16, span: 16, notes: [{ start: 0, length: 4, note: 48 }, { start: 8, length: 8, note: 55 }] }];
+    s.cycle = { start: 0, end: 16 };
+    s.cycling = true;
+    window.songMaker.render();
+    const regs = window.songMaker.trace(96 * 3);
+    s.cycling = false;
+    window.songMaker.render();
+    return regs.map((r) => `${r[0]},${r[1]},${r[4]}`);
+  });
+  const passes = [0, 1, 2].map((n) => cycled.slice(n * 96 + 8, (n + 1) * 96).join(' '));
+  report(passes[0] === passes[1] && passes[1] === passes[2] && cycled[96] === cycled[192], 'song cycle repeats exactly', `${cycled[0]} / ${cycled[96]} / ${cycled[192]}`);
+
+  // Double-click in a lane makes a clip; double-click in the editor adds a note
+  await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    s.tracks.forEach((t) => (t.clips = []));
+    window.songMaker.render();
+  });
+  const arrBox = await sm.$eval('#arr', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.click(arrBox.x + 6 * 16 + 30, arrBox.y + 32 + 56 + 28, { count: 2 });
+  const made = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks.map((t) => t.clips.map((c) => [c.start, c.length, c.span]))));
+  report(made === '[[],[[16,16,16]],[]]', 'song double-click makes a clip', made);
+  const rollBox = await sm.$eval('#roll-scroll', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.click(rollBox.x + 8 + 22 * 2 + 5, rollBox.y + rollBox.height / 2, { count: 2 });
+  const noted = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
+  report(noted === '[[2,2]]', 'song double-click adds a note', noted);
+
+  // Dragging a note's middle moves it a step at a time
+  const noteBox = await sm.$eval('.roll-note', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.move(noteBox.x + 8, noteBox.y + 4);
+  await sm.mouse.down();
+  await sm.mouse.move(noteBox.x + 8 + 44, noteBox.y + 4 - 11, { steps: 4 });
+  await sm.mouse.up();
+  const dragged = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
+  report(dragged === '[[4,2]]', 'song drag moves a note', dragged);
+
+  // The clip's upper right edge repeats it
+  const clipBox = await sm.$eval('.clip2-body', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.move(clipBox.right - 5, clipBox.y + 8);
+  await sm.mouse.down();
+  await sm.mouse.move(clipBox.right - 5 + 96, clipBox.y + 8, { steps: 6 });
+  await sm.mouse.up();
+  const repeated = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks[1].clips.map((c) => [c.start, c.length, c.span])));
+  report(repeated === '[[16,16,32]]', 'song clip repeats', repeated);
+
+  // Recording: R plays, a held key becomes a note on the selected track
+  await sm.mouse.click(arrBox.x - 100, arrBox.y + 32 + 20);
+  await sm.keyboard.press('r');
+  await sm.waitForFunction(() => window.songMaker.playing());
+  await new Promise((r) => setTimeout(r, 500));
+  await sm.keyboard.down('a');
+  await new Promise((r) => setTimeout(r, 500));
+  await sm.keyboard.up('a');
+  await sm.keyboard.press(' ');
+  const recorded = await sm.evaluate(() => window.songMaker.song().tracks[0].clips.flatMap((c) => c.notes));
+  const rec = recorded[0];
+  report(recorded.length === 1 && rec.note === 36 && rec.length >= 2 && rec.length <= 6, 'song records played notes', JSON.stringify(recorded));
+
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  const kept2 = await sm.evaluate(() => [...document.querySelectorAll('.track-instrument')].map((s, i) => `${s.selectedOptions[0].text} ${window.songMaker.song().tracks[i].clips.length}`).join(', '));
+  report(kept2 === 'Lead 1, Bass 1, Snare 0', 'song keeps across a reload', kept2);
+
+  await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
+  await colorScheme(sm, 'dark');
+  await sm.screenshot({ path: `${OUT}/${BROWSER}-songs-dark.png` });
+  await colorScheme(sm, 'light');
+  await sm.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+  const overflow3 = await sm.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  report(overflow3 <= 0, 'song maker fits a phone screen', overflow3 > 0 ? `${overflow3}px too wide` : '');
+  report(smErrors.length === 0, 'song maker without errors', smErrors.join(' | '));
 } finally {
   await browser.close();
   server.httpServer.close();

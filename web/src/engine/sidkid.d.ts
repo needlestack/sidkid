@@ -29,6 +29,7 @@ declare module '@engine/sidkid.js' {
     _sk_toggle_mute(channel: number): void;
     _sk_is_muted(channel: number): number;
     _sk_render(out: number, samples: number): void;
+    _sk_frame_left(): number;
     _sk_render_frame(out: number): number;
     _sk_sidregs(): number;
     _sk_envelopes(out: number): void;

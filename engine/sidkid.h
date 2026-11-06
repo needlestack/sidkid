@@ -67,6 +67,10 @@ int sk_scan(int subsong, int maxframes, unsigned *out, int maxevents);
 // Fills out with exactly n samples, running frames as needed.
 void sk_render(short *out, int n);
 
+// Samples sk_render has left of the frame it is in: 0 means its next
+// sample starts a new frame (so notes started now play from that frame).
+int sk_frame_left(void);
+
 // Playing single notes, for trying out sounds. These work while no song is
 // playing (a playing song is stopped). Notes are 0 (C-0) to 94 (A#7).
 

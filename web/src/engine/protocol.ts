@@ -4,6 +4,7 @@
 
 import type { Instrument } from '../song';
 import type { TableData } from './configure';
+import type { Sequence } from './sequencer';
 
 export interface SongInfo {
   title: string;
@@ -45,6 +46,8 @@ export interface Status {
   envelopes: Uint8Array;
   /** Voice 1's wave and pulse table positions and the filter's (1-based, 0 = not running). */
   tablePos: number[];
+  /** The frame a sequence has got to (see Sequencer), or null when none is playing */
+  sequence: number | null;
 }
 
 export type Command =
@@ -59,7 +62,8 @@ export type Command =
   | { type: 'instrument'; num: number; instrument: Instrument }
   | { type: 'noteOn'; voice: number; note: number; instrument: number }
   | { type: 'noteOff'; voice: number }
-  | { type: 'silence' };
+  | { type: 'silence' }
+  | { type: 'sequence'; sequence: Sequence | null; keep: boolean };
 
 export type Event =
   | { type: 'ready' }

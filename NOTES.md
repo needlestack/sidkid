@@ -165,6 +165,33 @@ zoomable timeline, aiming for a GarageBand feel.
   sync are checkboxes: whole note, or partly as imported). Also kept without UI:
   `legato`, `gateFrames`, `firstWave`, `pulseFromSong`.
 
+## Song maker (`songs.html`, started 2026-11-05)
+
+- `web/src/songdoc.ts`: the model (SongDoc → Track {instrument id, voice, muted, clips} → Clip
+  {start, length, span, notes}; steps, `stepFrames` a step = tempo) and the compiler.
+  `voiceSegments`: per voice, the held note that started last plays (same frame: higher track
+  wins); a note that gets the voice back restarts. `songSequence` turns that into timed note
+  on/offs, each started `leadOf` (gate timer + 1) frames early so it sounds on its frame;
+  a note-off is skipped when the next note's start comes first, or the instrument has a
+  fixed key up. Cycling: a first pass from the playhead, then the cycle round and round
+  (`lead` events replay before each jump back).
+- `web/src/engine/sequencer.ts`: plays a Sequence a frame at a time, in the worklet (which
+  now renders up to frame boundaries with `sk_frame_left`, new in the engine) and in
+  `Analyzer.traceSequence` for tests. Status reports `sequence` (the frame reached).
+- `web/src/instruments.ts`: maker2's storage, migration and shape → tables (`sound`,
+  `sounds`, `soundTables`) now shared. Instruments have ids (`giveIds`; starting ones are
+  'lead', 'bass', 'snare'). An instrument per (instrument, voice): the filter needs the voice.
+  The song page follows maker2 edits live (storage event).
+- Page (`songmaker.ts`): track heads (instrument, voice 1-3, mute, remove, + Track), clips
+  (double-click a lane; drag; ⌥-drag copies; lower right edge = length, upper right = repeat;
+  ⌘D duplicates), ruler (click = playhead, top strip = cycle), editor for the open clip
+  (double-click adds, drag moves/lengthens, rubber band, arrows), keys play the selected
+  track; R records (quantized to steps, into the clip under it or a take clip growing by
+  bars), C cycle, Space play, Return to start, Z/X octave. Double-clicks are detected from
+  press timing (the first press redraws the SVG). Stored in `sidkid.song2.v1`, one song.
+- Not yet: voice priority settings, filter sharing, several songs, .sng export, tempo
+  changes, copy/paste, selecting several clips.
+
 ## Song construction: stack and pre-empt (the plan)
 
 The user's direction: pre-planning every voice breaks how musicians think. Any number of

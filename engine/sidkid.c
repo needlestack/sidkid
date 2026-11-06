@@ -278,6 +278,11 @@ void sk_render(short *out, int n)
   if (n > 0) memset(out, 0, n * sizeof(short));
 }
 
+int sk_frame_left(void)
+{
+  return framelen - framepos;
+}
+
 void sk_reset(void)
 {
   // A stop only takes effect on the next playroutine call

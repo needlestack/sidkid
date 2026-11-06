@@ -4,6 +4,7 @@ import workletUrl from './worklet.ts?worker&url';
 import { wasmBytes } from './wasm';
 import type { Instrument } from '../song';
 import type { TableData } from './configure';
+import type { Sequence } from './sequencer';
 import { DEFAULT_SETTINGS, type Command, type Event, type ProcessorOptions, type Settings, type SongInfo, type Status } from './protocol';
 
 export const SAMPLE_RATE = 48000;
@@ -182,6 +183,11 @@ export class Player {
 
   noteOff(voice: number) {
     this.send({ type: 'noteOff', voice });
+  }
+
+  /** Plays notes on time (see Sequencer); null stops. `keep` swaps in an edit without restarting. */
+  sequence(sequence: Sequence | null, keep = false) {
+    this.send({ type: 'sequence', sequence, keep });
   }
 
   /** Stops everything at once, including notes still fading out. */

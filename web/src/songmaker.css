@@ -1,0 +1,485 @@
+/* The song maker: an arrangement of tracks over a ruler, and an editor for
+   one clip's notes under it. Builds on style.css, instrumentmaker.css (the
+   top bar, the keyboard bar at the bottom) and maker2.css. */
+
+.songmaker main {
+  display: grid;
+  gap: 16px;
+  max-width: 1400px;
+}
+
+.arrange,
+.editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.arrange-head {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.arrange-head .name-input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.transport-button {
+  width: 36px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.transport-button svg {
+  display: block;
+  margin: auto;
+}
+
+.transport-button:hover {
+  border-color: var(--accent);
+}
+
+.transport-button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.transport-button.record {
+  color: var(--playhead);
+}
+
+.transport-button.record.on {
+  background: var(--playhead);
+  border-color: var(--playhead);
+  color: #fff;
+}
+
+.position {
+  min-width: 64px;
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+#tempo {
+  height: 32px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.arrange-hint,
+.editor-hint {
+  margin: 0;
+}
+
+/* Track heads beside their lanes */
+.arrangement {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.track-heads {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.heads-ruler {
+  flex: 0 0 32px;
+  background: var(--surface-2);
+}
+
+.track-head {
+  flex: 0 0 56px;
+  height: 56px;
+  overflow: hidden;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  cursor: default;
+}
+
+.track-head::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+  background: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
+}
+
+.track-head.current {
+  background: var(--accent-soft);
+}
+
+.track-head.muted .track-instrument {
+  opacity: 0.5;
+}
+
+.track-instrument {
+  width: 100%;
+  height: 20px;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  cursor: pointer;
+}
+
+.track-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.voice-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.voice-pick {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.voice-pick button {
+  width: 22px;
+  height: 20px;
+  border: none;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.voice-pick button + button {
+  border-left: 1px solid var(--border);
+}
+
+.voice-pick button.on {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+.track-mute {
+  margin-left: auto;
+}
+
+.add-track {
+  margin: 8px;
+  align-self: start;
+}
+
+.arr-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.arr-plot {
+  display: block;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.arr-ruler {
+  fill: var(--surface-2);
+  cursor: text;
+}
+
+.arr-cycle {
+  fill: var(--step-bar);
+  opacity: 0.35;
+  cursor: grab;
+}
+
+.arr-cycle.on {
+  fill: #f2c94c;
+  opacity: 1;
+}
+
+.arr-cycle-band {
+  fill: #f2c94c;
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.arr-grid {
+  stroke: var(--step-beat);
+  pointer-events: none;
+}
+
+.arr-grid.bar {
+  stroke: var(--step-bar);
+  stroke-opacity: 0.7;
+}
+
+.arr-label {
+  fill: var(--muted);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.arr-lane {
+  fill: transparent;
+}
+
+.arr-lane.current {
+  fill: var(--accent-soft);
+  fill-opacity: 0.35;
+}
+
+.arr-lane-line {
+  stroke: var(--border);
+  pointer-events: none;
+}
+
+.arr-playhead {
+  stroke: var(--playhead);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+/* Clips: the track's colour, its notes inside, repeats after a notch */
+.clip2 {
+  cursor: grab;
+}
+
+.clip2-body {
+  fill: hsl(var(--h) var(--clip-s) var(--clip-l));
+  stroke: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
+}
+
+.clip2.open .clip2-body {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.clip2.muted {
+  opacity: 0.45;
+}
+
+.clip2-notch {
+  stroke: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
+  stroke-dasharray: 3 3;
+}
+
+.clip2-note {
+  fill: hsl(var(--h) 60% var(--clip-ink-l));
+}
+
+.clip2-note.again {
+  opacity: 0.55;
+}
+
+/* Another track on the voice has it here */
+.clip2-note.stolen {
+  opacity: 0.25;
+}
+
+.clip2-edge {
+  fill: transparent;
+  cursor: ew-resize;
+}
+
+.clip2-loop .clip2-edge {
+  cursor: alias;
+}
+
+.clip2-loop-icon {
+  fill: none;
+  stroke: hsl(var(--h) 60% var(--clip-ink-l));
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.clip2:hover .clip2-loop-icon,
+.clip2-loop:hover .clip2-loop-icon {
+  opacity: 0.8;
+}
+
+/* The editor: note names on the left, notes on a grid of steps */
+.editor-head {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.editor-head h2 {
+  margin: 0;
+}
+
+.roll {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.editor.empty .roll {
+  opacity: 0.55;
+}
+
+.roll-keys {
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.roll-keys svg {
+  display: block;
+}
+
+.roll-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.roll-plot {
+  display: block;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.roll-row {
+  fill: var(--surface);
+}
+
+.roll-row.black {
+  fill: var(--surface-2);
+}
+
+.roll-octave {
+  stroke: var(--step-bar);
+  stroke-opacity: 0.6;
+  pointer-events: none;
+}
+
+.roll-grid {
+  pointer-events: none;
+  stroke: var(--step-beat);
+  stroke-opacity: 0.5;
+}
+
+.roll-grid.beat {
+  stroke-opacity: 1;
+}
+
+.roll-grid.bar {
+  stroke: var(--step-bar);
+}
+
+.roll-past {
+  fill: var(--muted);
+  fill-opacity: 0.12;
+  pointer-events: none;
+}
+
+.roll-note {
+  fill: hsl(var(--h) var(--clip-s) var(--clip-edge-l));
+  stroke: hsl(var(--h) 60% var(--clip-ink-l));
+  stroke-opacity: 0.5;
+  cursor: grab;
+}
+
+.roll-note.selected {
+  stroke: var(--text);
+  stroke-opacity: 1;
+  stroke-width: 2;
+}
+
+.roll-note.past {
+  opacity: 0.4;
+}
+
+.roll-band {
+  fill: var(--accent);
+  fill-opacity: 0.12;
+  stroke: var(--accent);
+  pointer-events: none;
+}
+
+.roll-key {
+  fill: var(--surface);
+  cursor: pointer;
+}
+
+.roll-key.black {
+  fill: var(--surface-2);
+}
+
+.roll-key:hover {
+  fill: var(--accent-soft);
+}
+
+.roll-key-label {
+  fill: var(--muted);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+/* The bar at the bottom: which track the keys play */
+.track-now {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 36px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border-left: 4px solid hsl(var(--h) var(--clip-s) var(--clip-edge-l));
+  background: var(--surface-2);
+}
+
+.track-now b {
+  font-size: 16px;
+}
+
+.track-now span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 700px) {
+  .arrangement {
+    grid-template-columns: 130px minmax(0, 1fr);
+  }
+
+  .transport {
+    flex-wrap: wrap;
+  }
+}

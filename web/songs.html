@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIDKid Song Maker</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237c6cf2'/><path d='M4 11V5l4 3 4-3v6' stroke='white' stroke-width='1.6' fill='none'/></svg>" />
+  </head>
+  <body class="instrumentmaker songmaker">
+    <header class="topbar">
+      <div class="brand">SIDKid <span>Song maker</span></div>
+      <nav class="files">
+        <div class="segmented" id="model" title="Which SID chip to emulate, everywhere in SIDKid">
+          <span class="segmented-label">Chip</span>
+          <button data-model="0" class="on" title="The original C64 SID: gritty, with a characterful filter">6581</button>
+          <button data-model="1" title="The later SID revision: cleaner, with a brighter filter">8580</button>
+        </div>
+        <div class="segmented" id="clock" title="Which kind of C64: it sets how often the player runs and how fast the chip counts">
+          <span class="segmented-label">Clock</span>
+          <button data-ntsc="0" class="on" title="European C64s: 50 frames a second">PAL</button>
+          <button data-ntsc="1" title="American C64s: 60 frames a second, and a slightly faster chip">NTSC</button>
+        </div>
+        <a class="button secondary" href="./instruments2.html">Instrument maker 2</a>
+        <a class="button secondary" href="./">Song player</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="card arrange">
+        <header class="card-head arrange-head">
+          <input id="song-name" class="name-input" aria-label="Song name" spellcheck="false" />
+          <div class="transport">
+            <button class="transport-button" id="to-start" title="Back to the start (Return)" aria-label="Back to the start">⏮</button>
+            <button class="transport-button" id="play" title="Play or stop (Space)" aria-label="Play">▶</button>
+            <button class="transport-button record" id="record" title="Record what you play on the selected track (R)" aria-label="Record">●</button>
+            <button class="transport-button" id="cycle" title="Repeat the yellow stretch of the ruler (C); drag along the top of the ruler to set it" aria-label="Cycle" aria-pressed="false"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M5 8.5A5.5 5.5 0 0 1 15 7M15 11.5A5.5 5.5 0 0 1 5 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M15.5 3.5V7.5H11.5M4.5 16.5V12.5H8.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <span class="position" id="position" title="Bar . beat . step">1.1.1</span>
+            <select id="tempo" aria-label="Tempo" title="Tempo: frames each step lasts"></select>
+          </div>
+          <div class="zoom-buttons">
+            <button class="mini" id="zoom-out" aria-label="Zoom out" title="Zoom out (or ⌘/Ctrl + scroll)">−</button>
+            <button class="mini" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+          </div>
+        </header>
+        <div class="arrangement" id="arrangement">
+          <div class="track-heads" id="track-heads"></div>
+          <div class="arr-scroll" id="arr-scroll">
+            <svg id="arr" class="arr-plot"></svg>
+          </div>
+        </div>
+        <p class="hint arrange-hint">Double-click in a track to add a clip. Drag a clip's lower right edge to change its length, its upper right edge to repeat it.</p>
+      </section>
+
+      <section class="card editor" id="editor">
+        <header class="card-head editor-head">
+          <h2 id="editor-title">Notes</h2>
+        </header>
+        <div class="roll" id="roll-wrap">
+          <div class="roll-keys" id="roll-keys-wrap"><svg id="roll-keys"></svg></div>
+          <div class="roll-scroll" id="roll-scroll"><svg id="roll" class="roll-plot"></svg></div>
+        </div>
+        <p class="hint editor-hint" id="editor-hint"></p>
+      </section>
+    </main>
+
+    <footer class="tryit" id="tryit">
+      <div class="tryit-inner">
+        <div class="field instrument-field">
+          <span>Playing on</span>
+          <div class="track-now" id="track-now"></div>
+        </div>
+        <div class="keyboard-wrap">
+          <button class="octave-button" id="octave-down" aria-label="Octave down" title="Octave down (Z)">−</button>
+          <div class="keyboard-col">
+            <div class="key-labels" id="key-labels" aria-hidden="true"></div>
+            <div class="keyboard" id="keyboard" aria-label="Keyboard: play the selected track's instrument with the mouse or the computer keys shown on it."></div>
+          </div>
+          <button class="octave-button" id="octave-up" aria-label="Octave up" title="Octave up (X)">+</button>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script type="module" src="/src/songmaker.ts"></script>
+  </body>
+</html>
