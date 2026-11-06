@@ -344,7 +344,6 @@
   fill: var(--accent);
 }
 
-
 /* The dot in hand follows the pointer; the setting it will land on stays in
    colour and the next one past it is greyed out */
 .env-grip {
@@ -443,12 +442,6 @@
 .bar.selected .bar-body {
   fill-opacity: 0.55;
   stroke: var(--text);
-  stroke-width: 2;
-}
-
-.bar-arrow {
-  fill: none;
-  stroke: var(--c);
   stroke-width: 2;
 }
 
@@ -765,17 +758,6 @@
 
 .bar-body.held.noise {
   --c: var(--noise);
-}
-
-.note.implied {
-  fill-opacity: 0.12;
-  stroke-opacity: 0.4;
-  stroke-dasharray: 3 2;
-  pointer-events: none;
-}
-
-.note.implied.again {
-  opacity: 0.5;
 }
 
 /* The pitch as the player makes it */

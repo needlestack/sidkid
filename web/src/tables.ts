@@ -7,7 +7,7 @@
 // steps that then stops or loops. Programs are laid back out into a table
 // when they change, so jumps follow the steps they point at.
 
-import { describeCommand, noteName } from './song';
+import { noteName } from './song';
 
 export const WAVE = 0;
 export const PULSE = 1;
@@ -128,16 +128,6 @@ function positionOf(programs: Program[], starts: number[], t: Target): number {
   if (i < 0 || t.step > t.program.steps.length) return 0;
   const pos = starts[i] + t.step;
   return pos <= TABLE_LENGTH ? pos : 0;
-}
-
-/** The program and step a 1-based table position falls in. */
-export function locate(programs: Program[], layout: Layout, pos: number): { program: number; step: number } | null {
-  for (let i = programs.length - 1; i >= 0; i--) {
-    if (pos < layout.starts[i]) continue;
-    const step = pos - layout.starts[i];
-    return step <= programs[i].steps.length ? { program: i, step } : null;
-  }
-  return null;
 }
 
 export const KIND_NAMES = ['Wave', 'Pulse', 'Filter', 'Speed'];
@@ -303,12 +293,6 @@ export function passbandName(bits: number): string {
   return names.length ? `${names.join(' + ')} pass` : 'no passband';
 }
 
-function voiceList(bits: number): string {
-  const v = [1, 2, 3].filter((n) => bits & (1 << (n - 1)));
-  if (!v.length) return 'no voices';
-  return `voice${v.length > 1 ? 's' : ''} ${v.join(', ')}`;
-}
-
 function signed(b: number): number {
   return b < 0x80 ? b : b - 0x100;
 }
@@ -317,116 +301,11 @@ function clampFrames(n: number): number {
   return Math.max(1, Math.min(0x7f, Math.round(n)));
 }
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
-}
-
-/** What a step does, in plain words. */
-export function describeStep(kind: number, s: Step): string {
-  if (kind === WAVE) {
-    const a = waveAction(s);
-    const pitch = describePitch(pitchOf(s.right));
-    switch (a.type) {
-      case 'wave': {
-        const gate = a.wave & WAVE_GATE ? '' : ', gate off';
-        const extras = [a.wave & WAVE_SYNC && 'sync', a.wave & WAVE_RING && 'ring', a.wave & WAVE_TEST && 'test bit'].filter(Boolean);
-        return `${waveName(a.wave)}${extras.length ? ` (${extras.join(', ')})` : ''}${gate} · ${pitch}`;
-      }
-      case 'keep':
-        return `Same wave · ${pitch}`;
-      case 'wait':
-        return `Wait ${plural(a.frames, 'frame')}, then ${pitch}`;
-      case 'command':
-        return describeCommand(a.command, s.right) || 'Does nothing';
-    }
-  }
-  if (kind === PULSE) {
-    const a = pulseAction(s);
-    switch (a.type) {
-      case 'width':
-        return `Width ${percent(a.width / 4096)}`;
-      case 'sweep':
-        return `${a.speed >= 0 ? 'Widen' : 'Narrow'} by ${Math.abs(a.speed)} a frame for ${plural(a.frames, 'frame')}`;
-      case 'hold':
-        return 'Hold here';
-    }
-  }
-  if (kind === FILTER) {
-    const a = filterAction(s);
-    switch (a.type) {
-      case 'setup':
-        return `${cap(passbandName(a.passband))}, resonance ${a.resonance}, on ${voiceList(a.voices)}`;
-      case 'cutoff':
-        return `Cutoff ${a.cutoff}`;
-      case 'sweep':
-        return `${a.speed >= 0 ? 'Open' : 'Close'} by ${Math.abs(a.speed)} a frame for ${plural(a.frames, 'frame')}`;
-    }
-  }
-  return '';
-}
-
-function cap(s: string) {
-  return s[0].toUpperCase() + s.slice(1);
-}
-
 export function percent(f: number): string {
   return `${Math.round(f * 100)}%`;
 }
 
 // --- Starting points ------------------------------------------------------
-
-interface Preset {
-  name: string;
-  hint: string;
-  rows: [number, number][];
-  /** Step to loop back to, or null to stop. */
-  loop: number | null;
-}
-
-// Mostly from the examples in GoatTracker's readme
-export const PRESETS: Preset[][] = [
-  [
-    { name: 'Saw', hint: 'Sawtooth at the note played: bright and buzzy', rows: [[0x21, 0x00]], loop: null },
-    { name: 'Pulse', hint: 'Pulse wave at the note played, shaped by the pulse program', rows: [[0x41, 0x00]], loop: null },
-    { name: 'Triangle', hint: 'Triangle at the note played: soft and round', rows: [[0x11, 0x00]], loop: null },
-    { name: 'Flute', hint: 'A frame of pulse, then triangle', rows: [[0x41, 0x00], [0x11, 0x00]], loop: null },
-    { name: 'Koto', hint: 'Starts a semitone high for one frame, with the gate off after it', rows: [[0x41, 0x01], [0x40, 0x00]], loop: null },
-    {
-      name: 'Snare',
-      hint: 'Noise and pulse at fixed pitches, so it sounds the same on any note. Pair with a 50% pulse width.',
-      rows: [[0x81, 0xd0], [0x41, 0xaa], [0x41, 0xa4], [0x80, 0xd4], [0x80, 0xd1]],
-      loop: null,
-    },
-    { name: 'Tick + pulse', hint: 'A frame of high noise, like a hi-hat, then pulse', rows: [[0x81, 0xdf], [0x41, 0x00]], loop: null },
-    { name: 'Major arpeggio', hint: 'Cycles root, third, fifth and octave every frame: a chord on one voice', rows: [[0x41, 0x00], [0x00, 0x04], [0x00, 0x07], [0x00, 0x0c], [0x00, 0x00]], loop: 1 },
-    { name: 'Minor chord', hint: 'A slower minor arpeggio, three frames a note', rows: [[0x21, 0x00], [0x02, 0x03], [0x02, 0x07], [0x02, 0x00]], loop: 1 },
-    { name: 'Pulse / triangle', hint: 'Swaps between pulse and triangle every few frames, leaving the pitch free for slides', rows: [[0x41, 0x00], [0x03, 0x80], [0x11, 0x80], [0x03, 0x80], [0x41, 0x80]], loop: 1 },
-  ],
-  [
-    { name: 'Square', hint: 'Width 50%: a hollow square wave', rows: [[0x88, 0x00]], loop: null },
-    { name: 'Thin', hint: 'A narrow pulse: thin and nasal', rows: [[0x81, 0x00]], loop: null },
-    { name: 'Slow sweep', hint: 'Starts thin, then widens and narrows forever', rows: [[0x80, 0x10], [0x20, 0x40], [0x40, 0xe0], [0x40, 0x20]], loop: 2 },
-  ],
-  [
-    { name: 'Low pass', hint: 'Low pass on voice 1, fairly closed: muffled', rows: [[0x90, 0xf1], [0x00, 0x40]], loop: null },
-    { name: 'Wah sweep', hint: 'Band pass on all voices, cutoff opening and closing forever', rows: [[0xa0, 0x87], [0x00, 0x00], [0x7f, 0x01], [0x7f, 0x01], [0x7f, 0xff], [0x7f, 0xff]], loop: 2 },
-    { name: 'High then low', hint: 'A frame of bright high pass on voice 2, then low pass', rows: [[0xc0, 0xf2], [0x00, 0xf0], [0x90, 0xf2], [0x00, 0x50]], loop: null },
-    { name: 'Filter off', hint: 'Takes every voice out of the filter', rows: [[0x80, 0x00]], loop: null },
-  ],
-];
-
-export function programFromPreset(p: Preset): Program {
-  const program: Program = { name: p.name, steps: p.rows.map(([left, right]) => ({ left, right })), next: null };
-  if (p.loop !== null) program.next = { program, step: p.loop };
-  return program;
-}
-
-/** A new step that fits after the given one. */
-export function defaultStep(kind: number): Step {
-  if (kind === WAVE) return { left: 0x41, right: 0x00 };
-  if (kind === PULSE) return { left: 0x88, right: 0x00 };
-  return { left: 0x00, right: 0x80 };
-}
 
 // --- Sweeps as goals --------------------------------------------------------
 
@@ -462,28 +341,4 @@ export function sweepRows(change: number, frames: number): Sweep[] {
   run(fast, sign * (slow + 1));
   run(frames - fast, sign * slow);
   return out;
-}
-
-/**
- * How many of the sweeps from `at` belong to one goal, as sweepRows lays
- * them out: a run at one speed, then perhaps a run one slower, each run
- * continuing only after a full 127-frame row.
- */
-export function sweepLength(sweeps: (Sweep | null)[], at: number): number {
-  const first = sweeps[at];
-  if (!first) return 0;
-  const slower = first.speed > 0 ? first.speed - 1 : first.speed < 0 ? first.speed + 1 : null;
-  let n = 1;
-  let speed = first.speed;
-  while (at + n < sweeps.length) {
-    const prev = sweeps[at + n - 1]!;
-    const next = sweeps[at + n];
-    if (!next) break;
-    if (next.speed === speed && prev.frames === ROW_FRAMES) n++;
-    else if (speed === first.speed && next.speed === slower) {
-      speed = slower;
-      n++;
-    } else break;
-  }
-  return n;
 }

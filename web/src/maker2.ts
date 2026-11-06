@@ -16,11 +16,11 @@ import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, parseSong, type Instrument } from './song';
 import { defaultInstruments, giveIds, migrate, saveIds, NOTE_START, sound, soundTables, STORAGE_KEY } from './instruments';
 import { importInstrument, KEY as IMPORT_KEY, type Tracer } from './goatimport';
-import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
+import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
 import { filterScope, modeIcon } from './filtercurve';
-import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, wobbleRow, type Wobble } from './vibrato';
-import { arrival, chunkAt, stayingOn, FIXED_BASE, RING_BIT, SYNC_BIT, CUTOFF_MAX, defaultFilter, defaultPulse, filterProgram, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, pulseProgram, spans, SQUARE, storable, stretches, waveChanges, waveLooping, waveProgram, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
+import { freqOf, semitoneText as pitchText, vibratoCurve, vibratoSize, type Wobble } from './vibrato';
+import { arrival, chunkAt, stayingOn, FIXED_BASE, RING_BIT, SYNC_BIT, CUTOFF_MAX, defaultFilter, defaultPulse, lineAt, placeChunk, RESONANCE_MAX, heardSpans, LANES, NOTE_HIGH, NOTE_LOW, pitchAt, place, placeNote, programEnd, PULSE_MAX, pulseLine, SQUARE, storable, stretches, waveChanges, waveLooping, widthOn, type Bar, type HeardSpan, type FilterChunk, type Note, type PulseShape, type Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -820,7 +820,7 @@ function drawVolume(curve: Float32Array) {
     return;
   }
   const s = shape();
-  const [a, d, sus] = [s.ad >> 4, s.ad & 15, s.sr >> 4];
+  const a = s.ad >> 4;
   const end = releaseEnd(s.ad, s.sr, keyUp());
   const line = areaPath(curve, 0, Math.min(TOTAL, end + 2));
   el('path', { d: `${line}L${x(Math.min(TOTAL, end + 2))},${plotY(0)}L${x(0)},${plotY(0)}Z`, class: 'env-area' }, plot);
@@ -1792,16 +1792,6 @@ function deletePoint() {
   selectedVibrato = false;
   selectedType = -1;
   changed();
-}
-
-/** Replaces a bar with another, overwriting what it lands on, and selects it. */
-function commit(bars: Bar[], old: Bar | null, bar: Bar): Bar[] {
-  const out = place(
-    bars.filter((o) => o !== old),
-    bar,
-  );
-  selected = out.indexOf(bar);
-  return out;
 }
 
 function deleteSelected() {

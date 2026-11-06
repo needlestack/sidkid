@@ -8,7 +8,6 @@
 // set, the amount is instead worked out from the note: a semitone's step,
 // halved right-byte times, so it sounds the same on every note.
 
-const SVG = 'http://www.w3.org/2000/svg';
 const EVEN = 0x80;
 
 /** The chip's frequency register for a GoatTracker note (PAL; A-4, note 57, is 440 Hz). */
@@ -94,41 +93,4 @@ export function semitoneText(n: number): string {
   if (n >= 0.95) return `${Math.round(n * 10) / 10} semitone${Math.abs(n - 1) < 0.05 ? '' : 's'}`;
   if (n >= 0.01) return `${Math.round(n * 100)} cents`;
   return 'under a cent';
-}
-
-/** A picture of the pitch wobbling over time, with a function to redraw it. */
-export function vibratoIcon(w = 260, h = 46): { el: SVGSVGElement; set: (curve: Float64Array, delay: number) => void } {
-  const svg = document.createElementNS(SVG, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  svg.setAttribute('width', String(w));
-  svg.setAttribute('height', String(h));
-  svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add('vibrato-icon');
-  const mid = document.createElementNS(SVG, 'line');
-  mid.setAttribute('x1', '0');
-  mid.setAttribute('x2', String(w));
-  mid.setAttribute('y1', String(h / 2));
-  mid.setAttribute('y2', String(h / 2));
-  mid.classList.add('vibrato-mid');
-  const start = document.createElementNS(SVG, 'line');
-  start.setAttribute('y1', '2');
-  start.setAttribute('y2', String(h - 2));
-  start.classList.add('vibrato-start');
-  const line = document.createElementNS(SVG, 'polyline');
-  line.setAttribute('fill', 'none');
-  line.setAttribute('stroke', 'currentColor');
-  line.setAttribute('stroke-width', '1.8');
-  line.setAttribute('stroke-linejoin', 'round');
-  svg.append(mid, start, line);
-  const set = (curve: Float64Array, delay: number) => {
-    // A semitone either way fills the height, so depths compare
-    const y = (v: number) => h / 2 - Math.max(-1, Math.min(1, v)) * (h / 2 - 3);
-    const x = (f: number) => (f / (curve.length - 1)) * w;
-    line.setAttribute('points', Array.from(curve, (v, f) => `${x(f).toFixed(1)},${y(v).toFixed(1)}`).join(' '));
-    const sx = x(Math.max(0, delay - 1));
-    start.setAttribute('x1', sx.toFixed(1));
-    start.setAttribute('x2', sx.toFixed(1));
-    start.style.display = delay > 1 ? '' : 'none';
-  };
-  return { el: svg, set };
 }

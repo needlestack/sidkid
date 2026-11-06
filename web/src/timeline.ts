@@ -226,23 +226,3 @@ function letters(n: number): string {
   for (n++; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
   return s;
 }
-
-/** Maps a frame count from the start of playback to a frame in the timeline, following the loop. */
-export function timelineFrame(t: Timeline, frames: number): number {
-  if (frames < t.length) return Math.max(0, frames);
-  if (t.loopStart < 0 || t.loopStart >= t.length) return t.length;
-  return t.loopStart + ((frames - t.length) % (t.length - t.loopStart));
-}
-
-/** The item whose [start, end) contains frame, by binary search. */
-export function findAt<T extends { start: number; end: number }>(items: T[], frame: number): T | undefined {
-  let lo = 0;
-  let hi = items.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (items[mid].end <= frame) lo = mid + 1;
-    else if (items[mid].start > frame) hi = mid - 1;
-    else return items[mid];
-  }
-  return undefined;
-}

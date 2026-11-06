@@ -1251,15 +1251,6 @@ function endScrub() {
   if (transport.playing) void play(transport.recording);
 }
 
-function seek(step: number) {
-  playhead = Math.max(0, step);
-  if (transport.playing) {
-    void play(transport.recording);
-    return;
-  }
-  movePlayhead();
-}
-
 // --- Editor -----------------------------------------------------------------------------------
 
 const roll = $('roll') as unknown as SVGSVGElement;

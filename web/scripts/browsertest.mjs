@@ -3,8 +3,8 @@
 //
 // 1. Fidelity: each example song rendered through the real AudioWorklet path
 //    (OfflineAudioContext) must match the native engine sample for sample.
-// 2. UI: pick an example from the menu, check it loads and plays, and save a
-//    screenshots to build/webtest/.
+// 2. The Instrument Maker and 3. the Song Maker: what they do, played and
+//    traced, with screenshots saved to build/webtest/.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -166,209 +166,7 @@ try {
   }
   await page.close();
 
-  // --- 2. UI -----------------------------------------------------------------
-  const ui = await browser.newPage();
-  const errors = [];
-  ui.on('pageerror', (err) => errors.push(err.message));
-  ui.on('console', (msg) => msg.type() === 'error' && errors.push(msg.text()));
-  await ui.setViewport({ width: 1180, height: 820, deviceScaleFactor: 2 });
-  await ui.goto(base);
-  await ui.waitForFunction(() => document.querySelectorAll('#examples option').length > 1);
-  await ui.select('#examples', 'dojo.sng');
-  await ui.waitForFunction(() => document.getElementById('title').textContent === 'Dojo', { timeout: 5000 });
-  report(true, 'ui loads example from menu');
-
-  await ui.waitForFunction(() => document.getElementById('time').textContent === '0:02', { timeout: 6000 })
-    .then(() => report(true, 'ui plays (clock advancing)'), () => report(false, 'ui plays (clock advancing)'));
-  const notes = await ui.$$eval('.note', (els) => els.map((e) => e.textContent));
-  report(notes.some((n) => n !== '—'), 'ui shows notes', notes.join(' '));
-
-  // Clicking a section plays from its start
-  const target = await ui.$eval('.section-block:nth-child(3)', (el) => {
-    el.click();
-    return Number(el.dataset.start);
-  });
-  const expected = Math.floor(target / 50);
-  await ui.waitForFunction((s) => {
-    const [m, sec] = document.getElementById('time').textContent.split(':').map(Number);
-    return m * 60 + sec >= s && m * 60 + sec <= s + 2;
-  }, { timeout: 3000 }, expected)
-    .then(() => report(true, 'ui plays from a clicked section', `${expected} s`), async () =>
-      report(false, 'ui plays from a clicked section', `expected ${expected} s, clock shows ${await ui.$eval('#time', (e) => e.textContent)}`));
-  const shown = await ui.$eval('.section-letter', (el) => el.textContent);
-  const clicked = await ui.$eval('.section-block:nth-child(3)', (el) => el.textContent);
-  report(shown === clicked, 'ui shows the playing section', `${shown}`);
-  await ui.keyboard.press('Home');
-
-  await ui.keyboard.press('Digit2');
-  const muted = await ui.$eval('.voice:nth-child(2)', (el) => el.classList.contains('muted'));
-  report(muted, 'ui mutes voice 2 with key 2');
-  await ui.keyboard.press('Digit2');
-
-  await colorScheme(ui, 'dark');
-  await ui.screenshot({ path: `${OUT}/${BROWSER}-dark.png` });
-  await colorScheme(ui, 'light');
-  await ui.screenshot({ path: `${OUT}/${BROWSER}-light.png` });
-
-  await ui.keyboard.press(' ');
-  await ui.waitForFunction(() => !document.getElementById('play').classList.contains('playing'), { timeout: 2000 })
-    .then(() => report(true, 'ui stops with space'), () => report(false, 'ui stops with space'));
-
-  await ui.select('#examples', '2xtest.sng');
-  await ui.waitForFunction(() => document.getElementById('title').textContent.includes('2x-speed'), { timeout: 5000 });
-  const speed = await ui.$eval('#speed .on', (el) => el.dataset.speed);
-  report(speed === '2', 'ui applies example speed setting', `speed ${speed}`);
-  await colorScheme(ui, 'dark');
-  await ui.click('.advanced summary');
-  await ui.screenshot({ path: `${OUT}/${BROWSER}-settings.png`, fullPage: true });
-
-  report(errors.length === 0, 'ui without errors', errors.join(' | '));
-
-  // --- 3. Instrument maker --------------------------------------------------
-  const tm = await browser.newPage();
-  const tmErrors = [];
-  tm.on('pageerror', (err) => tmErrors.push(err.message));
-  tm.on('console', (msg) => msg.type() === 'error' && tmErrors.push(msg.text()));
-  await tm.setViewport({ width: 1180, height: 900, deviceScaleFactor: 2 });
-  await tm.goto(`${base}instruments.html`);
-  await tm.evaluate(() => localStorage.clear());
-  await tm.reload();
-  await tm.waitForFunction(() => window.instrumentMaker?.ready(), { timeout: 5000 });
-  report(true, 'instruments page loads and traces a note');
-
-  // Picking the Major arpeggio uses it in the instrument: steps 1-5, then loops back to step 2
-  await tm.click('#program-list li:nth-child(3) button');
-  await tm.waitForFunction(() => window.instrumentMaker.idle());
-  const order = await tm.evaluate(() => window.instrumentMaker.frameSteps().slice(0, 10).join(','));
-  report(order === '0,1,2,3,4,1,2,3,4,1', 'instruments graph follows the program loop', order);
-
-  // Editing step 2 from +4 to +3 semitones changes the traced pitch
-  const pitch = () => tm.evaluate(() => {
-    const t = window.instrumentMaker.trace();
-    return Math.round(12 * Math.log2(t.freq[1] / t.freq[0]));
-  });
-  const before = await pitch();
-  await tm.$eval('.step[data-step="1"] input[type=number]', (input) => {
-    input.value = '3';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await tm.waitForFunction(() => {
-    const t = window.instrumentMaker.trace();
-    return Math.round(12 * Math.log2(t.freq[1] / t.freq[0])) === 3;
-  }, { timeout: 2000 }).catch(() => {});
-  const after = await pitch();
-  report(before === 4 && after === 3, 'instruments edit changes the trace', `+${before} → +${after} semitones`);
-
-  // Playing a key runs the program in the worklet: its steps light up
-  await tm.keyboard.down('k');
-  await tm.waitForSelector('.step.live', { timeout: 3000 })
-    .then(() => report(true, 'instruments test note runs the program'), () => report(false, 'instruments test note runs the program'));
-  await tm.keyboard.up('k');
-
-  // Note keys still play after using a dropdown, which keeps focus
-  await tm.focus('#next');
-  await tm.keyboard.down('d');
-  const playedFromSelect = await tm.$('.key.down');
-  await tm.keyboard.up('d');
-  report(!!playedFromSelect && (await tm.$eval('#next', (el) => el.value)) !== '', 'instruments note keys work with a dropdown focused');
-
-  // A quick tap, released before the note starts sounding, still fades out
-  await tm.keyboard.down('s');
-  await tm.keyboard.up('s');
-  await tm.waitForFunction(() => {
-    const s = window.instrumentMaker.status();
-    return s && !(s.regs[4] & 1) && s.envelopes[0] === 0;
-  }, { timeout: 3000 })
-    .then(() => report(true, 'instruments quick tap is released'), () => report(false, 'instruments quick tap is released'));
-
-  // Dragging across the keyboard plays each key passed over
-  const first = await (await tm.$('.key[data-offset="0"]')).boundingBox();
-  const last = await (await tm.$('.key[data-offset="11"]')).boundingBox();
-  await tm.mouse.move(first.x + first.width / 2, first.y + first.height - 10);
-  await tm.mouse.down();
-  const played = new Set();
-  for (let i = 0; i <= 10; i++) {
-    await tm.mouse.move(first.x + first.width / 2 + ((last.x - first.x) * i) / 10, first.y + first.height - 10);
-    played.add(await tm.$eval('.key.down', (k) => k.dataset.offset).catch(() => null));
-  }
-  await tm.mouse.up();
-  const released = await tm.$('.key.down');
-  report(played.size >= 5 && !released, 'instruments drag across the keys', `${played.size} notes`);
-
-  // A duplicated instrument shares its programs, until it makes its own copy
-  await tm.click('#duplicate-instrument');
-  await tm.click('#kinds button[data-kind="1"]');
-  const sharedBefore = await tm.evaluate(() => {
-    const s = window.instrumentMaker.state();
-    return s.instruments[0].targets[1].program === s.instruments[s.current].targets[1].program;
-  });
-  await tm.click('#duplicate');
-  const sharedAfter = await tm.evaluate(() => {
-    const s = window.instrumentMaker.state();
-    return s.instruments[0].targets[1].program === s.instruments[s.current].targets[1].program;
-  });
-  report(sharedBefore && !sharedAfter, 'instruments share programs until copied');
-
-  // Turning vibrato on wobbles the traced pitch, once its delay is over (on
-  // Bass, whose saw leaves the pitch free: an arpeggio would set it each frame)
-  await tm.click('#kinds button[data-kind="0"]');
-  await tm.select('#instrument', '2');
-  await tm.click('#vibrato');
-  await tm.click('#vibrato-panel .toggles button:nth-child(2)');
-  const wobbles = await tm.waitForFunction(() => {
-    const t = window.instrumentMaker.trace();
-    const early = new Set(t.freq.slice(0, 10)).size;
-    const late = new Set(t.freq.slice(30, 60)).size;
-    return early === 1 && late > 2;
-  }, { timeout: 2000 }).then(() => true, () => false);
-  report(wobbles, 'instruments vibrato wobbles the pitch after a delay');
-  await tm.click('.intro');
-
-  // A slide step lowers the pitch every frame, looping on itself to keep going
-  await tm.click('#add-step');
-  const lastStep = await tm.evaluate(() => {
-    const s = window.instrumentMaker.state();
-    return s.instruments[s.current].targets[0].program.steps.length - 1;
-  });
-  await tm.select(`.step[data-step="${lastStep}"] .step-type`, 'slide');
-  const slides = await tm.waitForFunction(() => {
-    const t = window.instrumentMaker.trace();
-    return t.freq[3] < t.freq[2] && t.freq[20] < t.freq[10];
-  }, { timeout: 2000 }).then(() => true, () => false);
-  report(slides, 'instruments slide step moves the pitch');
-
-  // A pulse sweep goes to a goal: moving one goal keeps the next step's, and the width never wraps round
-  await tm.select('#instrument', '0');
-  await tm.click('#kinds button[data-kind="1"]');
-  await tm.$eval('.step[data-step="1"] input[type=range]', (el) => {
-    el.value = '4095';
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  const swept = await tm.waitForFunction(() => {
-    const t = window.instrumentMaker.trace();
-    const texts = [...document.querySelectorAll('.step-text')].map((e) => e.textContent);
-    const jumps = t.pulse.slice(1).some((v, f) => Math.abs(v - t.pulse[f]) > 200);
-    return Math.max(...t.pulse) > 4000 && !jumps && /to 0%/.test(texts[2] ?? '') ? texts[1] : false;
-  }, { timeout: 2000 }).then((h) => h.jsonValue(), () => false);
-  report(!!swept, 'instruments pulse sweep to a goal', swept || '');
-
-  await tm.select('#examples', 'cabrinigreen.sng');
-  await tm.waitForFunction(() => window.instrumentMaker.state().source !== '', { timeout: 5000 });
-  const loaded = await tm.evaluate(() => {
-    const s = window.instrumentMaker.state();
-    return `${s.instruments.length} instruments, ${s.programs.map((l) => l.length).join('/')} programs`;
-  });
-  report(true, 'instruments loads a song', loaded);
-  await colorScheme(tm, 'dark');
-  await tm.screenshot({ path: `${OUT}/${BROWSER}-instruments-dark.png` });
-  await colorScheme(tm, 'light');
-  await tm.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
-  const overflow = await tm.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  report(overflow <= 0, 'instruments fits a phone screen', overflow > 0 ? `${overflow}px too wide` : '');
-  report(tmErrors.length === 0, 'instruments without errors', tmErrors.join(' | '));
-
-  // --- 4. Instrument maker 2 ------------------------------------------------
+  // --- 2. Instrument maker -------------------------------------------------
   const m2 = await browser.newPage();
   const m2Errors = [];
   m2.on('pageerror', (err) => m2Errors.push(err.message));
@@ -827,7 +625,7 @@ try {
   report(overflow2 <= 0, 'maker2 fits a phone screen', overflow2 > 0 ? `${overflow2}px too wide` : '');
   report(m2Errors.length === 0, 'maker2 without errors', m2Errors.join(' | '));
 
-  // --- 5. Song maker --------------------------------------------------------
+  // --- 3. Song maker --------------------------------------------------------
   const sm = await browser.newPage();
   const smErrors = [];
   sm.on('pageerror', (err) => smErrors.push(err.message));

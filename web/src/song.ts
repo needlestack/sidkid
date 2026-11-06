@@ -177,34 +177,3 @@ const NOTE_NAMES = ['C-', 'C#', 'D-', 'D#', 'E-', 'F-', 'F#', 'G-', 'G#', 'A-', 
 export function noteName(n: number): string {
   return NOTE_NAMES[((n % 12) + 12) % 12] + Math.floor(n / 12);
 }
-
-const COMMANDS: Record<number, (d: number) => string> = {
-  1: (d) => `Slide up (speed ${hex2(d)})`,
-  2: (d) => `Slide down (speed ${hex2(d)})`,
-  3: (d) => (d ? `Slide into this note (speed ${hex2(d)})` : 'Slide into this note'),
-  4: (d) => `Vibrato (${hex2(d)})`,
-  5: (d) => `Attack ${hex1(d >> 4)}, decay ${hex1(d & 15)}`,
-  6: (d) => `Sustain ${hex1(d >> 4)}, release ${hex1(d & 15)}`,
-  7: (d) => `Waveform ${hex2(d)}`,
-  8: (d) => `Wave program ${hex2(d)}`,
-  9: (d) => `Pulse program ${hex2(d)}`,
-  10: (d) => `Filter program ${hex2(d)}`,
-  11: (d) => `Filter routing ${hex2(d)}`,
-  12: (d) => `Filter cutoff ${hex2(d)}`,
-  13: (d) => `Volume ${d & 15}`,
-  14: (d) => `Swing tempo (${hex2(d)})`,
-  15: (d) => (d >= 0x80 ? `Tempo ${d & 0x7f} for this voice` : `Tempo ${d}`),
-};
-
-/** A plain-language description of a pattern command, or "" for none. */
-export function describeCommand(command: number, data: number): string {
-  return COMMANDS[command]?.(data) ?? '';
-}
-
-function hex1(n: number) {
-  return n.toString(16).toUpperCase();
-}
-
-function hex2(n: number) {
-  return n.toString(16).toUpperCase().padStart(2, '0');
-}
