@@ -842,6 +842,17 @@ try {
   const repeated = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks[1].clips.map((c) => [c.start, c.length, c.span])));
   report(repeated === '[[16,16,32]]', 'song clip repeats', repeated);
 
+  // Zooming out and back in keeps the song in view
+  for (let i = 0; i < 8; i++) await sm.click('#zoom-out');
+  for (let i = 0; i < 10; i++) await sm.click('#zoom-in');
+  const inView = await sm.evaluate(() => {
+    const view = document.getElementById('arr-scroll').getBoundingClientRect();
+    const clip = document.querySelector('.clip2-body').getBoundingClientRect();
+    return clip.right > view.left && clip.left < view.right;
+  });
+  report(inView, 'song zoom keeps the song in view');
+  await sm.click('#zoom-fit');
+
   // Recording: R plays, a held key becomes a note on the selected track (no count-in here)
   await sm.click('#count-in');
   await sm.mouse.click(arrBox.x - 100, arrBox.y + 32 + 20);

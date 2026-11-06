@@ -793,11 +793,45 @@ arrScroll.addEventListener(
 const MIN_ZOOM = 1.5;
 const MAX_ZOOM = 40;
 
-function zoomTo(z: number, pointer = arrScroll.clientWidth / 2) {
-  const step = (arrScroll.scrollLeft + pointer) / view.zoom;
+/** Where the song's clips are, in steps (null: none yet) */
+function contentRange(): { from: number; to: number } | null {
+  const clips = song().tracks.flatMap((t) => t.clips);
+  if (!clips.length) return null;
+  return { from: Math.min(...clips.map((c) => c.start)), to: Math.max(...clips.map((c) => c.start + c.span)) };
+}
+
+/**
+ * Zooms around a point on screen (the pointer, when pinching or scrolling),
+ * or else around the song: the part of it nearest the middle of the view
+ * stays put, and a song that fits is kept in view.
+ */
+function zoomTo(z: number, pointer?: number) {
+  const width = arrScroll.clientWidth;
+  let at: number;
+  let step: number;
+  if (pointer !== undefined) {
+    at = pointer;
+    step = (arrScroll.scrollLeft + pointer) / view.zoom;
+  } else {
+    const mid = (arrScroll.scrollLeft + width / 2) / view.zoom;
+    const c = contentRange() ?? { from: playhead, to: playhead };
+    step = Math.max(c.from, Math.min(c.to, mid));
+    at = ax(step) - arrScroll.scrollLeft;
+    if (at < 0 || at > width) at = width / 2;
+  }
   view.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
   renderArrangement();
-  arrScroll.scrollLeft = step * view.zoom - pointer;
+  arrScroll.scrollLeft = step * view.zoom - at;
+  if (pointer === undefined) {
+    const c = contentRange();
+    // All of a song that fits, else as much of it as the view holds
+    if (c && ax(c.to) - ax(c.from) <= width - 16) {
+      const left = arrScroll.scrollLeft;
+      if (ax(c.from) < left || ax(c.to) > left + width) arrScroll.scrollLeft = Math.max(0, ax(c.from) - 8);
+    } else if (c) {
+      arrScroll.scrollLeft = Math.max(ax(c.from) - width / 2, Math.min(ax(c.to) - width / 2, arrScroll.scrollLeft));
+    }
+  }
   persist();
 }
 $('zoom-in').addEventListener('click', () => zoomTo(view.zoom * 1.5));
@@ -807,6 +841,7 @@ $('zoom-fit').addEventListener('click', () => {
   const steps = Math.max(songEnd(song()), barSteps() * 4);
   zoomTo(arrScroll.clientWidth / (steps + song().stepsPerBeat), 0);
   arrScroll.scrollLeft = 0;
+  renderZoom();
 });
 
 // The slider zooms in even steps of scale
