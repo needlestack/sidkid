@@ -13,11 +13,12 @@ import { loadModel, loadNtsc, Player, saveModel, saveNtsc } from './engine/playe
 import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
 import type { Sequence } from './engine/sequencer';
 import { addInstruments, loadInstruments, sound as soundOf, sounds, soundTables, STORAGE_KEY as INSTRUMENTS_KEY, type Sound } from './instruments';
-import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './resume';
+import { resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
 import { importGoatSong, ROW_TO_NOTE } from './songimport';
+import { exportSong } from './songexport';
 import { slideSemitones, vibratoCurve, wobbleOf, wobbleRow } from './vibrato';
-import { audible, bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
+import { audible, songRows, type ResumedNote, bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -290,10 +291,10 @@ function songPlan(from: number, cycle: { start: number; end: number } | null, me
   const made = new Map<string, number | 'silent' | null>();
   const alike = new Map<string, number>();
   const fits = () => all.length <= MAX_INSTRUMENTS && soundTables(all).rows.every((r) => r <= TABLE_ROWS);
-  const resume = (n: number, at: number) => {
-    const key = `${n}/${at}`;
+  const resume = (n: number, at: number, held: ResumedNote) => {
+    const key = `${n}/${at}/${held.step}/${held.note}`;
     if (!made.has(key)) {
-      const v = all.length < MAX_INSTRUMENTS ? resumeOf(base[n - 1], 1 << list[n - 1].voice, at) : null;
+      const v = all.length < MAX_INSTRUMENTS ? resumeOf(base[n - 1], 1 << list[n - 1].voice, at, { doc, track: doc.tracks[held.track], held, fps }) : null;
       let r: number | 'silent' | null = v === 'silent' ? 'silent' : null;
       if (v && v !== 'silent') {
         const same = variantKey(n, v);
@@ -316,14 +317,15 @@ function songPlan(from: number, cycle: { start: number; end: number } | null, me
   const speedIndex = new Map(speeds.map((sp, i) => [speedKey(sp), i]));
   const at = () => soundTables(all, speeds).extraSpeedsAt;
   let speedsAt = at();
-  const seq = songSequence(doc, list, numbers, from, cycle, fps, metronome, resume, (sp) => (sp ? speedsAt + (speedIndex.get(speedKey(sp)) ?? 0) : 0));
+  const speedRow = (sp: Speed | null) => (sp ? speedsAt + (speedIndex.get(speedKey(sp)) ?? 0) : 0);
+  let seq = songSequence(doc, list, numbers, from, cycle, fps, metronome, resume, speedRow);
   const t = soundTables(all, speeds);
   // (resumes added while the sequence was made moved the speeds on: make it again with them where they are)
   if (t.extraSpeedsAt !== speedsAt) {
     speedsAt = t.extraSpeedsAt;
-    return { seq: songSequence(doc, list, numbers, from, cycle, fps, metronome, resume, (sp) => (sp ? speedsAt + (speedIndex.get(speedKey(sp)) ?? 0) : 0)), tables: t.tables, instruments: t.instruments, trackSound: numbers };
+    seq = songSequence(doc, list, numbers, from, cycle, fps, metronome, resume, speedRow);
   }
-  return { seq, tables: t.tables, instruments: t.instruments, trackSound: numbers };
+  return { seq, tables: t.tables, instruments: t.instruments, trackSound: numbers, sounds: list, resume, speedRow };
 }
 
 /** What a variant plays, to share one between notes picked up at the same point */
@@ -1912,6 +1914,18 @@ function deleteSong() {
   toast(`Deleted ${gone.name} (⌘Z brings it back)`);
 }
 
+// Exporting: the song as a GoatTracker song file, downloaded
+$('export-song').addEventListener('click', () => {
+  const plan = songPlan(0, null, { click: false, countIn: false });
+  const { bytes, gaps } = exportSong(song(), plan, FPS);
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'application/octet-stream' }));
+  link.download = `${(song().name || 'song').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'song'}.sng`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  toast(gaps.length ? `Exported ${link.download}, but GoatTracker can't play all of it as here: ${gaps.join('; ')}` : `Exported ${link.download}`);
+});
+
 // --- Asking: a question by what it's about, a button for each answer and one to leave it -------
 
 const ask = document.createElement('div');
@@ -2245,38 +2259,57 @@ centreRoll();
 
 let analyzer: Analyzer | null = null;
 
-/** Traces of instruments on their own, for picking notes up where they left off; longer ones as needed */
+/** Where a resumed note was: its song, its track, the note itself */
+interface ResumeContext {
+  doc: SongDoc;
+  track: Track;
+  held: ResumedNote;
+  fps: number;
+}
+
+/**
+ * Traces of a note as the song plays it, for picking it up where it left
+ * off: on its own on its voice, from its step, with the song's tempo, rows
+ * and pulse rests (on the key, an octave up, and without its vibrato)
+ */
 const resumeTraceCache = new Map<string, ResumeTraces>();
-function resumeTraces(shape: Shape, voices: number, frames: number): ResumeTraces | null {
+function resumeTraces(shape: Shape, ctx: ResumeContext, frames: number): ResumeTraces | null {
   if (!analyzer) return null;
-  const k = `${JSON.stringify(shape)}/${voices}/${FPS}`;
-  let t = resumeTraceCache.get(k);
-  if (!t || t.key.frames < frames) {
-    const n = Math.max(frames, (t?.key.frames ?? 0) * 2, 256);
-    const one = soundTables([soundOf(shape, voices)]);
-    const plain = shape.vibrato ? soundTables([soundOf({ ...shape, vibrato: null }, voices)]) : null;
-    t = {
-      key: analyzer.trace(one.tables, one.instruments[0], RESUME_KEYS[0], n, settings),
-      octave: analyzer.trace(one.tables, one.instruments[0], RESUME_KEYS[1], n, settings),
-      plain: plain ? analyzer.trace(plain.tables, plain.instruments[0], RESUME_KEYS[0], n, settings) : null,
-    };
-    resumeTraceCache.set(k, t);
-  }
+  const { doc, track, held, fps } = ctx;
+  const k = JSON.stringify([shape, track.voice, held, doc.bpm, doc.tempo, doc.stepsPerBeat, doc.goat?.patterns[track.voice], fps]);
+  const cached = resumeTraceCache.get(k);
+  if (cached && cached.key.frames >= frames) return cached;
+  const n = Math.max(frames, (cached?.key.frames ?? 0) * 2, 256);
+  const from = frameAt(doc, held.step, fps);
+  const steps = Math.ceil(stepOfFrame(doc, from + n, fps) - held.step) + 2;
+  const run = (s: Shape, note: number) => {
+    // The song with only this note in it
+    const solo: SongDoc = { ...doc, tracks: [{ id: 'resume', instrument: 'resume', voice: track.voice, muted: false, clips: [{ start: held.step, length: steps, span: steps, notes: [{ start: 0, length: steps, note, ...(held.effects ? { effects: held.effects } : {}) }] }] }] };
+    const { sounds: list, trackSound: numbers } = songSounds(solo, new Map([['resume', s]]));
+    const one = sounds(list.map((x) => ({ shape: x.shape, voices: 1 << x.voice })));
+    const speeds = songSpeeds(solo);
+    const t = soundTables(one, speeds);
+    const index = new Map(speeds.map((sp, i) => [`${sp.left}/${sp.right}`, i]));
+    const seq = songSequence(solo, list, numbers, from, null, fps, { click: false, countIn: false }, () => null, (sp) => (sp ? t.extraSpeedsAt + (index.get(`${sp.left}/${sp.right}`) ?? 0) : 0));
+    return analyzer!.traceVoice(t.tables, t.instruments, seq, n, track.voice, settings);
+  };
+  const t: ResumeTraces = { key: run(shape, held.note), octave: run(shape, held.note + 12), plain: shape.vibrato ? run({ ...shape, vibrato: null }, held.note) : null };
+  resumeTraceCache.set(k, t);
   return t;
 }
 
 /** A sound's variant picking a note up `at` frames in (see resume.ts) */
-function resumeOf(base: Sound, voices: number, at: number): Sound | 'silent' | null {
+function resumeOf(base: Sound, voices: number, at: number, ctx: ResumeContext): Sound | 'silent' | null {
   // (far enough on to try vibrato delays against)
-  const t = resumeTraces(base.shape, voices, at + 200);
+  const t = resumeTraces(base.shape, ctx, at + 200);
   if (!t) return null;
   const clock = ntsc ? 1022727 : 985248;
-  const variant = resumeSound(base, at, t, FPS, clock);
+  const variant = resumeSound(base, at, t, FPS, clock, ctx.held.note);
   if (variant && variant !== 'silent' && t.plain) {
     // Tried out on an instrument of its own (the song's has its speed rows elsewhere)
     const alone = soundOf(base.shape, voices);
-    const trial = resumeSound(alone, at, t, FPS, clock);
-    if (trial && trial !== 'silent') variant.overrides!.vibratoDelay = tuneVibrato(alone, trial, t, at);
+    const trial = resumeSound(alone, at, t, FPS, clock, ctx.held.note);
+    if (trial && trial !== 'silent') variant.overrides!.vibratoDelay = tuneVibrato(alone, trial, t, at, ctx.held.note);
   }
   return variant;
 }
@@ -2290,7 +2323,7 @@ function resumeOf(base: Sound, voices: number, at: number): Sound | 'silent' | n
  * middle, and one yet to start is started where the note's would. Found by
  * trying: the smallest delay that follows it most closely.
  */
-function tuneVibrato(alone: Sound, trial: Sound, t: ResumeTraces, at: number): number {
+function tuneVibrato(alone: Sound, trial: Sound, t: ResumeTraces, at: number, key: number): number {
   if (!analyzer || !t.plain) return 1;
   const start = vibratoStart(t);
   if (start < 0) return 1;
@@ -2301,7 +2334,7 @@ function tuneVibrato(alone: Sound, trial: Sound, t: ResumeTraces, at: number): n
   for (let d = 1; d <= 96; d++) {
     trial.overrides!.vibratoDelay = d;
     const tt = soundTables([alone, trial]);
-    const r = analyzer.trace(tt.tables, tt.instruments[1], RESUME_KEYS[0], frames, settings);
+    const r = analyzer.trace(tt.tables, tt.instruments[1], key, frames, settings);
     let misses = 0;
     for (let k = 0; k < frames && misses < bestMisses; k++) if (off(r.freq[k], t.key.freq[at + k])) misses++;
     if (misses < bestMisses) {
@@ -2381,6 +2414,50 @@ Object.assign(window, {
       }) : undefined;
       return { gaps: imp.gaps, frames, differ, first, tracks: imp.song.tracks.length, clips: imp.song.tracks.reduce((n, t) => n + t.clips.length, 0), look };
     },
+    /**
+     * The song open, exported and played by GoatTracker's own player,
+     * compared frame by frame with Song Maker's playing of it: the gaps,
+     * and where they differ (from Song Maker's first frame, lined up)
+     */
+    exportCheck: () => {
+      const a = analyzer!;
+      const plan = songPlan(0, null, { click: false, countIn: false });
+      const { bytes, gaps } = exportSong(song(), plan, FPS);
+      const at: Settings = { ...settings, ...(song().goat?.pulseOptimization === false ? { pulseOptimization: false } : {}) };
+      const frames = toFrame(Math.max(1, songRows(song()))) - 4;
+      const mine = a.traceSequence(plan.tables, plan.instruments, plan.seq, frames, at);
+      if (!a.load(bytes.slice().buffer)) return { gaps, error: 'not a song GoatTracker can read' };
+      const theirs = a.traceSong(0, frames + 40, at);
+      const same = (o: Uint8Array, m: Uint8Array) => [0, 1, 2].every((v) => o[v * 7] === m[v * 7] && o[v * 7 + 1] === m[v * 7 + 1] && (o[v * 7 + 4] & 0xf1) === (m[v * 7 + 4] & 0xf1));
+      // Where GoatTracker's playing lines up with Song Maker's (its first row comes a few frames in)
+      let shift = 0;
+      let best = -1;
+      for (let o = 0; o < 30; o++) {
+        let n = 0;
+        for (let f = 0; f < Math.min(300, frames); f++) if (same(theirs[f + o], mine[f])) n++;
+        if (n > best) [best, shift] = [n, o];
+      }
+      const differ: Record<string, number> = {};
+      const first: Record<string, number> = {};
+      const mark = (what: string, f: number) => {
+        differ[what] = (differ[what] ?? 0) + 1;
+        first[what] ??= f;
+      };
+      const pw = (r: Uint8Array, b: number) => r[b + 2] | ((r[b + 3] & 15) << 8);
+      for (let f = 0; f < frames; f++) {
+        const o = theirs[f + shift];
+        const m = mine[f];
+        for (let v = 0; v < 3; v++) {
+          const b = v * 7;
+          if (o[b] !== m[b] || o[b + 1] !== m[b + 1]) mark(`pitch ${v + 1}`, f);
+          if ((o[b + 4] & 0xf1) !== (m[b + 4] & 0xf1)) mark(`waveform ${v + 1}`, f);
+          if (o[b + 4] & 0x40 && Math.abs(pw(o, b) - pw(m, b)) > 2) mark(`pulse ${v + 1}`, f);
+          if (o[b + 5] !== m[b + 5] || o[b + 6] !== m[b + 6]) mark(`envelope ${v + 1}`, f);
+        }
+        if (o[0x16] !== m[0x16] || o[0x17] !== m[0x17] || (o[0x18] & 0x70) !== (m[0x18] & 0x70)) mark('filter', f);
+      }
+      return { gaps, shift, frames, differ, first, bytes: bytes.length };
+    },
     /** The metronome's frames playing from a step: beats and bars */
     clicks: (fromStep: number, countIn: boolean) => {
       const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
@@ -2391,27 +2468,45 @@ Object.assign(window, {
      * How closely a resume of an instrument `at` frames in plays the rest of
      * the note: the frames where waveform, pitch, pulse width or cutoff differ
      */
-    resumeCheck: (which: number | Shape, at: number, frames: number) => {
-      const shape = typeof which === 'number' ? instruments[which] : which;
-      const base = soundOf(shape, 1);
-      const variant = resumeOf(base, 1, at);
-      if (!variant || variant === 'silent') return variant;
-      const t = soundTables([base, variant]);
-      if (t.rows.some((r) => r > 255)) return 'too big';
-      const original = resumeTraces(shape, 1, at + frames)!.key;
-      const resumed = analyzer!.trace(t.tables, t.instruments[1], RESUME_KEYS[0], frames, settings);
+    /**
+     * How closely a note picks up where it left off: an instrument's long
+     * note, another (the same instrument) taking its voice for a step at
+     * `step`, compared after it comes back with the note played alone:
+     * the frames where waveform, pitch, pulse width or cutoff differ
+     */
+    resumeCheck: (which: number | Shape, step: number, frames: number) => {
+      const shape = { ...(typeof which === 'number' ? instruments[which] : which), id: 'checked' };
+      const shapes = new Map([['checked', shape]]);
+      const long = { start: 0, length: 256, span: 256, notes: [{ start: 0, length: 256, note: 48 }] };
+      const doc = (stealing: boolean): SongDoc => ({
+        ...song(),
+        tempo: undefined,
+        goat: undefined,
+        tracks: [
+          { id: 'a', instrument: 'checked', voice: 0, muted: false, clips: [long] },
+          { id: 'b', instrument: 'checked', voice: 0, muted: !stealing, clips: [{ start: step, length: 1, span: 1, notes: [{ start: 0, length: 1, note: 60 }] }] },
+        ],
+      });
+      const both = songPlan(0, null, { click: false, countIn: false }, doc(true), shapes);
+      if (both.tables[0].left.length >= 255) return 'too big';
+      // (no resume made: it had let go by itself, or there's no room for one)
+      if (both.instruments.length < 2) return 'silent';
+      const alone = songPlan(0, null, { click: false, countIn: false }, doc(false), shapes);
+      const back = frameAt(doc(true), step + 1, FPS);
+      const a = analyzer!.traceVoice(both.tables, both.instruments, both.seq, back + frames, 0, settings);
+      const o = analyzer!.traceVoice(alone.tables, alone.instruments, alone.seq, back + frames, 0, settings);
+      if (!(a.control.subarray(back).some((c) => c & 1)) && !(o.control.subarray(back).some((c) => c & 1))) return 'silent';
       const out: string[] = [];
-      for (let f = 0; f < frames; f++) {
-        const o = at + f;
+      for (let f = back; f < back + frames; f++) {
         const what = [
-          (original.control[o] & 0xf1) !== (resumed.control[f] & 0xf1) && 'waveform',
-          // (within 10 cents: the player skips a vibrato step on one frame in six, counted from when a note starts)
-          Math.abs(12 * Math.log2((original.freq[o] || 1) / (resumed.freq[f] || 1))) > 0.1 && 'pitch',
+          (o.control[f] & 0xf1) !== (a.control[f] & 0xf1) && 'waveform',
+          // (within 10 cents: a vibrato or slide caught partway can be a step off)
+          Math.abs(12 * Math.log2((o.freq[f] || 1) / (a.freq[f] || 1))) > 0.1 && 'pitch',
           // (within 2 of 4096: the player writes widths without their lowest bit, so a sweep picked up can alternate a little)
-          original.control[o] & 0x40 && Math.abs(original.pulse[o] - resumed.pulse[f]) > 2 && 'pulse',
-          original.routing[o] & 7 && original.cutoff[o] !== resumed.cutoff[f] && 'cutoff',
+          o.control[f] & 0x40 && Math.abs(o.pulse[f] - a.pulse[f]) > 2 && 'pulse',
+          o.routing[f] & 7 && o.cutoff[f] !== a.cutoff[f] && 'cutoff',
         ].filter(Boolean);
-        if (what.length) out.push(`${f}: ${what.join('+')}`);
+        if (what.length) out.push(`${f - back}: ${what.join('+')}`);
       }
       return out;
     },

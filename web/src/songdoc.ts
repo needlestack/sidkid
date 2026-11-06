@@ -291,7 +291,15 @@ export const resumeLeadOf = (s: Shape) => Math.max(1, s.gateFrames & 0x3f) + 1;
  * (a variant of the sound, `from` frames in), 'silent' when there's nothing
  * left to pick up, or null to start the note again instead.
  */
-export type Resumer = (sound: number, from: number) => number | 'silent' | null;
+export type Resumer = (sound: number, from: number, note: ResumedNote) => number | 'silent' | null;
+
+/** The note a resume picks up: its track, the step it started on, its pitch and effects */
+export interface ResumedNote {
+  track: number;
+  step: number;
+  note: number;
+  effects?: NoteEffect[];
+}
 
 /**
  * The timed notes for playing a song from `from` (a frame): through to its
@@ -333,7 +341,7 @@ export function songSequence(
     const placed = (list: Segment[]) =>
       list.flatMap((s) => {
         if (!s.from) return [{ ...s, instrument: trackSound[s.track], resumed: false }];
-        const r = resume(trackSound[s.track], s.from);
+        const r = resume(trackSound[s.track], s.from, { track: s.track, step: s.step, note: s.note, ...(s.effects ? { effects: s.effects } : {}) });
         if (r === 'silent') return [];
         return [{ ...s, instrument: r ?? trackSound[s.track], resumed: r !== null }];
       });
@@ -406,8 +414,8 @@ export function songSequence(
     add(from, end, -from);
     if (cycle) add(cycle.start, cycle.end, firstLength - cycle.start);
   }
-  if (song.goat && song.goat.pulseOptimization !== false) {
-    const skips = goatPulseSkips(song, sounds, trackSound, fps);
+  if (song.goat?.pulseOptimization !== false) {
+    const skips = pulseSkips(song, sounds, trackSound, fps);
     skips.forEach((frames, voice) => {
       const add = (a: number, b: number, shift: number) => {
         for (const f of frames) if (f >= a && f < b) events.push({ frame: f + shift, voice, note: SKIP_PULSE, instrument: 0 });
@@ -437,29 +445,49 @@ export function songSequence(
   return { events, length, loopFrom, preroll, beats, bars };
 }
 
+/** The steps a song's rows run to (an exported song's patterns cover them) */
+export const songRows = (song: SongDoc) => (song.goat ? song.goat.end : songEnd(song));
+
+/** Rows a pattern of an exported song has: whole bars, four of 16 steps (GoatTracker's go to 128) */
+export const patternSteps = (song: SongDoc) => {
+  const bar = song.stepsPerBeat * song.beatsPerBar;
+  return bar * Math.max(1, Math.min(4, Math.floor(128 / bar)));
+};
+
+/** Where a voice's patterns start: an imported song's own, else every few bars (as it's exported) */
+export function patternStarts(song: SongDoc, voice: number): number[] {
+  if (song.goat) return song.goat.patterns[voice] ?? [0];
+  const out: number[] = [];
+  for (let p = 0; p < Math.max(1, songRows(song)); p += patternSteps(song)) out.push(p);
+  return out;
+}
+
 /**
  * The frames of each voice where GoatTracker's player holds its pulse
- * still (see SongDoc.goat): on every row, the instrument's lead before it
- * (when the player looks ahead to the next row; the instrument is the one
- * the voice last started a note with), and the frame after each pattern's
- * last row.
+ * still, with its pulse optimization (on unless an imported song was
+ * played without): when it reads each row ahead (the instrument's lead
+ * before the row's note, or GOAT_READ in imported songs; the instrument
+ * the one the voice last started a note with), and two frames after it
+ * reads each pattern's last row.
  */
-function goatPulseSkips(song: SongDoc, sounds: SongSound[], trackSound: number[], fps: number): number[][] {
-  const goat = song.goat!;
+function pulseSkips(song: SongDoc, sounds: SongSound[], trackSound: number[], fps: number): number[][] {
+  const rows = songRows(song);
   return [0, 1, 2].map((voice) => {
     const starts = voiceSegments(song, voice, fps)
       .filter((s) => !s.from && trackSound[s.track])
       .map((s) => ({ frame: s.start, lead: leadOf(sounds[trackSound[s.track] - 1].shape) }));
+    // (the last pattern ends too, where the song goes round to its start)
+    const ends = new Set([...patternStarts(song, voice).filter((p) => p > 0).map((p) => p - 1), rows - 1]);
     const out: number[] = [];
     let k = 0;
     let lead = starts[0]?.lead ?? 3;
-    for (let step = 0; step < goat.end; step++) {
+    for (let step = 0; step < rows; step++) {
       const at = frameAt(song, step, fps);
       while (k < starts.length && starts[k].frame <= at) lead = starts[k++].lead;
-      out.push(song.goat ? at - GOAT_READ : at - lead);
+      const read = song.goat ? at - GOAT_READ : at - lead;
+      out.push(read);
+      if (ends.has(step)) out.push(read + 2);
     }
-    // (a pattern's last row is read a step before the next starts, which sounds two frames later: so the frame before that)
-    for (const p of goat.patterns[voice] ?? []) if (p > 0) out.push(frameAt(song, p - 1, fps) - 1);
     return out;
   });
 }

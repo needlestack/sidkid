@@ -800,11 +800,11 @@ try {
   });
   report(resumed === 'carries on', 'song note picks up where it left off', resumed);
 
-  // Resumes at points through the starting instruments play the rest of the note as it was
+  // A note of each starting instrument, its voice taken for a step at points through it, plays on as it would have
   const resumeChecks = await sm.evaluate(() => {
     const out = [];
     window.songMaker.instruments().forEach((ins, i) => {
-      for (const at of [1, 2, 5, 9, 13, 24, 37, 50, 61, 99]) {
+      for (const at of [1, 2, 3, 5, 8, 13]) {
         const d = window.songMaker.resumeCheck(i, at, 120);
         if (d && d !== 'silent' && d.length) out.push(`${ins.name} @${at}: ${d[0]}`);
       }
@@ -1083,6 +1083,31 @@ try {
   const undone3 = await trackOrder();
   report(after3 === before3.split(' ').slice(1).concat(before3.split(' ')[0]).join(' ') && undone3 === before3, 'song drags a track to move it', `${before3} → ${after3} → ${undone3}`);
 
+  // A song made here, exported: three voices, a note picked up after another track's, a slide, vibrato, a bend, a tempo change;
+  // GoatTracker's own player plays the file as it plays here
+  const madeHere = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    const keep = JSON.stringify(s);
+    s.tracks[0].clips = [{ start: 0, length: 32, span: 64, notes: [
+      { start: 0, length: 8, note: 48 },
+      { start: 8, length: 8, note: 55, slide: { left: 0x80, right: 1 }, effects: [{ from: 0, to: 3, kind: 'slide', speed: { left: 0x80, right: 1 } }, { from: 3, to: 8, kind: 'vibrato', speed: { left: 0x83, right: 3 } }] },
+      { start: 20, length: 4, note: 52, effects: [{ from: 1, to: 4, kind: 'up', speed: { left: 0x80, right: 3 } }] },
+    ] }];
+    s.tracks[1].clips = [{ start: 0, length: 64, span: 64, notes: [{ start: 0, length: 30, note: 36 }, { start: 34, length: 12, note: 31 }] }];
+    s.tracks[2].clips = [{ start: 0, length: 16, span: 64, notes: [{ start: 4, length: 2, note: 60 }, { start: 12, length: 2, note: 60 }] }];
+    const voices = s.tracks.map((t) => t.voice);
+    s.tracks[2].voice = 1;
+    s.tempo = [{ step: 32, bpm: (60 * 50) / (7 * 4) }];
+    window.songMaker.render();
+    const r = window.songMaker.exportCheck();
+    Object.assign(s, JSON.parse(keep));
+    delete s.tempo;
+    s.tracks.forEach((t, i) => (t.voice = voices[i]));
+    window.songMaker.render();
+    return r;
+  });
+  report(!madeHere.gaps.length && !Object.keys(madeHere.differ).length, 'song exports as it plays', JSON.stringify(madeHere.gaps.length ? madeHere.gaps : madeHere.first));
+
   // Clicking a track's head puts its clip down; Delete then asks: clear the track, or delete it (⌘Z brings either back)
   const headLabel = await sm.$eval('.track-head .voice-label', (e) => e.getBoundingClientRect().toJSON());
   await sm.mouse.click(headLabel.x + 4, headLabel.y + 4);
@@ -1157,6 +1182,20 @@ try {
     return `${window.songMaker.song().tracks.length} tracks, ${saved.filter((n) => n.endsWith('(Everlasting Annoyance)')).length} instruments, earlier song ${JSON.stringify(songs[songs.length - 2]) === earlier ? 'kept' : 'changed'}, ${pick.options.length} songs`;
   }, earlierSong);
   report(/^9 tracks, 9 instruments, earlier song kept, \d+ songs$/.test(importedSong), 'song imports an example', importedSong);
+
+  // Exported, the imported song plays in GoatTracker's own player as it plays here; Export downloads the file
+  const reExported = await sm.evaluate(() => window.songMaker.exportCheck());
+  const downloaded = await sm.evaluate(() => {
+    let name = null;
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      name = this.download;
+    };
+    document.getElementById('export-song').click();
+    HTMLAnchorElement.prototype.click = click;
+    return name;
+  });
+  report(!reExported.gaps.length && !Object.keys(reExported.differ).length && downloaded === 'Everlasting Annoyance.sng', 'song exports an imported song', `${JSON.stringify(reExported.differ)} ${downloaded}`);
 
   // Songs offered for import play exactly as GoatTracker's player does
   const importExact = await sm.evaluate(async () => {

@@ -26,7 +26,7 @@ const NO_HARD_RESTART = 0x80;
 const SNAP_AD = 0x00;
 const KEY = 48;
 
-/** An instrument played on a key, and an octave up (to tell pitches that follow the key from fixed ones) */
+/** A note played (the key), and an octave up (to tell pitches that follow the key from fixed ones) */
 export interface ResumeTraces {
   key: Trace;
   octave: Trace;
@@ -42,10 +42,12 @@ function envelopeFrames(ad: number, fps: number, clock: number): number {
 }
 
 /** Frames already spent on the row a frame runs from, counting back while it stayed there */
-function spent(pos: Uint8Array, f: number, rowFrames: number): number {
+function spent(pos: Uint8Array, f: number, rowFrames: number, counts: (g: number) => boolean = () => true): number {
   let e = f;
   while (e > 0 && pos[e - 1] === pos[f]) e--;
-  return (f - e) % rowFrames;
+  let n = 0;
+  for (let g = e; g < f; g++) if (counts(g)) n++;
+  return n % rowFrames;
 }
 
 /** The nearest note to a frequency */
@@ -60,21 +62,21 @@ function noteOf(freq: number): number {
  * when there is nothing left to pick up (the instrument had let go of it
  * itself), or null when it can't be done (a waveform the table can't hold).
  */
-export function resumeSound(base: Sound, at: number, t: ResumeTraces, fps: number, clock: number): Sound | 'silent' | null {
+export function resumeSound(base: Sound, at: number, t: ResumeTraces, fps: number, clock: number, key = KEY): Sound | 'silent' | null {
   const s = base.shape;
   if (s.release !== null && at >= s.release) return 'silent';
   if (at < 1 || at + 1 >= t.key.frames) return null;
-  const { key, octave } = t;
+  const { key: played, octave } = t;
   const next = at + 1;
 
   // The waveform and pitch where the note had got, then on from the row it was on
-  const wave = key.control[at];
+  const wave = played.control[at];
   if (!waveStorable(wave)) return null;
-  const freq = key.freq[at];
+  const freq = played.freq[at];
   // The same on another key: a fixed pitch; else a step from the key played
-  const pitch = !freq ? 0x80 : freq === octave.freq[at] ? pitchRight({ type: 'fixed', note: noteOf(freq) }) : pitchRight({ type: 'relative', semitones: noteOf(freq) - KEY });
+  const pitch = !freq ? 0x80 : freq === octave.freq[at] ? pitchRight({ type: 'fixed', note: noteOf(freq) }) : pitchRight({ type: 'relative', semitones: noteOf(freq) - key });
   const waveSteps: Step[] = [{ left: waveLeft({ type: 'wave', wave }), right: pitch }];
-  const waveNext = join(base.wave, key.pos[0], next, waveSteps, (row) => {
+  const waveNext = join(base.wave, played.pos[0], next, waveSteps, (row) => {
     const a = waveAction(row);
     // A wait lasts its frames and one more; its pitch comes on the last
     if (a.type !== 'wait') return null;
@@ -83,10 +85,13 @@ export function resumeSound(base: Sound, at: number, t: ResumeTraces, fps: numbe
 
   let pulse: Program | null = null;
   if (base.pulse) {
-    const steps: Step[] = [pulseStep({ type: 'width', width: key.pulse[at] })];
-    const n = join(base.pulse, key.pos[1], next, steps, (row) => {
+    const steps: Step[] = [pulseStep({ type: 'width', width: played.pulse[at] })];
+    const n = join(base.pulse, played.pos[1], next, steps, (row) => {
       const a = pulseAction(row);
-      return a.type === 'sweep' ? { frames: a.frames, rest: (left) => pulseStep({ ...a, frames: left }) } : null;
+      // (a frame the player held the pulse still on, as it does once a row in a song, doesn't count: the sweep didn't move;
+      // a sweep of 2 or more a frame shows it, the width's lowest bit being dropped)
+      const moved = Math.abs(a.type === 'sweep' ? a.speed : 0) >= 2 ? (g: number) => played.pulse[g] !== (g ? played.pulse[g - 1] : -1) : undefined;
+      return a.type === 'sweep' ? { frames: a.frames, rest: (left) => pulseStep({ ...a, frames: left }), counts: moved } : null;
     });
     pulse = { name: `${s.name} from ${at}`, steps, next: n };
   }
@@ -95,10 +100,10 @@ export function resumeSound(base: Sound, at: number, t: ResumeTraces, fps: numbe
   if (base.filter) {
     // The type, resonance and routing, and the cutoff in the same frame
     const steps: Step[] = [
-      filterStep({ type: 'setup', passband: key.mode[at] & 0x70, resonance: key.routing[at] >> 4, voices: key.routing[at] & 0x07 }),
-      filterStep({ type: 'cutoff', cutoff: key.cutoff[at] }),
+      filterStep({ type: 'setup', passband: played.mode[at] & 0x70, resonance: played.routing[at] >> 4, voices: played.routing[at] & 0x07 }),
+      filterStep({ type: 'cutoff', cutoff: played.cutoff[at] }),
     ];
-    const n = join(base.filter, key.pos[2], next, steps, (row) => {
+    const n = join(base.filter, played.pos[2], next, steps, (row) => {
       const a = filterAction(row);
       return a.type === 'sweep' ? { frames: a.frames, rest: (left) => filterStep({ ...a, frames: left }) } : null;
     });
@@ -107,7 +112,7 @@ export function resumeSound(base: Sound, at: number, t: ResumeTraces, fps: numbe
 
   // Past the attack and decay: get back to the sustain level at once
   const settled = at >= envelopeFrames(s.ad, fps, clock);
-  const firstWave = key.control[at - 1] | 0x01;
+  const firstWave = played.control[at - 1] | 0x01;
   return {
     name: `${s.name} from ${at}`,
     shape: s,
@@ -140,7 +145,7 @@ export function vibratoStart(t: ResumeTraces): number {
  * (a wait, a sweep), the rest of that row is added to `steps` first, and
  * it goes on from the row after.
  */
-function join(program: Program, pos: Uint8Array, frame: number, steps: Step[], lasting: (row: Step) => { frames: number; rest: (left: number) => Step } | null): Target | null {
+function join(program: Program, pos: Uint8Array, frame: number, steps: Step[], lasting: (row: Step) => { frames: number; rest: (left: number) => Step; counts?: (g: number) => boolean } | null): Target | null {
   const at = pos[frame];
   if (!at) return null;
   // On the jump at its end: where it jumps to (the jump takes no frame of its own)
@@ -148,7 +153,7 @@ function join(program: Program, pos: Uint8Array, frame: number, steps: Step[], l
   if (at - 1 > program.steps.length) return null;
   const row = program.steps[at - 1];
   const long = lasting(row);
-  const done = long ? spent(pos, frame, long.frames) : 0;
+  const done = long ? spent(pos, frame, long.frames, long.counts) : 0;
   if (!long || !done) return { program, step: at - 1 };
   steps.push(long.rest(long.frames - done));
   // The row after; past the last, where the program's jump goes (the player

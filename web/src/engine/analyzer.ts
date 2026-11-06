@@ -124,6 +124,52 @@ export class Analyzer {
     return out;
   }
 
+  /**
+   * Plays a sequence silently (instruments 1, 2, ...) and records one
+   * voice as trace() records a note: its registers after each frame and
+   * the table positions each frame ran from, from the sequence's frame 0
+   */
+  traceVoice(tables: TableData[], instruments: Instrument[], seq: Sequence, frames: number, voice: number, settings: Settings): Trace {
+    const { sk } = this;
+    configure(sk, settings);
+    sk._sk_reset();
+    writeTables(sk, tables);
+    instruments.forEach((ins, i) => writeInstrument(sk, i + 1, ins));
+    const sequencer = new Sequencer();
+    sequencer.load(seq);
+    const trace: Trace = {
+      frames,
+      freq: new Uint16Array(frames),
+      control: new Uint8Array(frames),
+      pulse: new Uint16Array(frames),
+      cutoff: new Uint8Array(frames),
+      routing: new Uint8Array(frames),
+      mode: new Uint8Array(frames),
+      ad: new Uint8Array(frames),
+      sr: new Uint8Array(frames),
+      pos: [new Uint8Array(frames), new Uint8Array(frames), new Uint8Array(frames)],
+    };
+    const regs = sk._sk_sidregs();
+    const b = voice * 7;
+    for (let f = -seq.preroll; f < frames; f++) {
+      sequencer.tick(sk);
+      if (f >= 0) for (let t = 0; t < 3; t++) trace.pos[t][f] = sk._sk_table_pos(voice, t);
+      sk._sk_tick();
+      if (f < 0) continue;
+      const r = sk.HEAPU8;
+      trace.freq[f] = r[regs + b] | (r[regs + b + 1] << 8);
+      trace.pulse[f] = r[regs + b + 2] | ((r[regs + b + 3] & 0x0f) << 8);
+      trace.control[f] = r[regs + b + 4];
+      trace.ad[f] = r[regs + b + 5];
+      trace.sr[f] = r[regs + b + 6];
+      trace.cutoff[f] = r[regs + 0x16];
+      trace.routing[f] = r[regs + 0x17];
+      trace.mode[f] = r[regs + 0x18];
+    }
+    sk._sk_reset();
+    return trace;
+  }
+
   /** For looking into songs: each frame's wave table position on each voice, playing the loaded song (as traceSong) */
   songPositions(subsong: number, frames: number, settings: Settings): number[][] {
     const { sk } = this;

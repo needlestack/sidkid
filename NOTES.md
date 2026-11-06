@@ -229,6 +229,18 @@ zoomable timeline, aiming for a GarageBand feel.
   (ends: where; up/down: speed), and buttons over the one selected note (`fx-bar`). Instruments
   now keep their pitch re-sets (a note slid to is heard at once). Imports exact: everlasting,
   sixpack, tempo2test.
+- Export (`songexport.ts`, Export button): what Song Maker plays, a step a row per voice (notes and
+  instruments, resumes as their variant instruments, key-offs, effects' commands, tempo commands
+  on a row with none), cut into patterns where playback has them (`patternStarts`: imported
+  songs' own, else every `patternSteps`), alike patterns once, looping to the start. Every song
+  now plays with GoatTracker's pulse optimization (pulse rests a frame each row, and after each
+  pattern's last row, the last one included), as its player does by default, so exports play the
+  same. `songMaker.exportCheck()` loads the file in the engine and compares GoatTracker's playing
+  with Song Maker's: exact for a song made here and for the imports (except 2-frame steps, which
+  need funk tempo: listed as a gap). Resumes are traced in their song (`resumeTraces` plays the
+  note alone with the song's tempo, rows and rests).
+- Tracks: S solos (any number); Delete with no clip picked up asks to clear or delete the selected
+  track; deleting a song asks first.
 - Several songs (`songs` + `current` in `sidkid.song2.v1`), a picker with New / Import… / Delete.
   Undo keeps either the song open or the whole list (`before` / `beforeSongs`).
 - Importing GoatTracker songs (`songimport.ts`, 2026-11-05): tracks per voice and instrument, one
