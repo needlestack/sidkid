@@ -51,6 +51,8 @@ interface Saved {
   /** Clicks on the beats while playing; a bar of them before recording */
   metronome: boolean;
   countIn: boolean;
+  /** The clip open in the editor: its track and place in it */
+  open?: { track: number; clip: number } | null;
 }
 
 function defaultSong(): SongDoc {
@@ -91,7 +93,16 @@ const barSteps = () => song().stepsPerBeat * song().beatsPerBar;
 const toFrame = (step: number) => frameAt(song(), step, FPS);
 const toStep = (frame: number) => frame / framesPerStep(song(), FPS);
 
+/** Where a clip is, to find it again after a reload or an undo */
+function clipRef(c: Clip | null): { track: number; clip: number } | null {
+  if (!c) return null;
+  const track = song().tracks.findIndex((t) => t.clips.includes(c));
+  return track < 0 ? null : { track, clip: song().tracks[track].clips.indexOf(c) };
+}
+const clipAt = (ref: { track: number; clip: number } | null | undefined): Clip | null => (ref ? (song().tracks[ref.track]?.clips[ref.clip] ?? null) : null);
+
 function persist() {
+  view.open = clipRef(openClip);
   try {
     localStorage.setItem(SONG_KEY, JSON.stringify(view));
   } catch {
@@ -134,8 +145,10 @@ function undo(redo = false) {
   const s = from.pop();
   if (!s) return;
   to.push(JSON.stringify(view.song));
+  const ref = clipRef(openClip);
   view.song = JSON.parse(s);
-  openClip = null;
+  // The same clip stays open, if it's still there
+  openClip = clipAt(ref);
   selectedNotes.clear();
   current = Math.min(current, song().tracks.length - 1);
   changed();
@@ -428,11 +441,13 @@ function renderHeads() {
     const head = document.createElement('div');
     head.className = `track-head${i === current ? ' current' : ''}${t.muted ? ' muted' : ''}`;
     head.style.setProperty('--h', String(hue(t)));
+    // Selecting it leaves the heads in place, so a click on one of its buttons isn't lost
     head.addEventListener('pointerdown', () => {
-      if (current !== i) {
-        current = i;
-        render();
-      }
+      if (current === i) return;
+      current = i;
+      heads.querySelectorAll('.track-head').forEach((h, k) => h.classList.toggle('current', k === i));
+      renderArrangement();
+      renderTrackNow();
     });
     const select = document.createElement('select');
     select.className = 'track-instrument';
@@ -674,12 +689,12 @@ function movePlayhead(follow = false) {
     const w = arrScroll.clientWidth;
     if (x > left + w - 40 || x < left) arrScroll.scrollLeft = Math.max(0, x - 40);
   }
-  // In the editor, where the open clip is up to
+  // In the editor, where the open clip is up to (with none open, the song from its start)
   const c = openClip;
-  const inClip = c && playhead >= c.start && playhead < c.start + c.span;
+  const inClip = !c || (playhead >= c.start && playhead < c.start + c.span);
   rollPlayhead.style.display = inClip ? '' : 'none';
   if (inClip) {
-    const rx = KEYS_PAD + ((playhead - c.start) % c.length) * view.rollZoom + 0.5;
+    const rx = KEYS_PAD + (c ? (playhead - c.start) % c.length : playhead) * view.rollZoom + 0.5;
     rollPlayhead.setAttribute('x1', String(rx));
     rollPlayhead.setAttribute('x2', String(rx));
   }
@@ -992,9 +1007,9 @@ function renderEditor() {
       el('rect', { x: rx(n.start) + 1 + w - end, y: ry(n.note), width: end + NOTE_REACH, height: ROW, class: 'roll-note-end', 'data-note-end': 'end' }, ng);
       ng.append(title(noteName(n.note)));
     });
-    rollPlayhead.setAttribute('y2', String(height));
-    roll.append(rollPlayhead);
   }
+  rollPlayhead.setAttribute('y2', String(height));
+  roll.append(rollPlayhead);
   if (band) el('rect', { x: Math.min(band.x0, band.x1), y: Math.min(band.y0, band.y1), width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0), class: 'roll-band' }, roll);
   renderRollRuler(width, shown);
   drawPiano(height);
@@ -1579,6 +1594,8 @@ window.addEventListener('resize', () => render());
 
 // --- Start ---------------------------------------------------------------------------------------
 
+openClip = clipAt(view.open);
+if (openClip) current = clipRef(openClip)!.track;
 sendSounds();
 render();
 renderKeyboard();

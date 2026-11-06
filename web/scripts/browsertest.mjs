@@ -919,6 +919,8 @@ try {
   await sm.waitForFunction(() => window.songMaker?.ready());
   const kept2 = await sm.evaluate(() => [...document.querySelectorAll('.track-instrument')].map((s, i) => `${s.selectedOptions[0].text} ${window.songMaker.song().tracks[i].clips.length}`).join(', '));
   report(kept2 === 'Lead 1, Bass 1, Snare 0', 'song keeps across a reload', kept2);
+  const stillOpen = await sm.evaluate(() => `${window.songMaker.openClip()?.start} ${document.querySelectorAll('.roll-note').length} notes`);
+  report(stillOpen === '16 1 notes', 'song keeps the open clip across a reload', stillOpen);
 
   // A song saved with frames a step comes back at its tempo
   const oldTempo = await sm.evaluate(() => {
@@ -941,7 +943,8 @@ try {
   await sm.keyboard.press('z');
   await sm.keyboard.up('Meta');
   const back = await sm.evaluate(() => window.songMaker.song().tracks.length);
-  report(asked === '3 Remove?' && removed === 2 && back === 3, 'song removes a track on a second click', `${asked}, ${removed}, ${back}`);
+  const openAfterUndo = await sm.evaluate(() => window.songMaker.openClip() !== null);
+  report(asked === '3 Remove?' && removed === 2 && back === 3 && openAfterUndo, 'song removes a track on a second click', `${asked}, ${removed}, ${back}, ${openAfterUndo ? 'clip still open' : 'clip closed'}`);
 
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
   await colorScheme(sm, 'dark');
