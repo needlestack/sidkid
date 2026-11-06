@@ -2239,8 +2239,9 @@ window.addEventListener('keydown', (e) => {
   if (k === 'r') return toggleRecord();
   if (k === 'c') return toggleCycle();
   if (k === 'm') return toggleMetronome();
-  if (k === 'z') return octave(-1);
-  if (k === 'x') return octave(1);
+  if (k === 'z') return toStart();
+  if (k === ',') return octave(-1);
+  if (k === '.') return octave(1);
   const offset = KEYS[k];
   if (offset === undefined) return;
   e.preventDefault();
@@ -2560,6 +2561,7 @@ Object.assign(window, {
     liveFrame,
     openClip: () => openClip,
     selectedNotes: () => [...selectedNotes],
+    playhead: () => playhead,
     setPlayhead: (step: number) => {
       playhead = step;
       render();

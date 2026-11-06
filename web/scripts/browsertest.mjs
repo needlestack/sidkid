@@ -1010,6 +1010,15 @@ try {
   });
   report(pasted === '[[3,3],[8,3],[15,3]] 32/32 15', 'song copies and pastes notes', pasted);
 
+  // Z goes back to the start (of the cycle, when it's on)
+  await sm.evaluate(() => window.songMaker.setPlayhead(24));
+  await sm.keyboard.press('z');
+  const rtz = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    return `${window.songMaker.playhead()} ${s.cycling ? s.cycle.start : 0}`;
+  });
+  report(rtz.split(' ')[0] === rtz.split(' ')[1], 'song Z goes back to the start', rtz);
+
   // The editor's ruler numbers the song's bars (this clip starts on bar 2)
   const rollBars = await sm.evaluate(() => [...document.querySelectorAll('#roll-ruler text')].map((t) => t.textContent).join(' '));
   report(rollBars.startsWith('2 2.2 2.3 2.4 3'), 'song editor shows bars', rollBars.slice(0, 40));
