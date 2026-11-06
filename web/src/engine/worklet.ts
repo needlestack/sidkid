@@ -108,12 +108,14 @@ class SidKidProcessor extends AudioWorkletProcessor {
         break;
       case 'noteOn':
         sk._sk_note_on(cmd.voice, cmd.note, cmd.instrument);
+        this.liveNow();
         break;
       case 'clearFilter':
         sk._sk_clear_filter();
         break;
       case 'noteOff':
         sk._sk_note_off(cmd.voice);
+        this.liveNow();
         break;
       case 'silence':
         // Clears the SID registers: gates off with the fastest release
@@ -125,6 +127,11 @@ class SidKidProcessor extends AudioWorkletProcessor {
         else this.sequencer.stop();
         break;
     }
+  }
+
+  /** A note played live, with no song playing: its frame starts now, not when the one being played would end */
+  private liveNow() {
+    if (!this.sequencer.playing) this.sk!._sk_frame_now();
   }
 
   /** The metronome: a short, quickly fading tick beside the chip (it takes none of its voices) */

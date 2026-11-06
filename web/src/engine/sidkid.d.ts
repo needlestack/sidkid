@@ -24,6 +24,7 @@ declare module '@engine/sidkid.js' {
     _sk_note_off(voice: number): void;
     _sk_skip_pulse(voice: number): void;
     _sk_clear_filter(): void;
+    _sk_frame_now(): void;
     _sk_row(voice: number, frames: number, command: number, data: number): void;
     _sk_slide(voice: number, note: number, data: number): void;
     _sk_tick(): void;

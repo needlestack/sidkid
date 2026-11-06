@@ -14,9 +14,14 @@ static int frametempo = 125;
 static int sidmodel = SK_MODEL_6581;
 static int sidinterpolate = 0;
 
+// The frame being played: its length, how much of it the chip has made
+// (made as it's played, so a frame can end early), and how much is played
 static short framebuf[SK_MAX_FRAME_SAMPLES];
 static int framepos = 0;
 static int framelen = 0;
+static int framemade = 0;
+int sk_frame_begin(short *ptr, int samples);
+int sk_frame_more(short *ptr, int want, int room);
 
 // Order list position of each voice after the previous frame; whether it
 // has taken its loop; and whether it has since read the first row there
@@ -54,6 +59,7 @@ int sk_init(int rate, int model, int usentsc, int interpolate)
 
   framepos = 0;
   framelen = 0;
+  framemade = 0;
   return 1;
 }
 
@@ -241,6 +247,7 @@ void sk_seek(int subsong, int frame)
   while ((frame-- > 0) && (isplaying())) advance();
   framepos = 0;
   framelen = 0;
+  framemade = 0;
 }
 
 int sk_scan(int subsong, int maxframes, unsigned *out, int maxevents)
@@ -280,11 +287,31 @@ void sk_render(short *out, int n)
 
     if (framepos >= framelen)
     {
-      framelen = sk_render_frame(framebuf);
+      int samples = ((samplerate * 5) >> 1) / frametempo;
+
+      if (samples > SK_MAX_FRAME_SAMPLES) samples = SK_MAX_FRAME_SAMPLES;
+      advance();
+      framemade = sk_frame_begin(framebuf, samples);
+      framelen = samples;
       framepos = 0;
+      // (a frame too short for its register writes ends with them)
+      if (framemade < 0) framelen = framemade = -framemade;
       if (framelen <= 0) break;
     }
-    amount = framelen - framepos;
+    // More of the frame, as far as it's needed now
+    if (framepos >= framemade)
+    {
+      int got = sk_frame_more(&framebuf[framemade], n, framelen - framemade);
+
+      if (got <= 0)
+      {
+        framelen = framemade;
+        if (framelen <= 0) break;
+        continue;
+      }
+      framemade += got;
+    }
+    amount = framemade - framepos;
     if (amount > n) amount = n;
     memcpy(out, &framebuf[framepos], amount * sizeof(short));
     out += amount;
@@ -293,6 +320,12 @@ void sk_render(short *out, int n)
   }
   // Only reachable if reSID produced nothing; pad with silence
   if (n > 0) memset(out, 0, n * sizeof(short));
+}
+
+void sk_frame_now(void)
+{
+  // What's made of the frame plays out; the next starts straight after
+  if (framemade < framelen) framelen = framemade;
 }
 
 int sk_frame_left(void)
