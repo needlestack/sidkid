@@ -545,6 +545,7 @@ function renderArrangement() {
   });
   playheadLine.setAttribute('y2', String(height));
   arr.append(playheadLine);
+  renderZoom();
   movePlayhead();
 }
 
@@ -789,15 +790,40 @@ arrScroll.addEventListener(
   { passive: false },
 );
 
+const MIN_ZOOM = 1.5;
+const MAX_ZOOM = 40;
+
 function zoomTo(z: number, pointer = arrScroll.clientWidth / 2) {
   const step = (arrScroll.scrollLeft + pointer) / view.zoom;
-  view.zoom = Math.max(1.5, Math.min(40, z));
+  view.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
   renderArrangement();
   arrScroll.scrollLeft = step * view.zoom - pointer;
   persist();
 }
 $('zoom-in').addEventListener('click', () => zoomTo(view.zoom * 1.5));
 $('zoom-out').addEventListener('click', () => zoomTo(view.zoom / 1.5));
+// The whole song in view (or the first four bars of an empty one)
+$('zoom-fit').addEventListener('click', () => {
+  const steps = Math.max(songEnd(song()), barSteps() * 4);
+  zoomTo(arrScroll.clientWidth / (steps + song().stepsPerBeat), 0);
+  arrScroll.scrollLeft = 0;
+});
+
+// The slider zooms in even steps of scale
+const zoomSlider = $<HTMLInputElement>('zoom-slider');
+const SLIDER_STEPS = 1000;
+zoomSlider.max = String(SLIDER_STEPS);
+zoomSlider.addEventListener('input', () => {
+  const lo = Math.log(MIN_ZOOM);
+  zoomTo(Math.exp(lo + (Number(zoomSlider.value) / SLIDER_STEPS) * (Math.log(MAX_ZOOM) - lo)));
+});
+
+function renderZoom() {
+  const lo = Math.log(MIN_ZOOM);
+  zoomSlider.value = String(Math.round(((Math.log(view.zoom) - lo) / (Math.log(MAX_ZOOM) - lo)) * SLIDER_STEPS));
+  const bars = arrScroll.clientWidth / view.zoom / barSteps();
+  $('zoom-label').textContent = `${bars < 10 ? bars.toFixed(1) : Math.round(bars)} bars shown`;
+}
 
 function seek(step: number) {
   playhead = Math.max(0, step);

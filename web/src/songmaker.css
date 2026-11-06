@@ -22,11 +22,23 @@
 }
 
 .arrange-head .name-input {
-  flex: 1 1 160px;
+  flex: 1 1 140px;
   min-width: 0;
 }
 
+.arrange-head .zoom .hint {
+  width: 92px;
+}
+
 .song-transport {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+
+/* Buttons that go together sit together; the groups have room between */
+.transport-group {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -527,6 +539,10 @@ html.drag-cursor * {
   }
 
   .song-transport {
-    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .voice-label {
+    display: none;
   }
 }
