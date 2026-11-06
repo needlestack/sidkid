@@ -196,6 +196,18 @@ zoomable timeline, aiming for a GarageBand feel.
   short sine tick mixed in the worklet after the chip (no SID voice). Count-in is a bar of the
   song's beats before the playhead (preroll grows to a bar). ⏮/Return goes to the cycle's
   start when cycling.
+- Resume (`resume.ts`): a note getting its voice back picks up where it left off, as a variant
+  instrument of its sound: a first frame setting waveform, pitch, pulse width and filter as the
+  note had them (read off a trace of the instrument), then joining its programs at the row it
+  was on (the rest of a wait or sweep first; never onto a jump row: the player follows one jump
+  a frame). The quickest AD once past the attack and decay; the instrument's gate frames (so
+  the player's tick, which decides effect frames, keeps in step) without hard restart. Vibrato
+  delay found by trying (`tuneVibrato`). Variants are shared when alike and kept within 63
+  instruments and 255 table rows (else the note restarts) by `songPlan` in songmaker.ts.
+  `node scripts/resumesurvey.mjs`: 187/226 example instruments resume exactly at 12 points;
+  the rest differ a little in pitch (vibrato a frame off in jam-mode ticks, which reset per
+  note: a song exported to patterns keeps them in step; slides resume on the nearest note).
+  Released notes (fixed key up) aren't resumed. No per-track "start again" option yet.
 - Not yet: voice priority settings, filter sharing, several songs, .sng export, tempo
   changes, copy/paste, selecting several clips.
 

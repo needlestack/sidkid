@@ -760,6 +760,44 @@ try {
   const turnRuns = voiceRuns(turns, 0);
   report(turnRuns === '685:1x21 685:0x2 685:1x1 1168:1x21 1168:0x2 1168:1x1 685:1x48 685:0x4', 'song tracks on one voice take turns', turnRuns);
 
+  // A note getting its voice back picks up where it left off: after the other track's note, the
+  // Lead's pulse sweep and waveform carry on as if it had played alone
+  const resumed = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    const was = JSON.stringify(s.tracks);
+    s.tracks[0].clips = [{ start: 0, length: 16, span: 16, notes: [{ start: 0, length: 16, note: 48 }] }];
+    s.tracks[1].clips = [{ start: 0, length: 16, span: 16, notes: [{ start: 4, length: 2, note: 60 }] }];
+    s.tracks[1].voice = 0;
+    window.songMaker.render();
+    const both = window.songMaker.trace(96);
+    s.tracks[1].muted = true;
+    window.songMaker.render();
+    const alone = window.songMaker.trace(96);
+    s.tracks = JSON.parse(was);
+    window.songMaker.render();
+    const differ = [];
+    // From the frame it's back (step 6 = frame 36) to the note's end, but for the frames its gate goes off
+    for (let f = 36; f < 94; f++) {
+      const pw = (r) => r[2] | ((r[3] & 15) << 8);
+      if (Math.abs(pw(both[f]) - pw(alone[f])) > 2 || (both[f][4] & 0xf0) !== (alone[f][4] & 0xf0) || both[f][0] !== alone[f][0]) differ.push(f);
+    }
+    return differ.length ? `differs at ${differ.slice(0, 6).join(',')}` : 'carries on';
+  });
+  report(resumed === 'carries on', 'song note picks up where it left off', resumed);
+
+  // Resumes at points through the starting instruments play the rest of the note as it was
+  const resumeChecks = await sm.evaluate(() => {
+    const out = [];
+    window.songMaker.instruments().forEach((ins, i) => {
+      for (const at of [1, 2, 5, 9, 13, 24, 37, 50, 61, 99]) {
+        const d = window.songMaker.resumeCheck(i, at, 120);
+        if (d && d !== 'silent' && d.length) out.push(`${ins.name} @${at}: ${d[0]}`);
+      }
+    });
+    return out;
+  });
+  report(resumeChecks.length === 0, 'song resumes match the note', resumeChecks.slice(0, 4).join(' | '));
+
   // Other voices play at the same time
   const together = await sm.evaluate(() => {
     const s = window.songMaker.song();

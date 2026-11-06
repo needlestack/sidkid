@@ -80,6 +80,8 @@ export interface Segment {
   end: number;
   note: number;
   track: number;
+  /** Frames into the note it starts at: 0 for a note starting, more for one getting its voice back */
+  from: number;
 }
 
 interface Held {
@@ -118,7 +120,7 @@ export function voiceSegments(song: SongDoc, voice: number, fps: number): Segmen
     }
     const prev = out[out.length - 1];
     if (top && top === last && prev && prev.end === t) prev.end = times[i + 1];
-    else if (top) out.push({ start: t, end: times[i + 1], note: top.note, track: top.track });
+    else if (top) out.push({ start: t, end: times[i + 1], note: top.note, track: top.track, from: t - top.start });
     last = top;
   }
   return out;
@@ -152,6 +154,15 @@ export function songSounds(song: SongDoc, instruments: Map<string, Shape>): { so
 
 /** Frames before its frame a note has to be started: the player waits the gate timer, and a frame more */
 export const leadOf = (s: Shape) => (s.gateFrames & 0x3f) + 1;
+/** The same for a note picking up where it left off (its gate goes off for a frame at least, see resume.ts) */
+export const resumeLeadOf = (s: Shape) => Math.max(1, s.gateFrames & 0x3f) + 1;
+
+/**
+ * Picks a note up where it left off: the number of an instrument that does
+ * (a variant of the sound, `from` frames in), 'silent' when there's nothing
+ * left to pick up, or null to start the note again instead.
+ */
+export type Resumer = (sound: number, from: number) => number | 'silent' | null;
 
 /**
  * The timed notes for playing a song from `from` (a frame): through to its
@@ -167,6 +178,7 @@ export function songSequence(
   fps: number,
   /** Clicks on the beats, and a bar of them first (count-in) */
   metronome: { click: boolean; countIn: boolean } = { click: false, countIn: false },
+  resume: Resumer = () => null,
 ): Sequence {
   const end = cycle ? cycle.end : frameAt(song, songEnd(song), fps);
   // The first pass, from where playing starts; then the cycle, round and round
@@ -175,27 +187,39 @@ export function songSequence(
   const length = cycle ? firstLength + (cycle.end - cycle.start) : firstLength + 1;
   const beat = song.stepsPerBeat * framesPerStep(song, fps);
   const bar = beat * song.beatsPerBar;
-  const preroll = Math.max(1, ...sounds.map((s) => leadOf(s.shape)), metronome.countIn ? Math.ceil(bar) + 1 : 0);
+  const preroll = Math.max(1, ...sounds.map((s) => Math.max(leadOf(s.shape), resumeLeadOf(s.shape))), metronome.countIn ? Math.ceil(bar) + 1 : 0);
   const events: SeqEvent[] = [];
   for (let voice = 0; voice < VOICES; voice++) {
     const all = voiceSegments(song, voice, fps).filter((s) => trackSound[s.track] > 0);
+    // (a note getting its voice back that's cut by where playing starts picks up further in)
     const clip = (a: number, b: number, shift: number) =>
-      all.filter((s) => s.end > a && s.start < b).map((s) => ({ ...s, start: Math.max(a, s.start) + shift, end: Math.min(b, s.end) + shift }));
-    const first = clip(from, end, -from);
-    const round = cycle ? clip(cycle.start, cycle.end, firstLength - cycle.start) : [];
+      all
+        .filter((s) => s.end > a && s.start < b)
+        .map((s) => ({ ...s, from: s.from && s.start < a ? s.from + a - s.start : s.from, start: Math.max(a, s.start) + shift, end: Math.min(b, s.end) + shift }));
+    // Each note getting its voice back: the instrument that picks it up (dropped when there's nothing to pick up)
+    const placed = (list: Segment[]) =>
+      list.flatMap((s) => {
+        if (!s.from) return [{ ...s, instrument: trackSound[s.track], resumed: false }];
+        const r = resume(trackSound[s.track], s.from);
+        if (r === 'silent') return [];
+        return [{ ...s, instrument: r ?? trackSound[s.track], resumed: r !== null }];
+      });
+    const first = placed(clip(from, end, -from));
+    const round = cycle ? placed(clip(cycle.start, cycle.end, firstLength - cycle.start)) : [];
     const segs = [...first, ...round];
     const sound = (s: Segment) => sounds[trackSound[s.track] - 1].shape;
+    const lead = (s: (typeof segs)[number]) => (s.resumed ? resumeLeadOf(sound(s)) : leadOf(sound(s)));
     // The pass coming round again, for the notes ending the cycle
     const again = round.length ? { ...round[0], start: round[0].start + (cycle!.end - cycle!.start), end: round[0].end } : null;
     segs.forEach((s, i) => {
       const shape = sound(s);
-      const on = s.start - leadOf(shape);
-      events.push({ frame: on, voice, note: s.note, instrument: trackSound[s.track], ...(loopFrom !== null && s.start >= loopFrom && on < loopFrom ? { lead: true } : {}) });
+      const on = s.start - lead(s);
+      events.push({ frame: on, voice, note: s.note, instrument: s.instrument, ...(loopFrom !== null && s.start >= loopFrom && on < loopFrom ? { lead: true } : {}) });
       // Let go at the end, unless the next note on the voice starts first
       // (starting a note lets go of the last), or the instrument lets go itself
       const next = segs[i + 1] ?? (cycle ? again : null);
       if (shape.release !== null) return;
-      if (next && next.start - leadOf(sound(next)) <= s.end) return;
+      if (next && next.start - lead(next) <= s.end) return;
       events.push({ frame: Math.min(s.end, length - 1), voice, note: -1, instrument: 0 });
     });
   }

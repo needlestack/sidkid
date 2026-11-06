@@ -12,7 +12,8 @@ import { Analyzer } from './engine/analyzer';
 import { loadModel, loadNtsc, Player, saveModel, saveNtsc } from './engine/player';
 import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
 import type { Sequence } from './engine/sequencer';
-import { loadInstruments, sounds, soundTables, STORAGE_KEY as INSTRUMENTS_KEY } from './instruments';
+import { loadInstruments, sound as soundOf, sounds, soundTables, STORAGE_KEY as INSTRUMENTS_KEY, type Sound } from './instruments';
+import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
 import { clipNotes, framesPerStep, frameAt, newId, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
@@ -229,10 +230,60 @@ function playRange(): { from: number; cycle: { start: number; end: number } | nu
 }
 
 function restartSequence(keep: boolean) {
-  sendSounds();
-  const seq = songSequence(song(), songSounds(song(), byId).sounds, trackSound, transport.from, transport.cycle, FPS, { click: view.metronome, countIn: transport.countIn });
-  transport.seq = seq;
-  player.sequence(seq, keep);
+  const plan = songPlan(transport.from, transport.cycle, { click: view.metronome, countIn: transport.countIn });
+  trackSound = plan.trackSound;
+  player.setTables(plan.tables);
+  plan.instruments.forEach((ins, i) => player.setInstrument(i + 1, ins));
+  transport.seq = plan.seq;
+  player.sequence(plan.seq, keep);
+}
+
+/** GoatTracker's limits: instruments 1-63, and tables of 255 rows */
+const MAX_INSTRUMENTS = 63;
+const TABLE_ROWS = 255;
+
+/**
+ * Everything to play the song from a frame: its sounds, then a variant for
+ * each note that gets its voice back and picks up where it left off (alike
+ * ones shared), as long as they fit GoatTracker's instruments and tables
+ * (past that, notes start again instead), and the timed notes.
+ */
+function songPlan(from: number, cycle: { start: number; end: number } | null, metronome: { click: boolean; countIn: boolean }) {
+  const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
+  const base = sounds(list.map((s) => ({ shape: s.shape, voices: 1 << s.voice })));
+  const all = [...base];
+  const made = new Map<string, number | 'silent' | null>();
+  const alike = new Map<string, number>();
+  const fits = () => all.length <= MAX_INSTRUMENTS && soundTables(all).rows.every((r) => r <= TABLE_ROWS);
+  const resume = (n: number, at: number) => {
+    const key = `${n}/${at}`;
+    if (!made.has(key)) {
+      const v = all.length < MAX_INSTRUMENTS ? resumeOf(base[n - 1], 1 << list[n - 1].voice, at) : null;
+      let r: number | 'silent' | null = v === 'silent' ? 'silent' : null;
+      if (v && v !== 'silent') {
+        const same = variantKey(n, v);
+        if (alike.has(same)) r = alike.get(same)!;
+        else {
+          all.push(v);
+          if (fits()) {
+            r = all.length;
+            alike.set(same, r);
+          } else all.pop();
+        }
+      }
+      made.set(key, r);
+    }
+    return made.get(key)!;
+  };
+  const seq = songSequence(song(), list, numbers, from, cycle, FPS, metronome, resume);
+  const t = soundTables(all);
+  return { seq, tables: t.tables, instruments: t.instruments, trackSound: numbers };
+}
+
+/** What a variant plays, to share one between notes picked up at the same point */
+function variantKey(n: number, v: Sound): string {
+  const prog = (p: { steps: { left: number; right: number }[]; next: { step: number } | null } | null) => (p ? [p.steps.map((x) => [x.left, x.right]), p.next?.step ?? null] : null);
+  return JSON.stringify([n, prog(v.wave), prog(v.pulse), prog(v.filter), v.overrides]);
 }
 
 async function play(record = false) {
@@ -1592,6 +1643,74 @@ renderKeyboard();
 centreRoll();
 
 let analyzer: Analyzer | null = null;
+
+/** Traces of instruments on their own, for picking notes up where they left off; longer ones as needed */
+const resumeTraceCache = new Map<string, ResumeTraces>();
+function resumeTraces(shape: Shape, voices: number, frames: number): ResumeTraces | null {
+  if (!analyzer) return null;
+  const k = `${JSON.stringify(shape)}/${voices}/${FPS}`;
+  let t = resumeTraceCache.get(k);
+  if (!t || t.key.frames < frames) {
+    const n = Math.max(frames, (t?.key.frames ?? 0) * 2, 256);
+    const one = soundTables([soundOf(shape, voices)]);
+    const plain = shape.vibrato ? soundTables([soundOf({ ...shape, vibrato: null }, voices)]) : null;
+    t = {
+      key: analyzer.trace(one.tables, one.instruments[0], RESUME_KEYS[0], n, settings),
+      octave: analyzer.trace(one.tables, one.instruments[0], RESUME_KEYS[1], n, settings),
+      plain: plain ? analyzer.trace(plain.tables, plain.instruments[0], RESUME_KEYS[0], n, settings) : null,
+    };
+    resumeTraceCache.set(k, t);
+  }
+  return t;
+}
+
+/** A sound's variant picking a note up `at` frames in (see resume.ts) */
+function resumeOf(base: Sound, voices: number, at: number): Sound | 'silent' | null {
+  // (far enough on to try vibrato delays against)
+  const t = resumeTraces(base.shape, voices, at + 200);
+  if (!t) return null;
+  const clock = ntsc ? 1022727 : 985248;
+  const variant = resumeSound(base, at, t, FPS, clock);
+  if (variant && variant !== 'silent' && t.plain) {
+    // Tried out on an instrument of its own (the song's has its speed rows elsewhere)
+    const alone = soundOf(base.shape, voices);
+    const trial = resumeSound(alone, at, t, FPS, clock);
+    if (trial && trial !== 'silent') variant.overrides!.vibratoDelay = tuneVibrato(alone, trial, t, at);
+  }
+  return variant;
+}
+
+/**
+ * The vibrato delay that makes a resume's pitch follow the note's best. The
+ * player counts the delay down only on frames it runs effects (which depend
+ * on its tick as well as the rows), and a resume's first frame sets the
+ * pitch, which starts the wobble again from the middle; so a vibrato
+ * already going is held back until the note's comes back round to the
+ * middle, and one yet to start is started where the note's would. Found by
+ * trying: the smallest delay that follows it most closely.
+ */
+function tuneVibrato(alone: Sound, trial: Sound, t: ResumeTraces, at: number): number {
+  if (!analyzer || !t.plain) return 1;
+  const start = vibratoStart(t);
+  if (start < 0) return 1;
+  const frames = Math.min(t.key.frames - at, Math.max(64, start - at + 32));
+  const off = (a: number, b: number) => Math.abs(12 * Math.log2((a || 1) / (b || 1))) > 0.1;
+  let best = 1;
+  let bestMisses = Infinity;
+  for (let d = 1; d <= 96; d++) {
+    trial.overrides!.vibratoDelay = d;
+    const tt = soundTables([alone, trial]);
+    const r = analyzer.trace(tt.tables, tt.instruments[1], RESUME_KEYS[0], frames, settings);
+    let misses = 0;
+    for (let k = 0; k < frames && misses < bestMisses; k++) if (off(r.freq[k], t.key.freq[at + k])) misses++;
+    if (misses < bestMisses) {
+      best = d;
+      bestMisses = misses;
+    }
+    if (!misses) break;
+  }
+  return best;
+}
 Analyzer.create()
   .then((a) => (analyzer = a))
   .catch((err) => toast(`Engine failed to start: ${err}`));
@@ -1604,17 +1723,43 @@ Object.assign(window, {
     render: () => changed(),
     /** The chip's registers frame by frame, playing the song from a step (as Play would, with the cycle if on) */
     trace: (frames: number, fromStep = 0) => {
-      const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
-      const t = soundTables(sounds(list.map((s) => ({ shape: s.shape, voices: 1 << s.voice }))));
       const cycle = song().cycling ? { start: toFrame(song().cycle.start), end: toFrame(song().cycle.end) } : null;
-      const seq = songSequence(song(), list, numbers, toFrame(fromStep), cycle, FPS);
-      return analyzer!.traceSequence(t.tables, t.instruments, seq, frames, settings).map((r) => Array.from(r));
+      const plan = songPlan(toFrame(fromStep), cycle, { click: false, countIn: false });
+      return analyzer!.traceSequence(plan.tables, plan.instruments, plan.seq, frames, settings).map((r) => Array.from(r));
     },
     /** The metronome's frames playing from a step: beats and bars */
     clicks: (fromStep: number, countIn: boolean) => {
       const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
       const seq = songSequence(song(), list, numbers, toFrame(fromStep), null, FPS, { click: true, countIn });
       return { beats: seq.beats, bars: seq.bars, preroll: seq.preroll };
+    },
+    /**
+     * How closely a resume of an instrument `at` frames in plays the rest of
+     * the note: the frames where waveform, pitch, pulse width or cutoff differ
+     */
+    resumeCheck: (which: number | Shape, at: number, frames: number) => {
+      const shape = typeof which === 'number' ? instruments[which] : which;
+      const base = soundOf(shape, 1);
+      const variant = resumeOf(base, 1, at);
+      if (!variant || variant === 'silent') return variant;
+      const t = soundTables([base, variant]);
+      if (t.rows.some((r) => r > 255)) return 'too big';
+      const original = resumeTraces(shape, 1, at + frames)!.key;
+      const resumed = analyzer!.trace(t.tables, t.instruments[1], RESUME_KEYS[0], frames, settings);
+      const out: string[] = [];
+      for (let f = 0; f < frames; f++) {
+        const o = at + f;
+        const what = [
+          (original.control[o] & 0xf1) !== (resumed.control[f] & 0xf1) && 'waveform',
+          // (within 10 cents: the player skips a vibrato step on one frame in six, counted from when a note starts)
+          Math.abs(12 * Math.log2((original.freq[o] || 1) / (resumed.freq[f] || 1))) > 0.1 && 'pitch',
+          // (within 2 of 4096: the player writes widths without their lowest bit, so a sweep picked up can alternate a little)
+          original.control[o] & 0x40 && Math.abs(original.pulse[o] - resumed.pulse[f]) > 2 && 'pulse',
+          original.routing[o] & 7 && original.cutoff[o] !== resumed.cutoff[f] && 'cutoff',
+        ].filter(Boolean);
+        if (what.length) out.push(`${f}: ${what.join('+')}`);
+      }
+      return out;
     },
     instruments: () => instruments,
     playing: () => transport.playing,

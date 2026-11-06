@@ -167,6 +167,13 @@ export interface Sound {
   /** Speed table rows: vibrato's first, if any, then the glides' */
   speeds: Step[];
   vibrato: boolean;
+  /**
+   * A variant of another sound (a note picking up where it left off): its
+   * programs join the other's, it uses the other's speed rows, and these
+   * settings replace the instrument's own.
+   */
+  base?: Sound;
+  overrides?: Partial<Pick<Instrument, 'ad' | 'gateTimer' | 'firstWave' | 'vibratoDelay'>>;
 }
 
 export function sound(s: Shape, voices: number, speedBase = 1): Sound {
@@ -190,7 +197,7 @@ export function sound(s: Shape, voices: number, speedBase = 1): Sound {
  * each (in order). Sounds must be made with `speedBase` where their speed
  * rows land: use `sounds()`.
  */
-export function soundTables(list: Sound[]): { tables: TableData[]; instruments: Instrument[] } {
+export function soundTables(list: Sound[]): { tables: TableData[]; instruments: Instrument[]; rows: number[] } {
   const waves = layOut(list.map((s) => s.wave));
   const pulses = list.filter((s) => s.pulse).map((s) => s.pulse!);
   const filters = list.filter((s) => s.filter).map((s) => s.filter!);
@@ -198,11 +205,16 @@ export function soundTables(list: Sound[]): { tables: TableData[]; instruments: 
   const filterLayout = layOut(filters);
   const rows = list.flatMap((s) => s.speeds);
   const table = (steps: Step[]) => ({ left: Uint8Array.from(steps, (r) => r.left), right: Uint8Array.from(steps, (r) => r.right) });
+  // Where each sound's speed rows start (a variant uses its base's)
+  const speedStart = new Map<Sound, number>();
   let speedAt = 1;
+  for (const snd of list) {
+    speedStart.set(snd, speedAt);
+    speedAt += snd.speeds.length;
+  }
   const instruments = list.map((snd, i): Instrument => {
     const s = snd.shape;
-    const vib = snd.vibrato ? speedAt : 0;
-    speedAt += snd.speeds.length;
+    const vib = snd.vibrato ? (speedStart.get(snd.base ?? snd) ?? 0) : 0;
     return {
       name: s.name,
       ad: s.ad,
@@ -211,10 +223,12 @@ export function soundTables(list: Sound[]): { tables: TableData[]; instruments: 
       vibratoDelay: s.vibrato ? s.vibrato.delay : 0,
       gateTimer: (s.gateFrames & 0x3f) | (s.hardRestart ? 0 : NO_HARD_RESTART) | (s.legato ? NO_GATE_OFF : 0),
       firstWave: s.firstWave,
+      ...snd.overrides,
     };
   });
   const tables = [waves.table, pulseLayout.table, filterLayout.table, table(rows.slice(0, 255))];
-  return { tables, instruments };
+  // Rows each table needs (over 255 doesn't fit)
+  return { tables, instruments, rows: [waves.length, pulseLayout.length, filterLayout.length, rows.length] };
 }
 
 /** Sounds for instruments on voices (a voice bit mask each), with their speed rows numbered to follow on */
