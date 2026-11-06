@@ -16,7 +16,8 @@ import { addInstruments, loadInstruments, sound as soundOf, sounds, soundTables,
 import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './resume';
 import { noteName } from './song';
 import { importGoatSong, ROW_TO_NOTE } from './songimport';
-import { bpmAt, songSpeeds, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
+import { slideSemitones, vibratoCurve, wobbleOf, wobbleRow } from './vibrato';
+import { bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -1264,11 +1265,14 @@ function renderEditor() {
       el('rect', { x: rx(n.start) + 1 + w - end, y: ry(n.note), width: end + NOTE_REACH, height: ROW, class: 'roll-note-end', 'data-note-end': 'end' }, ng);
       ng.append(title(noteName(n.note)));
     });
+    // Slides and effects: the pitch through the note, and a band along it for each effect
+    c.notes.forEach((n, i) => drawEffects(c, n, i, g));
   }
   rollPlayhead.setAttribute('y2', String(height));
   roll.append(rollPlayhead);
   if (band) el('rect', { x: Math.min(band.x0, band.x1), y: Math.min(band.y0, band.y1), width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0), class: 'roll-band' }, roll);
   renderRollRuler(width, shown);
+  placeFxBar();
   drawPiano(height);
   movePlayhead();
 }
@@ -1350,6 +1354,154 @@ function lightPiano() {
   for (const key of rollKeys.querySelectorAll<SVGElement>('[data-key]')) key.classList.toggle('down', sounding.has(Number(key.dataset.key)));
 }
 
+// --- Slides, bends and vibrato, on the notes ---------------------------------------------------
+
+/** New effects' speeds: a slide of half a semitone a frame, bends of an eighth, a gentle vibrato */
+const DEFAULT_SPEEDS: Record<NoteEffect['kind'], Speed> = {
+  slide: { left: 0x80, right: 1 },
+  up: { left: 0x80, right: 3 },
+  down: { left: 0x80, right: 3 },
+  vibrato: (([left, right]) => ({ left, right }))(wobbleRow({ turn: 3, even: true, depth: 3 })),
+};
+const FX_NAMES: Record<NoteEffect['kind'], string> = { slide: 'Slide', up: 'Bend up', down: 'Bend down', vibrato: 'Vibrato' };
+
+/** The note before a note in its clip (the one a slide comes from) */
+const noteBefore = (c: Clip, n: SongNote) => c.notes.filter((m) => m !== n && m.start < n.start).sort((a, b) => b.start - a.start)[0];
+
+/** The effect on a step of a note (steps from its start), if any */
+const effectAt = (n: SongNote, k: number) => n.effects?.find((e) => k >= e.from && k < e.to);
+
+/**
+ * The pitch through a note, a point a frame (near enough to draw: as the
+ * player moves it, without its rests): sliding in from the note before,
+ * bending, sliding on, wobbling. Null for a note that holds its pitch.
+ */
+function pitchLine(c: Clip, n: SongNote): { x: number; y: number }[] | null {
+  if (n.slide === undefined && !n.effects?.length) return null;
+  const from = toFrame(c.start + n.start);
+  const to = toFrame(c.start + n.start + n.length);
+  const before = n.slide !== undefined ? noteBefore(c, n) : undefined;
+  let pitch = before ? before.note : n.note;
+  const pts: { x: number; y: number }[] = [];
+  let wobble: { start: number; curve: Float64Array } | null = null;
+  for (let f = from; f <= to; f++) {
+    const step = toStep(f) - (c.start + n.start);
+    const fx = effectAt(n, Math.floor(step)) ?? (n.slide !== undefined && step < 1 ? { kind: 'slide' as const, speed: n.slide, from: 0, to: 1 } : undefined);
+    let wob = 0;
+    if (fx?.kind === 'vibrato' && fx.speed) {
+      if (!wobble || f < wobble.start) wobble = { start: f, curve: vibratoCurve(wobbleOf(fx.speed.left, fx.speed.right), n.note, 1, to - f + 1) };
+      wob = wobble.curve[f - wobble.start];
+    } else if (fx && f > from) {
+      const rate = fx.speed ? slideSemitones(fx.speed.left, fx.speed.right, Math.round(pitch)) : Infinity;
+      if (fx.kind === 'up') pitch += rate;
+      else if (fx.kind === 'down') pitch -= rate;
+      else pitch = pitch < n.note ? Math.min(n.note, pitch + rate) : Math.max(n.note, pitch - rate);
+    }
+    pts.push({ x: rx(n.start + step), y: ry(pitch + wob) + ROW / 2 });
+  }
+  return pts;
+}
+
+/** A note's pitch line, and its effects as bands along its foot: their ends dragged, their speed dragged up and down */
+function drawEffects(c: Clip, n: SongNote, i: number, parent: Element) {
+  const line = pitchLine(c, n);
+  if (!line) return;
+  el('path', { d: line.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(''), class: 'roll-pitch' }, parent);
+  const y = ry(n.note) + ROW - 3;
+  (n.effects ?? []).forEach((e, k) => {
+    const g = el('g', { class: `roll-fx fx-${e.kind}`, 'data-fx-note': i, 'data-fx': k }, parent);
+    const x0 = rx(n.start + e.from) + 1;
+    const x1 = rx(n.start + e.to) - 1;
+    el('rect', { x: x0, y, width: Math.max(2, x1 - x0), height: 4, rx: 2, class: 'roll-fx-band' }, g);
+    for (const end of ['from', 'to'] as const) el('rect', { x: (end === 'from' ? x0 : x1) - 3, y: y - 1, width: 6, height: 6, class: 'roll-fx-end', 'data-fx-end': end }, g);
+    g.append(title(`${FX_NAMES[e.kind]}: drag its ends to set where; drag it up or down for ${e.kind === 'vibrato' ? 'deeper or gentler' : 'faster or slower'}`));
+  });
+}
+
+/** The buttons over the note selected: a slide into it, a bend, vibrato */
+const fxBar = document.createElement('div');
+fxBar.className = 'fx-bar';
+fxBar.hidden = true;
+for (const kind of ['slide', 'up', 'down', 'vibrato'] as const) {
+  const b = document.createElement('button');
+  b.dataset.kind = kind;
+  b.textContent = { slide: '⤴', up: '↗', down: '↘', vibrato: '∿' }[kind];
+  b.title = { slide: 'Slide into this note from the one before (it goes on rather than starting again)', up: 'Bend the pitch up', down: 'Bend the pitch down', vibrato: 'Vibrato' }[kind];
+  b.setAttribute('aria-label', FX_NAMES[kind]);
+  b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  b.addEventListener('click', () => toggleEffect(kind));
+  fxBar.append(b);
+}
+$('roll-scroll').append(fxBar);
+
+function placeFxBar() {
+  const c = openClip;
+  const n = selectedNotes.size === 1 ? [...selectedNotes][0] : null;
+  fxBar.hidden = !c || !n || !c.notes.includes(n);
+  if (fxBar.hidden || !c || !n) return;
+  // Above the note, and above its pitch where that goes higher
+  const line = pitchLine(c, n);
+  const top = Math.min(ry(n.note), ...(line ?? []).map((q) => q.y - ROW / 2));
+  fxBar.style.left = `${rx(n.start)}px`;
+  fxBar.style.top = `${Math.max(0, top - 28)}px`;
+  for (const b of fxBar.querySelectorAll<HTMLButtonElement>('button')) {
+    const kind = b.dataset.kind as NoteEffect['kind'];
+    const on = kind === 'slide' ? n.slide !== undefined : !!n.effects?.some((e) => e.kind === kind);
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+    b.disabled = kind === 'slide' && !noteBefore(c, n);
+  }
+}
+
+/** Steps a slide takes to get there from the note before, at its speed (at least its first) */
+function slideSteps(c: Clip, n: SongNote, speed: Speed | null): number {
+  const before = noteBefore(c, n);
+  if (!before || !speed) return 1;
+  const rate = slideSemitones(speed.left, speed.right, Math.min(before.note, n.note));
+  const frames = Math.ceil(Math.abs(n.note - before.note) / Math.max(rate, 1e-6)) + 1;
+  return Math.max(1, Math.min(n.length, Math.ceil(stepOfFrame(song(), toFrame(c.start + n.start) + frames, FPS) - (c.start + n.start))));
+}
+
+/** Adds an effect to the note selected over the rest of it (or the slide into it), or takes it off */
+function toggleEffect(kind: NoteEffect['kind']) {
+  const c = openClip;
+  const n = selectedNotes.size === 1 ? [...selectedNotes][0] : null;
+  if (!c || !n) return;
+  // (no room after a slide that takes the whole note)
+  if (kind !== 'slide' && !n.effects?.some((e) => e.kind === kind) && (n.effects?.find((e) => e.kind === 'slide')?.to ?? 0) >= n.length) return;
+  before();
+  const others = (n.effects ?? []).filter((e) => e.kind !== kind && e.kind !== 'slide');
+  if (kind === 'slide') {
+    if (n.slide !== undefined) {
+      delete n.slide;
+      n.effects = n.effects?.filter((e) => e.kind !== 'slide');
+    } else {
+      // It goes on from the note before: that one runs right up to it
+      const prev = noteBefore(c, n)!;
+      prev.length = n.start - prev.start;
+      n.slide = DEFAULT_SPEEDS.slide;
+      const steps = slideSteps(c, n, n.slide);
+      n.effects = [{ from: 0, to: steps, kind: 'slide', speed: n.slide }, ...others.filter((e) => e.from >= steps)];
+    }
+  } else if (n.effects?.some((e) => e.kind === kind)) {
+    n.effects = n.effects.filter((e) => e.kind !== kind);
+  } else {
+    // Over the rest of the note, after any slide in
+    const from = n.effects?.find((e) => e.kind === 'slide')?.to ?? 0;
+    n.effects = [...(n.effects ?? []).filter((e) => e.kind === 'slide'), { from, to: n.length, kind, speed: DEFAULT_SPEEDS[kind] }];
+  }
+  if (!n.effects?.length) delete n.effects;
+  changed();
+}
+
+/** A speed made faster (negative) or slower by notches: half or twice as much a notch */
+function nudgeSpeed(sp: Speed, notches: number): Speed {
+  // Worked out from the note: right is how many times a semitone's step is halved
+  if (sp.left & 0x80) return { left: sp.left, right: Math.max(0, Math.min(7, sp.right + notches)) };
+  const v = Math.max(1, Math.min(0x7fff, Math.round(((sp.left << 8) | sp.right) * 2 ** -notches)));
+  return { left: v >> 8, right: v & 0xff };
+}
+
 /** Scrolls the editor to the clip's notes, or around C-3 */
 function centreRoll() {
   const c = openClip;
@@ -1365,7 +1517,9 @@ rollScroll.addEventListener('scroll', () => {
 
 type RollDrag =
   | { kind: 'move' | 'start' | 'length'; x0: number; y0: number; was: Map<SongNote, SongNote>; moved: boolean; sounding: number | null }
-  | { kind: 'band'; keep: Set<SongNote> };
+  | { kind: 'band'; keep: Set<SongNote> }
+  | { kind: 'fx-end'; note: SongNote; fx: NoteEffect; end: 'from' | 'to'; x0: number; was: number; moved: boolean }
+  | { kind: 'fx-speed'; note: SongNote; fx: NoteEffect; y0: number; was: Speed | null; moved: boolean };
 let rollDrag: RollDrag | null = null;
 let band: { x0: number; y0: number; x1: number; y1: number } | null = null;
 
@@ -1392,6 +1546,19 @@ roll.addEventListener('pointerdown', (e) => {
   if (ti >= 0) current = ti;
   roll.setPointerCapture(e.pointerId);
   const p = rollPoint(e);
+  // An effect's band: its ends set where it is, the band its speed
+  const fxHit = (e.target as Element).closest<SVGElement>('[data-fx]');
+  if (fxHit) {
+    const n = c.notes[Number(fxHit.dataset.fxNote)];
+    const fx = n.effects![Number(fxHit.dataset.fx)];
+    const end = (e.target as Element).closest<SVGElement>('[data-fx-end]')?.dataset.fxEnd as 'from' | 'to' | undefined;
+    selectedNotes.clear();
+    selectedNotes.add(n);
+    rollDrag = end ? { kind: 'fx-end', note: n, fx, end, x0: p.x, was: fx[end], moved: false } : { kind: 'fx-speed', note: n, fx, y0: p.y, was: fx.speed, moved: false };
+    dragCursor(end ? 'ew-resize' : 'ns-resize');
+    renderEditor();
+    return;
+  }
   const hit = (e.target as Element).closest<SVGElement>('[data-note]');
   if (hit) {
     const n = c.notes[Number(hit.dataset.note)];
@@ -1425,6 +1592,27 @@ roll.addEventListener('pointermove', (e) => {
   const c = openClip;
   const p = rollPoint(e);
   if (!d || !c) return;
+  if (d.kind === 'fx-end' || d.kind === 'fx-speed') {
+    if (!d.moved) {
+      before();
+      d.moved = true;
+    }
+    const { note: n, fx } = d;
+    if (d.kind === 'fx-end') {
+      // Within the note, not over its other effects (one a step, as GoatTracker's rows)
+      const by = Math.round((p.x - d.x0) / view.rollZoom);
+      const others = (n.effects ?? []).filter((x) => x !== fx);
+      const lo = d.end === 'from' ? Math.max(0, ...others.filter((x) => x.to <= fx.from).map((x) => x.to)) : fx.from + 1;
+      const hi = d.end === 'to' ? Math.min(n.length, ...others.filter((x) => x.from >= fx.to).map((x) => x.from)) : fx.to - 1;
+      fx[d.end] = Math.max(lo, Math.min(hi, d.was + by));
+    } else if (d.was) {
+      // Up: faster (or deeper); down: slower (or gentler); a notch every 12 pixels
+      fx.speed = nudgeSpeed(d.was, Math.round((p.y - d.y0) / 12));
+      if (fx.kind === 'slide' && fx.from === 0 && n.slide !== undefined) n.slide = fx.speed;
+    }
+    renderEditor();
+    return;
+  }
   if (d.kind === 'band') {
     band!.x1 = p.x;
     band!.y1 = p.y;
@@ -1473,7 +1661,7 @@ const endRollDrag = () => {
   rollDrag = null;
   dragCursor(null);
   band = null;
-  if (d && d.kind !== 'band') sound(null, d.sounding);
+  if (d && 'sounding' in d) sound(null, d.sounding);
   if (d && d.kind !== 'band' && d.moved) changed();
   else renderEditor();
 };

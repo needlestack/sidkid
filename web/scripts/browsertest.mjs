@@ -938,6 +938,41 @@ try {
   const rollBars = await sm.evaluate(() => [...document.querySelectorAll('#roll-ruler text')].map((t) => t.textContent).join(' '));
   report(rollBars.startsWith('2 2.2 2.3 2.4 3'), 'song editor shows bars', rollBars.slice(0, 40));
 
+  // Effects on notes: the buttons over a note slide it in from the one before, and add vibrato; it plays as drawn
+  const fxBefore = await sm.evaluate(() => {
+    const c = window.songMaker.openClip();
+    const keep = JSON.stringify(c.notes);
+    c.notes = [{ start: 0, length: 3, note: 36 }, { start: 4, length: 8, note: 43 }];
+    window.songMaker.render();
+    return keep;
+  });
+  const fxNotes = await sm.$$eval('.roll-note', (els) => els.map((e) => e.getBoundingClientRect().toJSON()));
+  await sm.mouse.click(fxNotes[1].x + fxNotes[1].width / 2, fxNotes[1].y + 3);
+  await sm.click('.fx-bar [data-kind="slide"]');
+  await sm.click('.fx-bar [data-kind="vibrato"]');
+  const fxMade = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length, n.slide ? 'slide' : '-', (n.effects ?? []).map((e) => `${e.kind}${e.from}-${e.to}`).join(' ')])));
+  // A band dragged up two notches: a deeper vibrato (its depth halved twice less)
+  const vibBand = await sm.$eval('.fx-vibrato .roll-fx-band', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.move(vibBand.x + vibBand.width / 2, vibBand.y + 2);
+  await sm.mouse.down();
+  await sm.mouse.move(vibBand.x + vibBand.width / 2, vibBand.y + 2 - 24, { steps: 4 });
+  await sm.mouse.up();
+  const fxPlayed = await sm.evaluate(() => {
+    const n = window.songMaker.openClip().notes[1];
+    const depth = n.effects.find((e) => e.kind === 'vibrato').speed.right;
+    // Played: the slide goes through pitches between the two notes, and the vibrato wobbles after it
+    const regs = window.songMaker.trace(240, 16);
+    const v = window.songMaker.song().tracks.find((t) => t.clips.includes(window.songMaker.openClip())).voice * 7;
+    const freqs = regs.map((r) => r[v] | (r[v + 1] << 8));
+    const between = new Set(freqs.filter((f) => f > 0x8b4 && f < 0xd0e)).size;
+    return `depth ${depth}, ${between > 2 ? 'glides' : 'jumps'}`;
+  });
+  await sm.evaluate((keep) => {
+    window.songMaker.openClip().notes = JSON.parse(keep);
+    window.songMaker.render();
+  }, fxBefore);
+  report(fxMade === '[[0,4,"-",""],[4,8,"slide","slide0-3 vibrato3-8"]]' && fxPlayed === 'depth 1, glides', 'song note effects', `${fxMade} ${fxPlayed}`);
+
   // The clip's upper right edge repeats it
   const clipBox = await sm.$eval('.clip2-body', (e) => e.getBoundingClientRect().toJSON());
   await sm.mouse.move(clipBox.right - 5, clipBox.y + 8);

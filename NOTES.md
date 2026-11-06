@@ -218,6 +218,17 @@ zoomable timeline, aiming for a GarageBand feel.
   point ramps to it); the BPM box shows and edits the tempo at the playhead. Imports read each
   row's length (a step a row), so GoatTracker's tempo and funk tempo commands come across;
   per-voice tempos ("voices at different tempos") don't yet.
+- Slides, bends, vibrato (2026-11-05): `SongNote.slide` (goes on from the note before, at a
+  speed; null: at once) and `SongNote.effects` (up / down / slide / vibrato over steps
+  [from, to), a speed-table row each; GoatTracker's commands 1-4, one a step). Every step is a
+  row on every voice (`sk_row`: tick 0, length, command); a slide is `sk_slide` (note row with
+  tone portamento). Song speeds go after the instruments' in the speed table (`songSpeeds`).
+  Imported songs are timed as GoatTracker's player: rows read `GOAT_READ` frames before the
+  step's frame (notes start, let go, pulse rests), tick 0 the instrument's gate frames after.
+  Editor: a note's pitch line drawn through it (`pitchLine`), a band per effect along its foot
+  (ends: where; up/down: speed), and buttons over the one selected note (`fx-bar`). Instruments
+  now keep their pitch re-sets (a note slid to is heard at once). Imports exact: everlasting,
+  sixpack, tempo2test.
 - Several songs (`songs` + `current` in `sidkid.song2.v1`), a picker with New / Import… / Delete.
   Undo keeps either the song open or the whole list (`before` / `beforeSongs`).
 - Importing GoatTracker songs (`songimport.ts`, 2026-11-05): tracks per voice and instrument, one
