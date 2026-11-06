@@ -898,18 +898,19 @@ function drawWaveBand() {
 const LINE_PAD = 6;
 
 /**
- * The filter: its band shows the cutoff over time as a thin line (or that
- * there is no filter), and opens or closes it; open, the cutoff as a line
- * of points to drag, like pulse width.
+ * The filter: its band opens or closes it, showing the cutoff over time as
+ * a thin line (or that there is no filter) while closed; open, the cutoff
+ * as a line of points to drag, like pulse width.
  */
 function drawFilter() {
   const s = shape();
   const top = filterTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-filter-strip': '' }, plot);
-  if (!s.filter.types.length) {
+  // Folded, the band previews the cutoff (open, its rows show it)
+  if (!state.filterOpen && !s.filter.types.length) {
     el('text', { x: x(0) + 8, y: top + PAD_BOTTOM / 2 + 4, class: 'vib-hint' }, plot).textContent = 'No filter';
-  } else {
+  } else if (!state.filterOpen) {
     // The cutoff, where it filters, coming round with the repeat
     const py = (v: number) => top + LINE_PAD + (1 - v / CUTOFF_MAX) * (PAD_BOTTOM - 2 * LINE_PAD);
     const rep = filterRepeat();
@@ -1035,8 +1036,8 @@ function renderFilterControls() {
 }
 
 /**
- * The notes: their band shows the pitch over time as a thin line (and
- * opens or closes them); open, a roll of semitones from the note played,
+ * The notes: their band opens or closes them, showing the pitch over time
+ * as a thin line while closed; open, a roll of semitones from the note played,
  * with the notes as bars to draw, move and resize like the waveform's.
  */
 function drawNotes() {
@@ -1044,17 +1045,20 @@ function drawNotes() {
   const top = notesTop();
   el('line', { x1: 0, x2: x(TOTAL) + ORIGIN, y1: top, y2: top, class: 'heard-rule' }, plot);
   el('rect', { x: 0, y: top, width: x(TOTAL) + ORIGIN, height: PAD_BOTTOM, class: 'strip-hit', 'data-notes-strip': '' }, plot);
-  const py = (semis: number) => top + LINE_PAD + ((rollHigh() - Math.max(state.rollLow, Math.min(rollHigh(), semis))) / ROLL_SPAN) * (PAD_BOTTOM - 2 * LINE_PAD);
-  el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);
-  // (gliding into a pitch, a slope from the one before)
-  heardSpans(s, TOTAL).forEach((sp, k, all) => {
-    const glide = s.notes.find((n) => n.start === sp.from)?.glide ?? 0;
-    const from = Math.min(sp.start + glide, sp.end ?? TOTAL);
-    const cls = `notes-line${sp.again ? ' again' : ''}`;
-    if (glide && all[k - 1]?.end === sp.start) el('line', { x1: x(sp.start), x2: x(from), y1: py(all[k - 1].pitch), y2: py(sp.pitch), class: cls }, plot);
-    el('line', { x1: x(from), x2: x(sp.end ?? TOTAL), y1: py(sp.pitch), y2: py(sp.pitch), class: cls }, plot);
-  });
-  if (!state.notesOpen) return;
+  // Folded, the band previews the pitch as a thin line (open, the roll shows it)
+  if (!state.notesOpen) {
+    const py = (semis: number) => top + LINE_PAD + ((rollHigh() - Math.max(state.rollLow, Math.min(rollHigh(), semis))) / ROLL_SPAN) * (PAD_BOTTOM - 2 * LINE_PAD);
+    el('line', { x1: x(0), x2: x(TOTAL), y1: py(0), y2: py(0), class: 'notes-zero' }, plot);
+    // (gliding into a pitch, a slope from the one before)
+    heardSpans(s, TOTAL).forEach((sp, k, all) => {
+      const glide = s.notes.find((n) => n.start === sp.from)?.glide ?? 0;
+      const from = Math.min(sp.start + glide, sp.end ?? TOTAL);
+      const cls = `notes-line${sp.again ? ' again' : ''}`;
+      if (glide && all[k - 1]?.end === sp.start) el('line', { x1: x(sp.start), x2: x(from), y1: py(all[k - 1].pitch), y2: py(sp.pitch), class: cls }, plot);
+      el('line', { x1: x(from), x2: x(sp.end ?? TOTAL), y1: py(sp.pitch), y2: py(sp.pitch), class: cls }, plot);
+    });
+    return;
+  }
 
   const roll = rollTop();
   for (let semis = state.rollLow; semis <= rollHigh(); semis += 12) {
