@@ -487,7 +487,7 @@ export function pulseProgram(bars: Bar[], pulse: PulseShape, name: string): Prog
  * line has it, and the line goes on undisturbed. The cutoff's repeat sets
  * everything up again as it comes round.
  */
-export function filterProgram(filter: FilterShape, name: string, voices = 1): Program {
+export function filterProgram(filter: FilterShape, name: string, voices = 1, ownVoice = false): Program {
   // A chunk ending on the repeat's end covers that frame too: it is the
   // repeat's last, so the chunk stays on all the way round
   const loopEnd = filter.cutoff.loop !== null && filter.cutoff.loop < filter.cutoff.points.length - 1 ? filter.cutoff.points[filter.cutoff.points.length - 1].t : null;
@@ -497,7 +497,8 @@ export function filterProgram(filter: FilterShape, name: string, voices = 1): Pr
   const typeFor = (t: number) => chunkAt(filter.types, t)?.passband ?? [...filter.types].reverse().find((c) => c.start <= t)?.passband ?? filter.types[0]?.passband ?? 0;
   const route = (t: number) => {
     const c = chunkAt(filter.types, t);
-    return c ? (c.voices ?? voices) : 0;
+    // (trying an instrument out: the voice it plays on, wherever its chunks filter others)
+    return c ? (ownVoice ? voices : (c.voices ?? voices)) : 0;
   };
   const setup = (t: number) => filterStep({ type: 'setup', passband: typeFor(t), resonance: res(t), voices: route(t) });
   const cut = filter.cutoff;

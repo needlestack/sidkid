@@ -707,6 +707,17 @@ try {
   const reloaded = await m2.evaluate(() => JSON.stringify(window.maker2.state().instruments[0].notes));
   report(reloaded === '[{"start":0,"semis":5,"fixed":true},{"start":4,"semis":0,"glide":6}]', 'maker2 keeps glides and fixed steps', reloaded);
 
+  // The note start, sync and ring checkboxes wait in the Advanced box, closed at first
+  const advanced = await m2.evaluate(async () => {
+    const shut = document.getElementById('instrument-options').hidden;
+    document.getElementById('advanced-toggle').click();
+    const open = !document.getElementById('instrument-options').hidden;
+    const boxes = document.querySelectorAll('#instrument-options input[type=checkbox]').length;
+    document.getElementById('advanced-toggle').click();
+    return `${shut ? 'closed' : 'open'}, then ${open ? 'open' : 'closed'} with ${boxes} checkboxes`;
+  });
+  report(advanced === 'closed, then open with 4 checkboxes', 'maker2 advanced box', advanced);
+
   await colorScheme(m2, 'dark');
   await m2.screenshot({ path: `${OUT}/${BROWSER}-maker2-dark.png` });
   await colorScheme(m2, 'light');

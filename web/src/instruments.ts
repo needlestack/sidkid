@@ -208,7 +208,8 @@ export interface Sound {
   overrides?: Partial<Pick<Instrument, 'ad' | 'gateTimer' | 'firstWave' | 'vibratoDelay'>>;
 }
 
-export function sound(s: Shape, voices: number, speedBase = 1): Sound {
+/** `ownVoice`: filter the voices it plays on, even where an imported instrument filters others (for trying it out) */
+export function sound(s: Shape, voices: number, speedBase = 1, ownVoice = false): Sound {
   // Vibrato reads its speed from a row of the speed table, and glides from the rows after it
   const v = s.vibrato;
   const wobble = v ? wobbleRow(v) : null;
@@ -218,7 +219,7 @@ export function sound(s: Shape, voices: number, speedBase = 1): Sound {
     shape: s,
     wave,
     pulse: s.pulseFromSong ? null : pulseProgram(s.bars, s.pulse, s.name),
-    filter: s.filter.types.length ? filterProgram(s.filter, s.name, voices) : null,
+    filter: s.filter.types.length ? filterProgram(s.filter, s.name, voices, ownVoice) : null,
     speeds: [...(wobble ? [{ left: wobble[0], right: wobble[1] }] : []), ...speeds],
     vibrato: !!v,
   };

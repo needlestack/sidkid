@@ -79,6 +79,8 @@ interface State {
   filterOpen: boolean;
   /** The lowest pitch the roll shows (it shows ROLL_SPAN semitones up from it) */
   rollLow: number;
+  /** Whether the Advanced box (note start, sync, ring) is open */
+  advancedOpen: boolean;
 }
 
 function defaults(): State {
@@ -92,6 +94,7 @@ function defaults(): State {
     notesOpen: false,
     filterOpen: false,
     rollLow: -12,
+    advancedOpen: false,
   };
 }
 
@@ -176,7 +179,7 @@ function setKeyUp(f: number) {
 
 function audition(s: Shape = shape()): Audition {
   // The test note plays on voice 1, so that is the voice it filters
-  const t = soundTables([sound(s, 1)]);
+  const t = soundTables([sound(s, 1, 1, true)]);
   return { tables: t.tables, instrument: t.instruments[0] };
 }
 
@@ -612,15 +615,6 @@ function render(keepReadout = false) {
   $('zoom-label').textContent = `${timeText(scroller.clientWidth / state.zoom)} shown`;
   if (document.activeElement !== zoomSlider) zoomSlider.value = String(sliderValue());
   renderOptions();
-  $('tab-hint').textContent =
-    [
-      state.volumeOpen ? 'Drag the dots: how fast it rises, falls to the level it holds, and fades once the key goes up.' : '',
-      state.waveOpen ? 'Drag along a row to draw a waveform, or drag bars to move and resize them; bars that overlap play together.' : '',
-      state.notesOpen ? `Draw pitches in semitones from ${shape().fixedNote === null ? 'the key played' : noteName(shape().fixedNote!)}; each holds until the next. Drag a step’s end or start apart to glide.` : '',
-      state.filterOpen ? 'Draw chunks of filtering in the Type row (gaps aren’t filtered); shape the cutoff and resonance under it.' : '',
-    ]
-      .join(' ')
-      .trim() || 'Click Volume, Waveform, Pitch or Filter to open them.';
 
   const width = x(TOTAL) + ORIGIN;
   const HEIGHT = height();
@@ -2388,6 +2382,19 @@ window.addEventListener('storage', (e) => {
   } catch {
     // Unreadable: keep what's here
   }
+});
+
+// The Advanced box: closed until wanted
+function renderAdvanced() {
+  $('advanced-toggle').setAttribute('aria-expanded', String(state.advancedOpen));
+  $('advanced-twisty').setAttribute('d', state.advancedOpen ? 'M1,3L11,3L6,10Z' : 'M3,1L10,6L3,11Z');
+  $('instrument-options').hidden = !state.advancedOpen;
+}
+renderAdvanced();
+$('advanced-toggle').addEventListener('click', () => {
+  state.advancedOpen = !state.advancedOpen;
+  persist();
+  renderAdvanced();
 });
 
 function renderInstruments() {

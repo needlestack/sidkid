@@ -28,10 +28,6 @@
     </header>
 
     <main>
-      <p class="intro">
-        Shape how a note sounds over time. <b>Volume</b> is how loud it is from the moment a key goes down until it fades after the key
-        comes up. <b>Waveform</b> is the tone it plays, which can change as the note goes on.
-      </p>
 
       <section class="card shaper">
         <header class="card-head shaper-head">
@@ -49,7 +45,6 @@
             </div>
           </div>
         </header>
-        <p class="hint tab-hint" id="tab-hint"></p>
         <div class="timeline" id="timeline">
           <div class="tl-gutter" id="gutter"></div>
           <div class="tl-scroll" id="scroll">
@@ -58,7 +53,14 @@
         </div>
         <div class="filter-controls" id="filter-controls" hidden></div>
         <div class="readout" id="readout"></div>
-        <div class="instrument-options" id="instrument-options"></div>
+      </section>
+
+      <section class="card advanced">
+        <button class="advanced-head" id="advanced-toggle" aria-expanded="false">
+          <svg class="twisty" viewBox="0 0 12 12" aria-hidden="true"><path id="advanced-twisty" d="M3,1L10,6L3,11Z" /></svg>
+          Advanced
+        </button>
+        <div class="instrument-options" id="instrument-options" hidden></div>
       </section>
     </main>
 

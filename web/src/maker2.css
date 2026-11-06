@@ -107,10 +107,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.tab-hint {
-  margin: 0;
-}
-
 .timeline {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
@@ -1071,7 +1067,35 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 10px;
+  padding-left: 19px;
+}
+
+.instrument-options[hidden] {
+  display: none;
+}
+
+/* The Advanced box: a heading that opens and closes it, as the timeline's sections do */
+.advanced {
+  padding: 10px 16px;
+}
+
+.advanced-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.advanced-head:hover {
+  color: var(--text);
 }
 
 .instrument-option {
