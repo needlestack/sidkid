@@ -1370,15 +1370,40 @@ try {
   const roundFile = `${OUT}/roundtrip.sng`;
   writeFileSync(roundFile, Uint8Array.from(exportedBytes));
   const exportedPlays = await sm.evaluate((n) => JSON.stringify(window.songMaker.trace(n)), roundFrames);
+  const tempoOf = () => sm.evaluate(() => JSON.stringify([window.songMaker.song().bpm, window.songMaker.song().tempo ?? []]));
+  const exportedTempo = await tempoOf();
   const songsBeforeFile = await sm.evaluate(() => document.getElementById('song-pick').options.length);
   await (await sm.$('#import-file-input')).uploadFile(roundFile);
   await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeFile);
   const reimportedPlays = await sm.evaluate((n) => JSON.stringify(window.songMaker.trace(n)), roundFrames);
+  const reimportedTempo = await tempoOf();
   // (one that wouldn't play as it does isn't imported)
   await (await sm.$('#import-file-input')).uploadFile(`${ROOT}web/public/examples/hyperspace.sng`);
   await new Promise((r) => setTimeout(r, 2000));
   const refused = await sm.evaluate((n) => document.getElementById('song-pick').options.length === n + 1 && document.getElementById('toast').textContent.includes("can't come across"), songsBeforeFile);
-  report(offered.split(' of ')[0] === offered.split(' of ')[1] && reimportedPlays === exportedPlays && refused, 'song imports a file, round trip', `${offered} offered, round trip ${reimportedPlays === exportedPlays ? 'same' : 'differs'}, refused ${refused}`);
+  report(offered.split(' of ')[0] === offered.split(' of ')[1] && reimportedPlays === exportedPlays && reimportedTempo === exportedTempo && refused, 'song imports a file, round trip', `${offered} offered, round trip ${reimportedPlays === exportedPlays ? 'same' : 'differs'}, tempo ${exportedTempo} → ${reimportedTempo}, refused ${refused}`);
+
+  // A steady tempo between whole frames a step (rows of 8 and 9 frames) comes back as itself, not a change each row
+  const steady = await sm.evaluate(async () => {
+    const s = window.songMaker.song();
+    s.bpm = 88;
+    delete s.tempo;
+    window.songMaker.render();
+    let href = null;
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      href = this.href;
+    };
+    document.getElementById('export-song').click();
+    HTMLAnchorElement.prototype.click = click;
+    return Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer()));
+  });
+  writeFileSync(roundFile, Uint8Array.from(steady));
+  const songsBeforeSteady = await sm.evaluate(() => document.getElementById('song-pick').options.length);
+  await (await sm.$('#import-file-input')).uploadFile(roundFile);
+  await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeSteady);
+  const steadyTempo = await tempoOf();
+  report(steadyTempo === '[88,[]]', 'song import keeps a steady tempo', steadyTempo);
 
   // Songs offered for import play exactly as GoatTracker's player does
   const importExact = await sm.evaluate(async () => {

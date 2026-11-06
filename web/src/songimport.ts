@@ -151,12 +151,11 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
 
   const fps = settings.ntsc ? 60 : 50;
   const end = steps(tl.length);
-  const bpmOf = (frames: number) => (60 * fps) / (frames * STEPS_PER_BEAT);
-  const tempo: TempoChange[] = [];
-  for (let i = 1; i < rows.length - 1; i++) if (lengthAt(i) !== lengthAt(i - 1)) tempo.push({ step: i, bpm: bpmOf(lengthAt(i)) });
+  // (the song's own rows, to its end: on into its loop they start over)
+  const [first, ...tempo] = tempoOf(rows.filter((f) => f <= tl.length).map((f) => f - firstRow), fps);
   const song: SongDoc = {
     name: goat.title || name,
-    bpm: bpmOf(lengthAt(0)),
+    bpm: first.bpm,
     ...(tempo.length ? { tempo } : {}),
     stepsPerBeat: STEPS_PER_BEAT,
     beatsPerBar: BEATS_PER_BAR,
@@ -166,6 +165,71 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
     goat: { patterns: tl.clips.map((cs) => cs.map((c) => steps(c.start))), end, ...(settings.pulseOptimization ? {} : { pulseOptimization: false }) },
   };
   return { song, instruments: [...instruments.values()], gaps, firstRow, length: tl.length };
+}
+
+/**
+ * The fewest tempos that start each row on its frame, as Song Maker times
+ * steps (a step's start, worked out exactly, to the nearest frame): a
+ * steady tempo between whole frames a step (rows of 8 and 9 frames, say)
+ * is one tempo, not a change each row. Each tempo runs as far as one can,
+ * its bpm the roundest that does.
+ */
+function tempoOf(rows: number[], fps: number): TempoChange[] {
+  const frames = (bpm: number) => (60 * fps) / (bpm * STEPS_PER_BEAT);
+  const bpmOf = (f: number) => (60 * fps) / (f * STEPS_PER_BEAT);
+  // Whether a bpm from a step (starting at an exact frame) starts the next k rows on theirs, as Song Maker works it out
+  const fits = (bpm: number, at: number, exact: number, k: number) => {
+    for (let j = 1; j <= k; j++) if (Math.round(exact + j * frames(bpm)) !== rows[at + j]) return false;
+    return true;
+  };
+  const out: TempoChange[] = [];
+  let at = 0;
+  let exact = 0;
+  while (at < rows.length - 1 || !out.length) {
+    // How far one tempo goes: the frames a step can last, narrowed row by row (a little wide; the bpm is checked)
+    let lo = 0;
+    let hi = Infinity;
+    let k = 1;
+    for (; at + k < rows.length; k++) {
+      const a = (rows[at + k] - 0.5 - exact) / k - 1e-9;
+      const b = (rows[at + k] + 0.5 - exact) / k + 1e-9;
+      if (Math.max(lo, a) > Math.min(hi, b)) break;
+      lo = Math.max(lo, a);
+      hi = Math.min(hi, b);
+    }
+    k--;
+    if (!k) {
+      // (a song of one row: its length unknown, GoatTracker's starting tempo)
+      out.push({ step: at, bpm: bpmOf(6) });
+      break;
+    }
+    let bpm = roundest(bpmOf(hi), bpmOf(lo), (n) => fits(n, at, exact, k));
+    // (none fits all the way, at the edge of what rounds: as far as the middle goes)
+    if (bpm === null) {
+      bpm = bpmOf((lo + hi) / 2);
+      let n = 0;
+      while (n < k && fits(bpm, at, exact, n + 1)) n++;
+      k = Math.max(1, n);
+    }
+    out.push({ step: at, bpm });
+    // (a steady stretch counted on from where it starts, as Song Maker does)
+    exact += k * frames(bpm);
+    at += k;
+  }
+  return out;
+}
+
+/** The roundest number between two that does (whole, else to fewer decimals) */
+function roundest(lo: number, hi: number, ok: (n: number) => boolean): number | null {
+  const mid = (lo + hi) / 2;
+  for (const scale of [1, 10, 100, 1000, 1e6]) {
+    const all: number[] = [];
+    for (let n = Math.ceil(lo * scale); n <= Math.floor(hi * scale) && all.length < 50; n++) all.push(n / scale);
+    all.sort((x, y) => Math.abs(x - mid) - Math.abs(y - mid));
+    const n = all.find(ok);
+    if (n !== undefined) return n;
+  }
+  return null;
 }
 
 /**

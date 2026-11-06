@@ -139,9 +139,15 @@ function stepStarts(song: SongDoc, fps: number, upTo: number): number[] {
     starts.set(song, c);
   }
   const at = c.at;
+  // (a steady stretch counted on from where it starts, as a song of one tempo is: the same frames; a ramp step by step)
+  const changes = song.tempo ?? [];
   while (at.length <= upTo) {
     const k = at.length - 1;
-    at.push(at[k] + (60 * fps) / (bpmAt(song, k) * song.stepsPerBeat));
+    let from = 0;
+    for (const t of changes) if (t.step <= k) from = t.step;
+    const next = changes.find((t) => t.step > k);
+    const steady = !next?.ramp || next.step <= from;
+    at.push(steady ? at[from] + (k + 1 - from) * ((60 * fps) / (bpmAt(song, k) * song.stepsPerBeat)) : at[k] + (60 * fps) / (bpmAt(song, k) * song.stepsPerBeat));
   }
   return at;
 }
