@@ -101,7 +101,23 @@ function defaults(): State {
 }
 
 let state: State = load();
+/** The keyboard's octave and the note last played (Space's), kept for coming back to the page */
+const TEST_KEY = 'sidkid.maker2.key';
 const test = { octave: 3, note: 48 };
+try {
+  const saved = JSON.parse(localStorage.getItem(TEST_KEY) ?? 'null');
+  if (Number.isInteger(saved?.octave) && saved.octave >= 0 && saved.octave <= 6) test.octave = saved.octave;
+  if (Number.isInteger(saved?.note) && saved.note >= 0 && saved.note <= 94) test.note = saved.note;
+} catch {
+  // (the defaults)
+}
+function saveTest() {
+  try {
+    localStorage.setItem(TEST_KEY, JSON.stringify(test));
+  } catch {
+    // (kept for this visit only)
+  }
+}
 const shape = () => state.instruments[state.current];
 
 function load(): State {
@@ -2494,6 +2510,7 @@ function sendToPlayer() {
 async function noteOn(note: number) {
   held = note;
   test.note = note;
+  saveTest();
   clearTimeout(playTimer);
   renderKeyboard();
   if (!player.started) {
@@ -2709,10 +2726,12 @@ document.addEventListener('visibilitychange', () => document.hidden && silence()
 
 $('octave-down').addEventListener('click', () => {
   test.octave = Math.max(0, test.octave - 1);
+  saveTest();
   renderKeyboard();
 });
 $('octave-up').addEventListener('click', () => {
   test.octave = Math.min(6, test.octave + 1);
+  saveTest();
   renderKeyboard();
 });
 $('play').addEventListener('click', playShape);
@@ -2891,5 +2910,7 @@ Object.assign(window, {
     },
     /** Sets the key the traces play */
     setKey: (note: number) => (test.note = note),
+    /** The keyboard's octave and Space's note */
+    test: () => ({ ...test }),
   },
 });

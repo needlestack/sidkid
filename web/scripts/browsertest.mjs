@@ -714,6 +714,16 @@ try {
   const spaceAfter = await m2.evaluate(() => window.maker2.state().instruments.length);
   report(spacePlayed && spaceHeld && spaceLetGo && spaceAfter === spaceBefore, 'maker2 space plays as a key, not the focused button', `played ${spacePlayed}, held ${spaceHeld}, let go ${spaceLetGo}, ${spaceBefore} → ${spaceAfter} instruments`);
 
+  // The note last played (and the octave) are Space's on coming back to the page
+  await m2.click('#octave-up');
+  await m2.keyboard.press('h');
+  const keyWas = await m2.evaluate(() => JSON.stringify(window.maker2.test()));
+  await m2.reload();
+  await m2.waitForFunction(() => window.maker2?.ready());
+  const keyNow = await m2.evaluate(() => JSON.stringify(window.maker2.test()));
+  await m2.click('#octave-down');
+  report(keyNow === keyWas && JSON.parse(keyWas).note === 57, 'maker2 remembers the note played', `${keyWas} → ${keyNow}`);
+
   // The key played's step, before the first change, has its end to drag too (moving that change)
   await m2.evaluate(() => {
     const s = window.maker2.state();
