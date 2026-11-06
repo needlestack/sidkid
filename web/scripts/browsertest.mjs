@@ -792,7 +792,21 @@ try {
     const c = window.songMaker.clicks(6, true);
     return `${c.bars.join(',')} / ${c.beats.join(',')} / ${c.preroll}`;
   });
-  report(clicks === '-36,60 / -84,-60,-12,12,36,84,108,132 / 96', 'song metronome and count-in', clicks);
+  report(clicks === '-36,60 / -84,-60,-12,12,36,84,108,132 / 97', 'song metronome and count-in', clicks);
+
+  // Any tempo: at 128 BPM a beat is 23.4375 frames, so beats land on the nearest frames
+  await sm.evaluate(() => (document.getElementById('tempo').value = ''));
+  await sm.type('#tempo', '128');
+  await sm.keyboard.press('Enter');
+  const odd = await sm.evaluate(() => {
+    const c = window.songMaker.clicks(0, false);
+    return `${window.songMaker.song().bpm}: ${c.bars.join(',')} / ${c.beats.join(',')}`;
+  });
+  report(odd === '128: 0,94 / 23,47,70,117,141,164', 'song any tempo', odd);
+  await sm.evaluate(() => {
+    window.songMaker.song().bpm = 125;
+    window.songMaker.render();
+  });
 
   // Double-click in a lane makes a clip; double-click in the editor adds a note
   await sm.evaluate(() => {
@@ -871,6 +885,18 @@ try {
   await sm.waitForFunction(() => window.songMaker?.ready());
   const kept2 = await sm.evaluate(() => [...document.querySelectorAll('.track-instrument')].map((s, i) => `${s.selectedOptions[0].text} ${window.songMaker.song().tracks[i].clips.length}`).join(', '));
   report(kept2 === 'Lead 1, Bass 1, Snare 0', 'song keeps across a reload', kept2);
+
+  // A song saved with frames a step comes back at its tempo
+  const oldTempo = await sm.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('sidkid.song2.v1'));
+    delete saved.song.bpm;
+    saved.song.stepFrames = 8;
+    localStorage.setItem('sidkid.song2.v1', JSON.stringify(saved));
+  });
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  const was = await sm.evaluate(() => `${window.songMaker.song().bpm} ${document.getElementById('tempo').value}`);
+  report(was === '93.8 93.8', 'song keeps an old tempo', was);
 
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
   await colorScheme(sm, 'dark');

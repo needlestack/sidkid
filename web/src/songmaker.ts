@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS, type Settings } from './engine/protocol';
 import type { Sequence } from './engine/sequencer';
 import { loadInstruments, sounds, soundTables, STORAGE_KEY as INSTRUMENTS_KEY } from './instruments';
 import { noteName } from './song';
-import { clipNotes, newId, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
+import { clipNotes, framesPerStep, frameAt, newId, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -25,6 +25,8 @@ let FPS = ntsc ? 60 : 50;
 let settings: Settings = { ...DEFAULT_SETTINGS, ntsc };
 
 const SONG_KEY = 'sidkid.song2.v1';
+const TEMPO_MIN = 30;
+const TEMPO_MAX = 300;
 /** Instrument timelines are this long (only for bringing old saves up to date) */
 const INSTRUMENT_SECONDS = 32;
 
@@ -52,7 +54,7 @@ interface Saved {
 function defaultSong(): SongDoc {
   return {
     name: 'New song',
-    stepFrames: 6,
+    bpm: 125,
     stepsPerBeat: 4,
     beatsPerBar: 4,
     tracks: [0, 1, 2].map((v) => ({ id: newId(), instrument: instruments[v % instruments.length]?.id ?? '', voice: v, muted: false, clips: [] })),
@@ -67,6 +69,12 @@ let byId = new Map(instruments.map((s) => [s.id!, s]));
 function load(): Saved {
   try {
     const saved = JSON.parse(localStorage.getItem(SONG_KEY) ?? 'null') as Saved | null;
+    // Songs saved with whole frames a step: the tempo that was (on PAL)
+    const old = saved?.song as (SongDoc & { stepFrames?: number }) | undefined;
+    if (old && old.bpm === undefined) {
+      old.bpm = Math.round(((60 * 50) / ((old.stepFrames ?? 6) * old.stepsPerBeat)) * 10) / 10;
+      delete old.stepFrames;
+    }
     if (saved?.song?.tracks) return { ...saved, zoom: saved.zoom ?? 6, rollZoom: saved.rollZoom ?? 22, metronome: saved.metronome ?? true, countIn: saved.countIn ?? true };
   } catch {
     // Unreadable or blocked storage: start afresh
@@ -77,6 +85,9 @@ function load(): Saved {
 const view = load();
 const song = () => view.song;
 const barSteps = () => song().stepsPerBeat * song().beatsPerBar;
+/** Steps to frames and back, at the song's tempo and the machine's clock */
+const toFrame = (step: number) => frameAt(song(), step, FPS);
+const toStep = (frame: number) => frame / framesPerStep(song(), FPS);
 
 function persist() {
   try {
@@ -194,18 +205,17 @@ const transport = {
 };
 
 function playRange(): { from: number; cycle: { start: number; end: number } | null } {
-  const sf = song().stepFrames;
   const s = song();
-  let from = Math.round(playhead * sf);
-  const cycle = s.cycling ? { start: s.cycle.start * sf, end: s.cycle.end * sf } : null;
+  let from = toFrame(playhead);
+  const cycle = s.cycling ? { start: toFrame(s.cycle.start), end: toFrame(s.cycle.end) } : null;
   if (cycle && (from < cycle.start || from >= cycle.end)) from = cycle.start;
-  if (!cycle && from >= songEnd(s) * sf) from = 0;
+  if (!cycle && from >= toFrame(songEnd(s))) from = 0;
   return { from, cycle };
 }
 
 function restartSequence(keep: boolean) {
   sendSounds();
-  const seq = songSequence(song(), songSounds(song(), byId).sounds, trackSound, transport.from, transport.cycle, { click: view.metronome, countIn: transport.countIn });
+  const seq = songSequence(song(), songSounds(song(), byId).sounds, trackSound, transport.from, transport.cycle, FPS, { click: view.metronome, countIn: transport.countIn });
   transport.seq = seq;
   player.sequence(seq, keep);
 }
@@ -233,7 +243,7 @@ function stop() {
   transport.recording = false;
   player.sequence(null);
   player.silence();
-  if (f !== null) playhead = f / song().stepFrames;
+  if (f !== null) playhead = toStep(f);
   renderTransport();
   render();
 }
@@ -244,7 +254,7 @@ player.onStatus = (status) => {
     // Played to the end (statuses from before it started don't count)
     if (transport.at !== null) {
       stop();
-      playhead = transport.from / song().stepFrames;
+      playhead = toStep(transport.from);
       render();
     }
     return;
@@ -283,11 +293,11 @@ function animate() {
       movePlayhead();
       return;
     }
-    playhead = f / song().stepFrames;
+    playhead = toStep(f);
     movePlayhead(true);
     // Counting in: the beats to go, in place of the position
     const ahead = -heardSeqFrame();
-    const beat = song().stepsPerBeat * song().stepFrames;
+    const beat = song().stepsPerBeat * framesPerStep(song(), FPS);
     const counting = transport.countIn && ahead > 0;
     $('position').classList.toggle('counting', counting);
     if (counting) $('position').textContent = String(Math.ceil(ahead / beat));
@@ -327,11 +337,10 @@ function keyUp(key: string) {
 
 /** Puts a played note into the track, on the nearest steps */
 function record(t: Track, note: number, from: number, to: number) {
-  const sf = song().stepFrames;
-  const start = Math.round(from / sf);
-  let length = Math.round(to / sf) - start;
+  const start = Math.round(toStep(from));
+  let length = Math.round(toStep(to)) - start;
   // Let go after coming round the cycle
-  if (length < 0 && transport.cycle) length += (transport.cycle.end - transport.cycle.start) / sf;
+  if (length < 0 && transport.cycle) length += song().cycle.end - song().cycle.start;
   length = Math.max(1, length);
   before();
   let clip = t.clips.find((c) => c.start <= start && start < c.start + c.span);
@@ -540,7 +549,7 @@ function renderArrangement() {
     el('rect', { x: 0, y: top, width, height: LANE_H, class: `arr-lane${i === current ? ' current' : ''}`, 'data-lane': i }, arr);
     el('line', { x1: 0, x2: width, y1: top + LANE_H - 0.5, y2: top + LANE_H - 0.5, class: 'arr-lane-line' }, arr);
     // Where another track on the voice has it, this one is drawn hatched
-    const heard = voiceSegments(s, t.voice).filter((g) => g.track === i);
+    const heard = voiceSegments(s, t.voice, FPS).filter((g) => g.track === i);
     t.clips.forEach((clip, k) => drawClip(t, i, clip, k, heard));
   });
   playheadLine.setAttribute('y2', String(height));
@@ -569,10 +578,9 @@ function drawClip(t: Track, ti: number, clip: Clip, k: number, heard: { start: n
     const hi = Math.max(...notes.map((n) => n.note));
     const range = Math.max(12, hi - lo);
     const ny = (n: number) => top + 6 + (1 - (n - lo + (range - (hi - lo)) / 2) / range) * (h - 14);
-    const sf = s.stepFrames;
     for (const n of notes) {
-      const from = n.start * sf;
-      const to = (n.start + n.length) * sf;
+      const from = toFrame(n.start);
+      const to = toFrame(n.start + n.length);
       const stolen = !heard.some((g) => g.start <= from && g.end >= to);
       el('rect', { x: ax(n.start) + 0.5, y: ny(n.note) - 1.5, width: Math.max(1.5, ax(n.length) - 1), height: 3, rx: 1, class: `clip2-note${n.start >= clip.start + clip.length ? ' again' : ''}${stolen ? ' stolen' : ''}` }, g);
     }
@@ -1207,16 +1215,8 @@ function renderTransport() {
   $('cycle').setAttribute('aria-pressed', String(s.cycling));
   const name = $<HTMLInputElement>('song-name');
   if (document.activeElement !== name) name.value = s.name;
-  const tempo = $<HTMLSelectElement>('tempo');
-  if (!tempo.options.length || tempo.dataset.fps !== String(FPS)) {
-    tempo.replaceChildren();
-    for (let f = 2; f <= 16; f++) {
-      const bpm = (60 * FPS) / (f * s.stepsPerBeat);
-      tempo.append(new Option(`${Number.isInteger(bpm) ? bpm : bpm.toFixed(1)} BPM`, String(f)));
-    }
-    tempo.dataset.fps = String(FPS);
-  }
-  tempo.value = String(s.stepFrames);
+  const tempo = $<HTMLInputElement>('tempo');
+  if (document.activeElement !== tempo) tempo.value = String(s.bpm);
 }
 
 function renderTrackNow() {
@@ -1254,9 +1254,15 @@ $<HTMLInputElement>('song-name').addEventListener('change', (e) => {
   song().name = (e.target as HTMLInputElement).value.trim() || 'Untitled';
   changed();
 });
-$<HTMLSelectElement>('tempo').addEventListener('change', (e) => {
+$<HTMLInputElement>('tempo').addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement;
+  const bpm = Math.round(Number(input.value) * 10) / 10;
+  if (!(bpm >= TEMPO_MIN && bpm <= TEMPO_MAX)) {
+    input.value = String(song().bpm);
+    return;
+  }
   before();
-  song().stepFrames = Number((e.target as HTMLSelectElement).value);
+  song().bpm = bpm;
   changed();
 });
 
@@ -1490,15 +1496,14 @@ Object.assign(window, {
     trace: (frames: number, fromStep = 0) => {
       const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
       const t = soundTables(sounds(list.map((s) => ({ shape: s.shape, voices: 1 << s.voice }))));
-      const sf = song().stepFrames;
-      const cycle = song().cycling ? { start: song().cycle.start * sf, end: song().cycle.end * sf } : null;
-      const seq = songSequence(song(), list, numbers, fromStep * sf, cycle);
+      const cycle = song().cycling ? { start: toFrame(song().cycle.start), end: toFrame(song().cycle.end) } : null;
+      const seq = songSequence(song(), list, numbers, toFrame(fromStep), cycle, FPS);
       return analyzer!.traceSequence(t.tables, t.instruments, seq, frames, settings).map((r) => Array.from(r));
     },
     /** The metronome's frames playing from a step: beats and bars */
     clicks: (fromStep: number, countIn: boolean) => {
       const { sounds: list, trackSound: numbers } = songSounds(song(), byId);
-      const seq = songSequence(song(), list, numbers, fromStep * song().stepFrames, null, { click: true, countIn });
+      const seq = songSequence(song(), list, numbers, toFrame(fromStep), null, FPS, { click: true, countIn });
       return { beats: seq.beats, bars: seq.bars, preroll: seq.preroll };
     },
     instruments: () => instruments,

@@ -168,7 +168,10 @@ zoomable timeline, aiming for a GarageBand feel.
 ## Song maker (`songs.html`, started 2026-11-05)
 
 - `web/src/songdoc.ts`: the model (SongDoc → Track {instrument id, voice, muted, clips} → Clip
-  {start, length, span, notes}; steps, `stepFrames` a step = tempo) and the compiler.
+  {start, length, span, notes}; in steps) and the compiler. Tempo is `bpm`, any value: a step
+  starts on the nearest frame (`frameAt`, `framesPerStep`), like GoatTracker's alternating
+  tempos, at most a frame off; switching PAL/NTSC keeps the BPM. Old saves (`stepFrames`) are
+  converted as PAL.
   `voiceSegments`: per voice, the held note that started last plays (same frame: higher track
   wins); a note that gets the voice back restarts. `songSequence` turns that into timed note
   on/offs, each started `leadOf` (gate timer + 1) frames early so it sounds on its frame;

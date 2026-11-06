@@ -37,8 +37,8 @@ export interface Track {
 
 export interface SongDoc {
   name: string;
-  /** Frames a step lasts: the tempo */
-  stepFrames: number;
+  /** Beats a minute (each step starts on the frame nearest its time, so any tempo works) */
+  bpm: number;
   stepsPerBeat: number;
   beatsPerBar: number;
   tracks: Track[];
@@ -46,6 +46,12 @@ export interface SongDoc {
   cycle: { start: number; end: number };
   cycling: boolean;
 }
+
+/** Frames a step lasts, not a whole number in general */
+export const framesPerStep = (song: SongDoc, fps: number) => (60 * fps) / (song.bpm * song.stepsPerBeat);
+
+/** The frame a step (or part of one) starts on: the nearest */
+export const frameAt = (song: SongDoc, step: number, fps: number) => Math.round(step * framesPerStep(song, fps));
 
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -89,14 +95,14 @@ interface Held {
  * the voice plays the held note that started last (on the same frame, the
  * track higher up wins). A note that gets the voice back starts again.
  */
-export function voiceSegments(song: SongDoc, voice: number): Segment[] {
+export function voiceSegments(song: SongDoc, voice: number, fps: number): Segment[] {
   const held: Held[] = [];
   let order = 0;
   song.tracks.forEach((t, ti) => {
     if (t.voice !== voice || t.muted) return;
     for (const c of t.clips) {
       for (const n of clipNotes(c)) {
-        held.push({ start: n.start * song.stepFrames, end: (n.start + n.length) * song.stepFrames, note: n.note, track: ti, order: order++ });
+        held.push({ start: frameAt(song, n.start, fps), end: frameAt(song, n.start + n.length, fps), note: n.note, track: ti, order: order++ });
       }
     }
   });
@@ -158,20 +164,21 @@ export function songSequence(
   trackSound: number[],
   from: number,
   cycle: { start: number; end: number } | null,
+  fps: number,
   /** Clicks on the beats, and a bar of them first (count-in) */
   metronome: { click: boolean; countIn: boolean } = { click: false, countIn: false },
 ): Sequence {
-  const end = cycle ? cycle.end : songEnd(song) * song.stepFrames;
+  const end = cycle ? cycle.end : frameAt(song, songEnd(song), fps);
   // The first pass, from where playing starts; then the cycle, round and round
   const firstLength = Math.max(0, end - from);
   const loopFrom = cycle ? firstLength : null;
   const length = cycle ? firstLength + (cycle.end - cycle.start) : firstLength + 1;
-  const beat = song.stepsPerBeat * song.stepFrames;
+  const beat = song.stepsPerBeat * framesPerStep(song, fps);
   const bar = beat * song.beatsPerBar;
-  const preroll = Math.max(1, ...sounds.map((s) => leadOf(s.shape)), metronome.countIn ? bar : 0);
+  const preroll = Math.max(1, ...sounds.map((s) => leadOf(s.shape)), metronome.countIn ? Math.ceil(bar) + 1 : 0);
   const events: SeqEvent[] = [];
   for (let voice = 0; voice < VOICES; voice++) {
-    const all = voiceSegments(song, voice).filter((s) => trackSound[s.track] > 0);
+    const all = voiceSegments(song, voice, fps).filter((s) => trackSound[s.track] > 0);
     const clip = (a: number, b: number, shift: number) =>
       all.filter((s) => s.end > a && s.start < b).map((s) => ({ ...s, start: Math.max(a, s.start) + shift, end: Math.min(b, s.end) + shift }));
     const first = clip(from, end, -from);
@@ -197,7 +204,10 @@ export function songSequence(
   const beats: number[] = [];
   const bars: number[] = [];
   const clicks = (a: number, b: number, shift: number) => {
-    for (let t = Math.ceil(a / beat) * beat; t < b; t += beat) (t % bar === 0 ? bars : beats).push(t + shift);
+    for (let k = Math.floor(a / beat) - 1; k <= Math.ceil(b / beat) + 1; k++) {
+      const t = frameAt(song, k * song.stepsPerBeat, fps);
+      if (t >= a && t < b) (k % song.beatsPerBar === 0 ? bars : beats).push(t + shift);
+    }
   };
   // A bar of the song's beats before playing starts
   if (metronome.countIn) clicks(from - bar, from, -from);
