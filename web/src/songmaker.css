@@ -8,8 +8,8 @@
   max-width: 1400px;
 }
 
-.arrange,
-.editor {
+.song-arrange,
+.song-editor {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
@@ -26,7 +26,7 @@
   min-width: 0;
 }
 
-.transport {
+.song-transport {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -365,7 +365,7 @@
   overflow: hidden;
 }
 
-.editor.empty .roll {
+.song-editor.empty .roll {
   opacity: 0.55;
 }
 
@@ -492,7 +492,7 @@
     grid-template-columns: 130px minmax(0, 1fr);
   }
 
-  .transport {
+  .song-transport {
     flex-wrap: wrap;
   }
 }
