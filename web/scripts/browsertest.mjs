@@ -987,6 +987,21 @@ try {
   await sm.keyboard.press(' ');
   report(removed === 2 && back === 3 && openAfterUndo && spaced === '3 true', 'song removes a track, Space plays', `${removed}, ${back}, ${openAfterUndo ? 'clip still open' : 'clip closed'}, space: ${spaced}`);
 
+  // Instruments saved before they had ids get them for good: a track's pick survives reloads
+  const picked = await sm.evaluate(() => {
+    const saved = { instruments: window.songMaker.instruments().map(({ id: _id, ...rest }) => ({ ...rest, name: `${rest.name} old` })), current: 0 };
+    localStorage.setItem('sidkid.maker2.v1', JSON.stringify(saved));
+  });
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  await sm.select('.track-head:nth-of-type(3) .track-instrument', await sm.evaluate(() => window.songMaker.instruments()[2].id));
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  const stuck = await sm.evaluate(() => document.querySelectorAll('.track-instrument')[1].selectedOptions[0].text);
+  report(stuck === 'Snare old', 'song keeps instrument picks across reloads', stuck);
+
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs.png` });
   await colorScheme(sm, 'dark');
   await sm.screenshot({ path: `${OUT}/${BROWSER}-songs-dark.png` });

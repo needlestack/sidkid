@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS, type Settings, type Status } from './engine/protocol'
 import { ATTACK_MS, DECAY_MS } from './adsr';
 import { envelope, NTSC_FRAME_CYCLES, PAL_FRAME_CYCLES } from './envelope';
 import { noteName, parseSong, type Instrument } from './song';
-import { defaultInstruments, giveIds, migrate, NOTE_START, sound, soundTables, STORAGE_KEY } from './instruments';
+import { defaultInstruments, giveIds, migrate, saveIds, NOTE_START, sound, soundTables, STORAGE_KEY } from './instruments';
 import { importInstrument, KEY as IMPORT_KEY, type Tracer } from './goatimport';
 import { FILTER_BAND, FILTER_HIGH, FILTER_LOW, layOut, waveName, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRI } from './tables';
 import { waveIcon, waveRun } from './waveicon';
@@ -100,6 +100,7 @@ const test = { octave: 3, note: 48 };
 const shape = () => state.instruments[state.current];
 
 function load(): State {
+  saveIds();
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
     if (saved?.instruments?.length) {

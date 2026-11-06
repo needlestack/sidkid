@@ -141,8 +141,27 @@ export function giveIds(instruments: Shape[]) {
   }
 }
 
+/**
+ * Gives saved instruments that have no id one, and saves it, so it's the
+ * same the next time either page loads them (songs refer to instruments by
+ * id). Only the ids are added: the rest is left as it was saved.
+ */
+export function saveIds() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const saved = JSON.parse(raw ?? 'null') as { instruments?: Shape[] } | null;
+    if (!saved?.instruments?.length) return;
+    const ids = saved.instruments.map((s) => s.id);
+    giveIds(saved.instruments);
+    if (saved.instruments.some((s, i) => s.id !== ids[i])) localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+  } catch {
+    // Unreadable or blocked storage: nothing to keep
+  }
+}
+
 /** The instruments Instrument Maker 2 saved, or its starting ones */
 export function loadInstruments(total: number): Shape[] {
+  saveIds();
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
     if (saved?.instruments?.length) {
