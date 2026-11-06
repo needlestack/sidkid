@@ -53,7 +53,7 @@ interface Saved {
   metronome: boolean;
   countIn: boolean;
   /** The clip open in the editor: its track and place in it */
-  open?: { track: number; clip: number } | null;
+  open?: ClipRef | null;
 }
 
 function defaultSong(): SongDoc {
@@ -95,12 +95,14 @@ const toFrame = (step: number) => frameAt(song(), step, FPS);
 const toStep = (frame: number) => frame / framesPerStep(song(), FPS);
 
 /** Where a clip is, to find it again after a reload or an undo */
-function clipRef(c: Clip | null): { track: number; clip: number } | null {
+/** A clip by its track's id (tracks move) and its place in the track */
+type ClipRef = { track: string; clip: number };
+function clipRef(c: Clip | null): ClipRef | null {
   if (!c) return null;
-  const track = song().tracks.findIndex((t) => t.clips.includes(c));
-  return track < 0 ? null : { track, clip: song().tracks[track].clips.indexOf(c) };
+  const track = song().tracks.find((t) => t.clips.includes(c));
+  return track ? { track: track.id, clip: track.clips.indexOf(c) } : null;
 }
-const clipAt = (ref: { track: number; clip: number } | null | undefined): Clip | null => (ref ? (song().tracks[ref.track]?.clips[ref.clip] ?? null) : null);
+const clipAt = (ref: ClipRef | null | undefined): Clip | null => (ref ? (song().tracks.find((t) => t.id === ref.track)?.clips[ref.clip] ?? null) : null);
 
 function persist() {
   view.open = clipRef(openClip);
@@ -560,6 +562,44 @@ function renderHeads() {
   add.addEventListener('click', addTrack);
   heads.append(add);
 }
+
+// Dragging a track's head (not its menu or buttons) moves the track up or down, its clips with it
+const headsEl = $('track-heads');
+let trackDrag: { from: number; y0: number; moved: boolean } | null = null;
+headsEl.addEventListener('pointerdown', (e) => {
+  const head = (e.target as HTMLElement).closest<HTMLElement>('.track-head');
+  if (!head || e.button !== 0 || (e.target as HTMLElement).closest('button, select')) return;
+  trackDrag = { from: [...headsEl.querySelectorAll('.track-head')].indexOf(head), y0: e.clientY, moved: false };
+  headsEl.setPointerCapture(e.pointerId);
+});
+headsEl.addEventListener('pointermove', (e) => {
+  const d = trackDrag;
+  if (!d) return;
+  if (!d.moved && Math.abs(e.clientY - d.y0) < 4) return;
+  if (!d.moved) {
+    before();
+    d.moved = true;
+    dragCursor('grabbing');
+  }
+  const tracks = song().tracks;
+  const top = headsEl.getBoundingClientRect().top + RULER_H;
+  const to = Math.max(0, Math.min(tracks.length - 1, Math.floor((e.clientY - top) / LANE_H)));
+  if (to === d.from) return;
+  const [moving] = tracks.splice(d.from, 1);
+  tracks.splice(to, 0, moving);
+  current = to;
+  d.from = to;
+  render();
+});
+const endTrackDrag = () => {
+  const d = trackDrag;
+  trackDrag = null;
+  if (!d?.moved) return;
+  dragCursor(null);
+  changed();
+};
+headsEl.addEventListener('pointerup', endTrackDrag);
+headsEl.addEventListener('pointercancel', endTrackDrag);
 
 function addTrack() {
   before();
@@ -1636,7 +1676,7 @@ window.addEventListener('resize', () => render());
 // --- Start ---------------------------------------------------------------------------------------
 
 openClip = clipAt(view.open);
-if (openClip) current = clipRef(openClip)!.track;
+if (openClip) current = song().tracks.findIndex((t) => t.clips.includes(openClip!));
 sendSounds();
 render();
 renderKeyboard();

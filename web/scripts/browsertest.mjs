@@ -972,6 +972,21 @@ try {
   const was = await sm.evaluate(() => `${window.songMaker.song().bpm} ${document.getElementById('tempo').value}`);
   report(was === '93.8 93.8', 'song keeps an old tempo', was);
 
+  // Dragging a track's head moves the track, its clips with it; ⌘Z puts it back
+  const order = () => sm.evaluate(() => window.songMaker.song().tracks.map((t) => `${t.voice + 1}:${t.clips.length}`).join(' '));
+  const before3 = await order();
+  const hb = await sm.$eval('.track-head .voice-label', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.move(hb.x + 4, hb.y + 4);
+  await sm.mouse.down();
+  await sm.mouse.move(hb.x + 4, hb.y + 4 + 56 * 2, { steps: 8 });
+  await sm.mouse.up();
+  const after3 = await order();
+  await sm.keyboard.down('Meta');
+  await sm.keyboard.press('z');
+  await sm.keyboard.up('Meta');
+  const undone3 = await order();
+  report(after3 === before3.split(' ').slice(1).concat(before3.split(' ')[0]).join(' ') && undone3 === before3, 'song drags a track to move it', `${before3} → ${after3} → ${undone3}`);
+
   // × removes a track, ⌘Z brings it back with its clip still open; Space on a focused button plays rather than pressing it
   await sm.click('.track-remove');
   const removed = await sm.evaluate(() => window.songMaker.song().tracks.length);
