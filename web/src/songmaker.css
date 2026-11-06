@@ -239,6 +239,17 @@
   cursor: grab;
 }
 
+.arr-cycle-end {
+  fill: transparent;
+  cursor: ew-resize;
+}
+
+/* While dragging: the drag's cursor everywhere */
+html.drag-cursor,
+html.drag-cursor * {
+  cursor: var(--drag-cursor) !important;
+}
+
 .arr-cycle.on {
   fill: #f2c94c;
   opacity: 1;
@@ -328,10 +339,6 @@
   cursor: ew-resize;
 }
 
-.clip2-loop .clip2-edge {
-  cursor: alias;
-}
-
 .clip2-loop-icon {
   fill: none;
   stroke: hsl(var(--h) 60% var(--clip-ink-l));
@@ -359,7 +366,8 @@
 .roll {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
-  height: 320px;
+  grid-template-rows: 22px minmax(0, 1fr);
+  height: 340px;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -367,6 +375,32 @@
 
 .song-editor.empty .roll {
   opacity: 0.55;
+}
+
+.roll-corner {
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.roll-ruler {
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  cursor: text;
+}
+
+.roll-ruler svg {
+  display: block;
+}
+
+.arr-label.beat {
+  font-size: 9.5px;
+  opacity: 0.75;
+}
+
+.roll-note-end {
+  fill: transparent;
+  cursor: ew-resize;
 }
 
 .roll-keys {

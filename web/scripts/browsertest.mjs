@@ -818,6 +818,21 @@ try {
   const dragged = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
   report(dragged === '[[4,2]]', 'song drag moves a note', dragged);
 
+  // Its left end moves its start and keeps its end; the ends show arrows, the middle a hand
+  const nb = await sm.$eval('.roll-note', (e) => e.getBoundingClientRect().toJSON());
+  const cursors = await sm.evaluate(() => ['.roll-note-end', '.roll-note', '.arr-cycle-end', '.arr-cycle', '.clip2-edge'].map((q) => getComputedStyle(document.querySelector(q)).cursor).join(' '));
+  await sm.mouse.move(nb.x + 2, nb.y + 4);
+  await sm.mouse.down();
+  await sm.mouse.move(nb.x + 2 - 22, nb.y + 4, { steps: 3 });
+  const during = await sm.evaluate(() => getComputedStyle(document.body).cursor);
+  await sm.mouse.up();
+  const stretched = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
+  report(stretched === '[[3,3]]' && cursors === 'ew-resize grab ew-resize grab ew-resize' && during === 'ew-resize', 'song note ends and cursors', `${stretched} ${cursors} / ${during}`);
+
+  // The editor's ruler numbers the song's bars (this clip starts on bar 2)
+  const rollBars = await sm.evaluate(() => [...document.querySelectorAll('#roll-ruler text')].map((t) => t.textContent).join(' '));
+  report(rollBars.startsWith('2 2.2 2.3 2.4 3'), 'song editor shows bars', rollBars.slice(0, 40));
+
   // The clip's upper right edge repeats it
   const clipBox = await sm.$eval('.clip2-body', (e) => e.getBoundingClientRect().toJSON());
   await sm.mouse.move(clipBox.right - 5, clipBox.y + 8);

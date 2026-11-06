@@ -520,6 +520,11 @@ function renderArrangement() {
   el('rect', { x: 0, y: 0, width, height: RULER_H, class: 'arr-ruler', 'data-ruler': '' }, arr);
   const c = s.cycle;
   el('rect', { x: ax(c.start), y: 2, width: ax(c.end - c.start), height: CYCLE_H - 2, rx: 3, class: `arr-cycle${s.cycling ? ' on' : ''}`, 'data-cycle': '' }, arr);
+  // Its ends, to drag (drawn over the middle, which moves it)
+  for (const end of ['start', 'end'] as const) {
+    const at = ax(end === 'start' ? c.start : c.end);
+    el('rect', { x: at - EDGE / 2 - (end === 'start' ? 0 : 3), y: 0, width: EDGE + 3, height: CYCLE_H, class: 'arr-cycle-end', 'data-cycle-end': end }, arr);
+  }
   if (s.cycling) el('rect', { x: ax(c.start), y: RULER_H, width: ax(c.end - c.start), height: height - RULER_H, class: 'arr-cycle-band' }, arr);
   const bar = barSteps();
   const beatPx = ax(s.stepsPerBeat);
@@ -577,6 +582,12 @@ function drawClip(t: Track, ti: number, clip: Clip, k: number, heard: { start: n
   el('rect', { x: x0 + w - EDGE * 2, y: top, width: EDGE * 2, height: h / 2, class: 'clip2-edge' }, loop);
   el('path', { d: `M${x0 + w - 11},${top + 9}a4,4 0 1 1 1.5,3.1m-1.5,-3.1l-1.4,-2.6m1.4,2.6l2.6,-1.3`, class: 'clip2-loop-icon' }, loop);
   loop.append(title('Drag to repeat'));
+}
+
+/** While dragging, the cursor stays what the drag is (a closed hand, or arrows), wherever the pointer goes */
+function dragCursor(cursor: string | null) {
+  document.documentElement.classList.toggle('drag-cursor', cursor !== null);
+  if (cursor) document.documentElement.style.setProperty('--drag-cursor', cursor);
 }
 
 /**
@@ -639,15 +650,17 @@ arr.addEventListener('pointerdown', (e) => {
   const s = song();
   arr.setPointerCapture(e.pointerId);
   if (p.y < RULER_H) {
-    if (target.closest('[data-cycle]') && p.y < CYCLE_H) {
+    const end = target.closest<SVGElement>('[data-cycle-end]')?.dataset.cycleEnd as 'start' | 'end' | undefined;
+    if (end || target.closest('[data-cycle]')) {
       const c = s.cycle;
-      const near = (st: number) => Math.abs(p.x - ax(st)) <= EDGE;
-      arrDrag = { kind: 'cycle', what: near(c.start) ? 'start' : near(c.end) ? 'end' : 'move', x0: p.x, start: c.start, end: c.end };
+      arrDrag = { kind: 'cycle', what: end ?? 'move', x0: p.x, start: c.start, end: c.end };
+      dragCursor(end ? 'ew-resize' : 'grabbing');
       before();
     } else if (p.y < CYCLE_H) {
       before();
       const at = Math.round(stepAt(p.x) / snap()) * snap();
       arrDrag = { kind: 'cycle-new', from: at };
+      dragCursor('ew-resize');
     } else {
       arrDrag = { kind: 'seek' };
       seek(stepAt(p.x));
@@ -664,6 +677,7 @@ arr.addEventListener('pointerdown', (e) => {
     if (other) selectedNotes.clear();
     openClip = clip;
     arrDrag = { kind: 'clip', what: edge ?? 'move', clip, track: ti, x0: p.x, y0: p.y, start: clip.start, length: clip.length, span: clip.span, copy: e.altKey && !edge, moved: false };
+    dragCursor(edge ? 'ew-resize' : e.altKey ? 'copy' : 'grabbing');
     render();
     if (other) centreRoll();
     return;
@@ -686,13 +700,7 @@ arr.addEventListener('pointermove', (e) => {
   const p = arrPoint(e);
   const d = arrDrag;
   const s = song();
-  if (!d) {
-    // The cycle's ends can be dragged
-    const c = s.cycle;
-    const onCycle = p.y < CYCLE_H && (Math.abs(p.x - ax(c.start)) <= EDGE || Math.abs(p.x - ax(c.end)) <= EDGE);
-    arr.style.cursor = onCycle ? 'ew-resize' : '';
-    return;
-  }
+  if (!d) return;
   const by = Math.round((p.x - ('x0' in d ? d.x0 : p.x)) / view.zoom / snap()) * snap();
   if (d.kind === 'seek') seek(stepAt(p.x));
   else if (d.kind === 'cycle-new') {
@@ -746,6 +754,7 @@ arr.addEventListener('pointermove', (e) => {
 const endArrDrag = () => {
   const d = arrDrag;
   arrDrag = null;
+  dragCursor(null);
   if (!d) return;
   if (d.kind === 'clip' && d.moved) changed();
   else if (d.kind === 'cycle' || d.kind === 'cycle-new') changed();
@@ -841,13 +850,20 @@ function renderEditor() {
     const g = el('g', {}, roll);
     g.style.setProperty('--h', String(t ? hue(t) : 250));
     c.notes.forEach((n, i) => {
-      const r = el('rect', { x: rx(n.start) + 1, y: ry(n.note) + 1, width: Math.max(3, n.length * view.rollZoom - 2), height: ROW - 2, rx: 3, class: `roll-note${selectedNotes.has(n) ? ' selected' : ''}${n.start >= c.length ? ' past' : ''}`, 'data-note': i }, g);
-      r.append(title(noteName(n.note)));
+      const ng = el('g', { 'data-note': i }, g);
+      const w = Math.max(3, n.length * view.rollZoom - 2);
+      el('rect', { x: rx(n.start) + 1, y: ry(n.note) + 1, width: w, height: ROW - 2, rx: 3, class: `roll-note${selectedNotes.has(n) ? ' selected' : ''}${n.start >= c.length ? ' past' : ''}` }, ng);
+      // Its ends, to drag: a third of it each at most, so the middle is left to move it
+      const end = Math.min(6, w / 3);
+      el('rect', { x: rx(n.start) + 1, y: ry(n.note), width: end, height: ROW, class: 'roll-note-end', 'data-note-end': 'start' }, ng);
+      el('rect', { x: rx(n.start) + 1 + w - end, y: ry(n.note), width: end, height: ROW, class: 'roll-note-end', 'data-note-end': 'end' }, ng);
+      ng.append(title(noteName(n.note)));
     });
     rollPlayhead.setAttribute('y2', String(height));
     roll.append(rollPlayhead);
   }
   if (band) el('rect', { x: Math.min(band.x0, band.x1), y: Math.min(band.y0, band.y1), width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0), class: 'roll-band' }, roll);
+  renderRollRuler(width, shown);
   // The note names alongside
   rollKeys.setAttribute('width', String(KEYS_W));
   rollKeys.setAttribute('height', String(height));
@@ -859,6 +875,38 @@ function renderEditor() {
   movePlayhead();
 }
 
+const rollRuler = $('roll-ruler') as unknown as SVGSVGElement;
+const ROLL_RULER_H = 22;
+
+/** Bars and beats along the top of the editor, numbered as in the song */
+function renderRollRuler(width: number, shown: number) {
+  const s = song();
+  const start = openClip?.start ?? 0;
+  const bar = barSteps();
+  rollRuler.setAttribute('width', String(width));
+  rollRuler.setAttribute('height', String(ROLL_RULER_H));
+  rollRuler.replaceChildren();
+  el('rect', { x: 0, y: 0, width, height: ROLL_RULER_H, class: 'arr-ruler' }, rollRuler);
+  const beatPx = s.stepsPerBeat * view.rollZoom;
+  for (let st = 0; st <= shown; st++) {
+    const at = start + st;
+    if (at % s.stepsPerBeat) continue;
+    const isBar = at % bar === 0;
+    const x = rx(st) + 0.5;
+    el('line', { x1: x, x2: x, y1: isBar ? 4 : ROLL_RULER_H - 6, y2: ROLL_RULER_H, class: isBar ? 'arr-grid bar' : 'arr-grid' }, rollRuler);
+    // Bar numbers, and beats too when there's room (the clip's first, wherever it starts)
+    const label = isBar ? String(at / bar + 1) : beatPx >= 36 || st === 0 ? positionText(at).split('.').slice(0, 2).join('.') : '';
+    if (label) el('text', { x: x + 4, y: ROLL_RULER_H - 7, class: `arr-label${isBar ? '' : ' beat'}` }, rollRuler).textContent = label;
+  }
+}
+
+// Clicking the editor's ruler moves the playhead there
+rollRuler.addEventListener('pointerdown', (e) => {
+  const r = rollRuler.getBoundingClientRect();
+  const step = Math.max(0, Math.round((e.clientX - r.left - KEYS_PAD) / view.rollZoom));
+  seek((openClip?.start ?? 0) + step);
+});
+
 /** Scrolls the editor to the clip's notes, or around C-3 */
 function centreRoll() {
   const c = openClip;
@@ -869,10 +917,11 @@ function centreRoll() {
 
 rollScroll.addEventListener('scroll', () => {
   rollKeys.style.transform = `translateY(${-rollScroll.scrollTop}px)`;
+  rollRuler.style.transform = `translateX(${-rollScroll.scrollLeft}px)`;
 });
 
 type RollDrag =
-  | { kind: 'move' | 'length'; x0: number; y0: number; was: Map<SongNote, SongNote>; moved: boolean; sounding: number | null }
+  | { kind: 'move' | 'start' | 'length'; x0: number; y0: number; was: Map<SongNote, SongNote>; moved: boolean; sounding: number | null }
   | { kind: 'band'; keep: Set<SongNote> };
 let rollDrag: RollDrag | null = null;
 let band: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -910,8 +959,9 @@ roll.addEventListener('pointerdown', (e) => {
       selectedNotes.clear();
       selectedNotes.add(n);
     }
-    const right = rx(n.start + n.length);
-    const kind = p.x > right - Math.min(8, (n.length * view.rollZoom) / 3) ? 'length' : 'move';
+    const end = (e.target as Element).closest<SVGElement>('[data-note-end]')?.dataset.noteEnd;
+    const kind = end === 'start' ? 'start' : end === 'end' ? 'length' : 'move';
+    dragCursor(kind === 'move' ? 'grabbing' : 'ew-resize');
     rollDrag = { kind, x0: p.x, y0: p.y, was: new Map([...selectedNotes].map((m) => [m, { ...m }])), moved: false, sounding: sound(n.note, null) };
     renderEditor();
     return;
@@ -931,12 +981,7 @@ roll.addEventListener('pointermove', (e) => {
   const d = rollDrag;
   const c = openClip;
   const p = rollPoint(e);
-  if (!d || !c) {
-    const hit = (e.target as Element).closest<SVGElement>('[data-note]');
-    const n = hit && c ? c.notes[Number(hit.dataset.note)] : null;
-    roll.style.cursor = n && p.x > rx(n.start + n.length) - Math.min(8, (n.length * view.rollZoom) / 3) ? 'ew-resize' : n ? 'grab' : '';
-    return;
-  }
+  if (!d || !c) return;
   if (d.kind === 'band') {
     band!.x1 = p.x;
     band!.y1 = p.y;
@@ -966,6 +1011,13 @@ roll.addEventListener('pointermove', (e) => {
     }
     const first = [...d.was.keys()][0];
     d.sounding = sound(first.note, d.sounding);
+  } else if (d.kind === 'start') {
+    // The start moves, the end stays
+    for (const [n, w] of d.was) {
+      n.start = Math.max(0, Math.min(w.start + w.length - 1, w.start + by));
+      n.length = w.start + w.length - n.start;
+    }
+    lastLength = [...d.was.keys()][0].length;
   } else {
     for (const [n, w] of d.was) n.length = Math.max(1, w.length + by);
     lastLength = [...d.was.keys()][0].length;
@@ -976,6 +1028,7 @@ roll.addEventListener('pointermove', (e) => {
 const endRollDrag = () => {
   const d = rollDrag;
   rollDrag = null;
+  dragCursor(null);
   band = null;
   if (d && d.kind !== 'band') sound(null, d.sounding);
   if (d && d.kind !== 'band' && d.moved) changed();
