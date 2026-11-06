@@ -74,8 +74,13 @@ export interface Track {
   /** 0-2 */
   voice: number;
   muted: boolean;
+  /** Soloed: while any track is, only those play */
+  solo?: boolean;
   clips: Clip[];
 }
+
+/** Whether a track is heard: not muted, and soloed if any is */
+export const audible = (song: SongDoc, t: Track) => !t.muted && (t.solo || !song.tracks.some((x) => x.solo));
 
 /** A change of tempo at a step: held from there, or reached by a ramp from the change before */
 export interface TempoChange {
@@ -225,7 +230,7 @@ export function voiceSegments(song: SongDoc, voice: number, fps: number): Segmen
   const held: Held[] = [];
   let order = 0;
   song.tracks.forEach((t, ti) => {
-    if (t.voice !== voice || t.muted) return;
+    if (t.voice !== voice || !audible(song, t)) return;
     for (const c of t.clips) {
       for (const n of clipNotes(c)) {
         held.push({ start: frameAt(song, n.start, fps), end: frameAt(song, n.start + n.length, fps), note: n.note, track: ti, order: order++, step: n.start, slide: n.slide, effects: n.effects });

@@ -376,6 +376,39 @@
   margin-left: auto;
 }
 
+/* A question about a track or song: by it, a button for each answer */
+.ask {
+  position: fixed;
+  z-index: 30;
+  max-width: min(420px, calc(100vw - 16px));
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 40px rgb(20 16 50 / 20%);
+}
+
+.ask[hidden] {
+  display: none;
+}
+
+.ask p {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.ask-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ask .button.danger {
+  border-color: var(--playhead);
+  background: var(--playhead);
+  color: #fff;
+}
+
 .add-track {
   margin: 8px;
   align-self: start;

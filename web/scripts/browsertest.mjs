@@ -1083,20 +1083,37 @@ try {
   const undone3 = await trackOrder();
   report(after3 === before3.split(' ').slice(1).concat(before3.split(' ')[0]).join(' ') && undone3 === before3, 'song drags a track to move it', `${before3} → ${after3} → ${undone3}`);
 
-  // × removes a track, ⌘Z brings it back with its clip still open; Space on a focused button plays rather than pressing it
-  await sm.click('.track-remove');
+  // Clicking a track's head puts its clip down; Delete then asks: clear the track, or delete it (⌘Z brings either back)
+  const headLabel = await sm.$eval('.track-head .voice-label', (e) => e.getBoundingClientRect().toJSON());
+  await sm.mouse.click(headLabel.x + 4, headLabel.y + 4);
+  await sm.keyboard.press('Delete');
+  const asked = await sm.evaluate(() => [...document.querySelectorAll('.ask button')].map((b) => b.textContent).join(', '));
+  await sm.evaluate(() => [...document.querySelectorAll('.ask button')].find((b) => b.textContent === 'Delete track').click());
   const removed = await sm.evaluate(() => window.songMaker.song().tracks.length);
   await sm.keyboard.down('Meta');
   await sm.keyboard.press('z');
   await sm.keyboard.up('Meta');
   const back = await sm.evaluate(() => window.songMaker.song().tracks.length);
-  const openAfterUndo = await sm.evaluate(() => window.songMaker.openClip() !== null);
-  await sm.focus('.track-remove');
+  await sm.mouse.click(headLabel.x + 4, headLabel.y + 4);
+  await sm.keyboard.press('Delete');
+  await sm.evaluate(() => [...document.querySelectorAll('.ask button')].find((b) => b.textContent === 'Clear track').click());
+  const cleared = await sm.evaluate(() => window.songMaker.song().tracks[0].clips.length);
+  await sm.keyboard.down('Meta');
+  await sm.keyboard.press('z');
+  await sm.keyboard.up('Meta');
+  const unCleared = await sm.evaluate(() => window.songMaker.song().tracks[0].clips.length);
+  report(asked === 'Clear track, Delete track, Cancel' && removed === 2 && back === 3 && cleared === 0 && unCleared > 0, 'song clears or deletes a track', `${asked}; ${removed}, ${back}; ${cleared}, ${unCleared}`);
+
+  // Solo: only soloed tracks play (the rest drawn faint); Space on a focused button plays rather than pressing it
+  await sm.click('.track-head:nth-of-type(4) .track-solo');
+  const soloed = await sm.evaluate(() => `${window.songMaker.song().tracks.map((t) => (t.solo ? 'S' : '-')).join('')} ${document.querySelector('[data-track="0"]').classList.contains('muted') ? 'others faint' : 'others heard'}`);
+  await sm.focus('.track-head:nth-of-type(4) .track-solo');
   await sm.keyboard.press(' ');
   await sm.waitForFunction(() => window.songMaker.playing(), { timeout: 2000 }).catch(() => {});
-  const spaced = await sm.evaluate(() => `${window.songMaker.song().tracks.length} ${window.songMaker.playing()}`);
+  const spaced = await sm.evaluate(() => `${window.songMaker.song().tracks[1].solo ? 'still soloed' : 'unsoloed'} ${window.songMaker.playing()}`);
   await sm.keyboard.press(' ');
-  report(removed === 2 && back === 3 && openAfterUndo && spaced === '3 true', 'song removes a track, Space plays', `${removed}, ${back}, ${openAfterUndo ? 'clip still open' : 'clip closed'}, space: ${spaced}`);
+  await sm.click('.track-head:nth-of-type(4) .track-solo');
+  report(soloed === '-S- others faint' && spaced === 'still soloed true', 'song solo, Space plays', `${soloed}; ${spaced}`);
 
   // Instruments saved before they had ids get them for good: a track's pick survives reloads
   const picked = await sm.evaluate(() => {
@@ -1119,6 +1136,7 @@ try {
   await sm.click('#new-song');
   const songsAdded = await songCount();
   await sm.click('#delete-song');
+  await sm.evaluate(() => [...document.querySelectorAll('.ask button')].find((b) => b.textContent === 'Delete song').click());
   const songsRemoved = await songCount();
   await sm.keyboard.down('Meta');
   await sm.keyboard.press('z');

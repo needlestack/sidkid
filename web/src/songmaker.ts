@@ -17,7 +17,7 @@ import { RESUME_KEYS, resumeSound, vibratoStart, type ResumeTraces } from './res
 import { noteName } from './song';
 import { importGoatSong, ROW_TO_NOTE } from './songimport';
 import { slideSemitones, vibratoCurve, wobbleOf, wobbleRow } from './vibrato';
-import { bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
+import { audible, bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -548,8 +548,14 @@ function renderHeads() {
     head.className = `track-head${i === current ? ' current' : ''}${t.muted ? ' muted' : ''}`;
     head.style.setProperty('--h', String(hue(t)));
     // Selecting it leaves the heads in place, so a click on one of its buttons isn't lost
+    // (and puts down any clip picked up: Delete then asks about the track)
     head.addEventListener('pointerdown', () => {
-      if (current === i) return;
+      if (openClip) {
+        openClip = null;
+        selectedNotes.clear();
+        renderEditor();
+      }
+      if (current === i) return renderArrangement();
       current = i;
       heads.querySelectorAll('.track-head').forEach((h, k) => h.classList.toggle('current', k === i));
       renderArrangement();
@@ -592,19 +598,23 @@ function renderHeads() {
       t.muted = !t.muted;
       changed();
     });
-    const remove = document.createElement('button');
-    remove.className = 'mini danger track-remove';
-    remove.textContent = '×';
-    remove.title = 'Remove this track';
-    remove.setAttribute('aria-label', 'Remove this track');
-    remove.disabled = song().tracks.length < 2;
-    remove.addEventListener('click', () => removeTrack(i));
+    const solo = document.createElement('button');
+    solo.className = `mini track-solo${t.solo ? ' set' : ''}`;
+    solo.textContent = 'S';
+    solo.title = t.solo ? 'Soloed: click to hear the others too' : 'Solo this track (with any others soloed)';
+    solo.setAttribute('aria-pressed', String(!!t.solo));
+    solo.addEventListener('click', () => {
+      before();
+      if (t.solo) delete t.solo;
+      else t.solo = true;
+      changed();
+    });
     const row = document.createElement('div');
     row.className = 'track-row';
     const voiceLabel = document.createElement('span');
     voiceLabel.className = 'voice-label';
     voiceLabel.textContent = 'Voice';
-    row.append(voiceLabel, voices, mute, remove);
+    row.append(voiceLabel, voices, mute, solo);
     head.append(select, row);
     heads.append(head);
   });
@@ -731,7 +741,7 @@ function drawClip(t: Track, ti: number, clip: Clip, k: number, heard: { start: n
   const s = song();
   const top = laneTop(ti) + 3;
   const h = LANE_H - 6;
-  const g = el('g', { class: `clip2${clip === openClip ? ' open' : ''}${t.muted ? ' muted' : ''}`, 'data-track': ti, 'data-clip': k }, arr);
+  const g = el('g', { class: `clip2${clip === openClip ? ' open' : ''}${audible(s, t) ? '' : ' muted'}`, 'data-track': ti, 'data-clip': k }, arr);
   g.style.setProperty('--h', String(hue(t)));
   const x0 = ax(clip.start);
   const w = Math.max(4, ax(clip.span));
@@ -1890,12 +1900,83 @@ $('new-song').addEventListener('click', () => {
 });
 $('delete-song').addEventListener('click', () => {
   if (view.songs.length < 2) return;
+  askChoice($('delete-song').getBoundingClientRect(), `Delete “${song().name}”?`, [{ label: 'Delete song', danger: true, act: deleteSong }]);
+});
+
+function deleteSong() {
+  if (view.songs.length < 2) return;
   beforeSongs();
   const [gone] = view.songs.splice(view.current, 1);
   view.current = Math.min(view.current, view.songs.length - 1);
   switchedSong();
   toast(`Deleted ${gone.name} (⌘Z brings it back)`);
+}
+
+// --- Asking: a question by what it's about, a button for each answer and one to leave it -------
+
+const ask = document.createElement('div');
+ask.className = 'ask';
+ask.setAttribute('role', 'dialog');
+ask.hidden = true;
+document.body.append(ask);
+
+function askChoice(near: DOMRect, text: string, choices: { label: string; danger?: boolean; disabled?: boolean; act: () => void }[]) {
+  const q = document.createElement('p');
+  q.textContent = text;
+  const row = document.createElement('div');
+  row.className = 'ask-buttons';
+  for (const c of choices) {
+    const b = document.createElement('button');
+    b.className = `button${c.danger ? ' danger' : ' secondary'}`;
+    b.textContent = c.label;
+    b.disabled = !!c.disabled;
+    b.addEventListener('click', () => {
+      closeAsk();
+      c.act();
+    });
+    row.append(b);
+  }
+  const cancel = document.createElement('button');
+  cancel.className = 'button secondary';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closeAsk);
+  row.append(cancel);
+  ask.replaceChildren(q, row);
+  ask.hidden = false;
+  // By what it's about, kept on the screen
+  const w = ask.offsetWidth;
+  ask.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, near.left))}px`;
+  ask.style.top = `${Math.min(window.innerHeight - ask.offsetHeight - 8, near.bottom + 6)}px`;
+  cancel.focus();
+}
+
+function closeAsk() {
+  ask.hidden = true;
+}
+document.addEventListener('pointerdown', (e) => {
+  if (!ask.hidden && !ask.contains(e.target as Node)) closeAsk();
 });
+
+/** Delete with no clip picked up: the selected track, cleared of its clips or deleted */
+function askTrack() {
+  const t = track();
+  if (!t) return;
+  const head = document.querySelectorAll('.track-head')[current];
+  askChoice(head.getBoundingClientRect(), `${instrumentName(t)}: clear its clips, or delete the track?`, [
+    {
+      label: 'Clear track',
+      disabled: !t.clips.length,
+      act: () => {
+        before();
+        t.clips = [];
+        openClip = null;
+        selectedNotes.clear();
+        changed();
+      },
+    },
+    { label: 'Delete track', danger: true, disabled: song().tracks.length < 2, act: () => removeTrack(current) },
+  ]);
+}
 
 interface Example {
   file: string;
@@ -2039,6 +2120,11 @@ function typing(e: KeyboardEvent) {
 }
 
 window.addEventListener('keydown', (e) => {
+  // A question open: Escape leaves it; other keys are its buttons'
+  if (!ask.hidden) {
+    if (e.key === 'Escape') closeAsk();
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !typing(e)) {
     e.preventDefault();
     undo(e.shiftKey);
@@ -2065,7 +2151,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
     if (focus === 'roll' && selectedNotes.size) deleteNotes();
-    else deleteClip();
+    else if (openClip) deleteClip();
+    else askTrack();
     return;
   }
   if (focus === 'roll' && selectedNotes.size && e.key.startsWith('Arrow')) {
