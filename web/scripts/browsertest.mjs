@@ -1250,6 +1250,53 @@ try {
   const steadyTempo = await tempoOf();
   report(steadyTempo === '[88,[]]', 'song import keeps a steady tempo', steadyTempo);
 
+  // An instrument that lets go by itself: its notes come back as long as they hold the key (the
+  // recorded length, or its own key up when that's later), and still play as they did
+  const releaseOf = await sm.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('sidkid.maker2.v1'));
+    const ins = saved.instruments.find((i) => i.id === window.songMaker.song().tracks[0].instrument);
+    const was = ins.release;
+    ins.release = 20;
+    localStorage.setItem('sidkid.maker2.v1', JSON.stringify(saved));
+    return [ins.id, was];
+  });
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  const selfRelease = await sm.evaluate(async () => {
+    const s = window.songMaker.song();
+    s.bpm = 125;
+    delete s.tempo;
+    s.tracks.forEach((tr) => (tr.clips = []));
+    // (one of Song Maker's own: an imported song keeps GoatTracker's key-offs)
+    delete s.goat;
+    s.cycling = false;
+    s.tracks[0].clips = [{ start: 0, length: 32, span: 32, notes: [{ start: 0, length: 1, note: 48 }, { start: 16, length: 8, note: 48 }] }];
+    window.songMaker.render();
+    const check = window.songMaker.exportCheck();
+    let href = null;
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      href = this.href;
+    };
+    document.getElementById('export-song').click();
+    [...document.querySelectorAll('.ask button')].find((b) => b.textContent.includes('.sng')).click();
+    HTMLAnchorElement.prototype.click = click;
+    return { differ: check.differ, bytes: Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer())) };
+  });
+  writeFileSync(roundFile, Uint8Array.from(selfRelease.bytes));
+  const songsBeforeRelease = await sm.evaluate(() => document.getElementById('song-pick').options.length);
+  await (await sm.$('#import-file-input')).uploadFile(roundFile);
+  await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeRelease);
+  const releasedNotes = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks.flatMap((t) => t.clips.flatMap((c) => c.notes.map((n) => [c.start + n.start, n.length])))));
+  await sm.evaluate(([id, was]) => {
+    const saved = JSON.parse(localStorage.getItem('sidkid.maker2.v1'));
+    saved.instruments.find((i) => i.id === id).release = was;
+    localStorage.setItem('sidkid.maker2.v1', JSON.stringify(saved));
+  }, releaseOf);
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready());
+  report(!Object.keys(selfRelease.differ).length && releasedNotes === '[[0,4],[16,8]]', 'song exports notes of an instrument that lets go itself', `${JSON.stringify(selfRelease.differ)} ${releasedNotes}`);
+
   // Export as a C64 disk (a program that plays the song, at the player's $1000), a SID file, or its sound
   const exported = await sm.evaluate(async () => {
     const got = {};

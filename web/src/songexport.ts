@@ -15,7 +15,7 @@
 import type { TableData } from './engine/configure';
 import type { Instrument } from './song';
 import { ENDPATT, FIRSTNOTE, KEYOFF, LOOPSONG, REST } from './song';
-import { EFFECT_COMMANDS, frameAt, patternStarts, songRows, stepAt, voiceSegments, VOICES, type ResumedNote, type SongDoc, type SongSound, type Speed } from './songdoc';
+import { EFFECT_COMMANDS, frameAt, leadOf, patternStarts, resumeLeadOf, songRows, stepAt, voiceSegments, VOICES, type ResumedNote, type SongDoc, type SongSound, type Speed } from './songdoc';
 
 const CMD_TONEPORTA = 3;
 const CMD_SETTEMPO = 15;
@@ -70,11 +70,19 @@ export function exportSong(song: SongDoc, plan: ExportPlan, fps: number): { byte
         const fx = s.effects?.find((e) => j - s.step >= e.from && j - s.step < e.to);
         if (fx) out[j] = { ...out[j], command: EFFECT_COMMANDS[fx.kind], data: plan.speedRow(fx.speed) };
       }
-      // Let go where nothing comes straight after (an instrument that lets go by itself is left to, in Song Maker's own songs)
+      // Let go where nothing comes straight after
       const next = segs[i + 1];
       if ((next && next.start <= s.end) || end >= rows) return;
-      if (shape.release !== null && !song.goat) return;
-      if (out[end].note === REST) out[end] = { ...out[end], note: KEYOFF };
+      let off = end;
+      // (an instrument that lets go by itself, in Song Maker's own songs: a key-off once it has, at the
+      // note's end or its own key up, which changes nothing heard and keeps the note's length on import)
+      if (shape.release !== null && !song.goat) {
+        const letGo = s.start + Math.max(0, shape.release - (s.from ?? 0));
+        const lead = s.from ? resumeLeadOf(shape) : leadOf(shape);
+        while (off < rows && frameAt(song, off, fps) - lead < letGo) off++;
+        if (off >= rows || (next && stepOf(next.start) <= off)) return;
+      }
+      if (out[off].note === REST) out[off] = { ...out[off], note: KEYOFF };
     });
     voices.push(out);
   }
