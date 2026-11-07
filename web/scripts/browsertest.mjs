@@ -804,6 +804,26 @@ try {
   const noted = await sm.evaluate(() => JSON.stringify(window.songMaker.openClip().notes.map((n) => [n.start, n.length])));
   report(noted === '[[2,2]]', 'song double-click adds a note', noted);
 
+  // Scrolled past its top or bottom, the roll scrolls the page on
+  const rollChain = await sm.evaluate(async () => {
+    const r = document.getElementById('roll-scroll');
+    window.__rollWas = r.scrollTop;
+    r.scrollTop = r.scrollHeight;
+    window.scrollTo(0, 0);
+    await new Promise((res) => setTimeout(res, 100));
+    return { x: r.getBoundingClientRect().left + 40, y: r.getBoundingClientRect().top + 40, max: document.documentElement.scrollHeight - innerHeight };
+  });
+  await sm.mouse.move(rollChain.x, rollChain.y);
+  await sm.mouse.wheel({ deltaY: 400 });
+  await new Promise((r) => setTimeout(r, 400));
+  const pageScrolled = await sm.evaluate(() => window.scrollY);
+  await sm.evaluate(() => {
+    window.scrollTo(0, 0);
+    document.getElementById('roll-scroll').scrollTop = window.__rollWas;
+  });
+  await new Promise((r) => setTimeout(r, 100));
+  report(rollChain.max <= 0 || pageScrolled > 0, 'song roll scrolls the page at its end', `page scrolled ${pageScrolled} of ${rollChain.max}`);
+
   // Dragging a note's middle moves it a step at a time
   const noteBox = await sm.$eval('.roll-note', (e) => e.getBoundingClientRect().toJSON());
   await sm.mouse.move(noteBox.x + 8, noteBox.y + 4);

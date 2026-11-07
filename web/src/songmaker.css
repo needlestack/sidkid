@@ -635,7 +635,8 @@ html.drag-cursor * {
 .roll-scroll {
   position: relative;
   overflow: auto;
-  overscroll-behavior: contain;
+  /* (sideways stays in the roll, not the browser's back swipe; up and down carry on to the page at its ends) */
+  overscroll-behavior-x: contain;
 }
 
 .roll-plot {
