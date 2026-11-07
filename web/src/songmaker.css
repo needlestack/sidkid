@@ -101,8 +101,19 @@
   background: var(--accent-soft);
 }
 
-#import-file {
-  margin-top: 10px;
+.import-list hr {
+  margin: 14px 0 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.import-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
 }
 
 .import-list .by {
