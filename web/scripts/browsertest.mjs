@@ -977,9 +977,12 @@ try {
   await sm.keyboard.press(' ');
   await sm.waitForFunction(() => window.songMaker.liveFrame() > window.songMaker.cycleFrames().song / 2, { timeout: 8000 });
   const beforeChange = await sm.evaluate(() => window.songMaker.liveFrame());
+  const roundBefore = await sm.evaluate(() => window.songMaker.cycleFrames().song);
   await sm.evaluate(() => (document.getElementById('tempo').value = ''));
   await sm.type('#tempo', '95');
   await sm.keyboard.press('Enter');
+  // (once the new tempo has taken: a slow machine may take a moment)
+  await sm.waitForFunction((was) => window.songMaker.cycleFrames().song !== was, { timeout: 3000 }, roundBefore).catch(() => {});
   const afterChange = await sm.evaluate(() => ({ ...window.songMaker.cycleFrames(), at: window.songMaker.liveFrame() }));
   await sm.keyboard.press(' ');
   await sm.evaluate(() => {
