@@ -3,8 +3,9 @@
 //
 // Each voice's notes are worked out as Song Maker plays them (tracks taking
 // turns, notes picking up where they left off), a step a row: a note's row
-// has its note and instrument, a row where nothing follows has a key-off,
-// and each row carries its effect's command. Tempo changes are tempo
+// has its note and instrument, a row where nothing follows has a key-off
+// (for an instrument that lets go by itself, once it has, its own end
+// marked: NOTE_END), and each row carries its effect's command. Tempo changes are tempo
 // commands on a row with no effect of its own. The instruments and tables
 // are the ones Song Maker plays with. Each voice is cut into patterns where
 // Song Maker's playback has them (imported songs' own, else every few
@@ -14,7 +15,7 @@
 
 import type { TableData } from './engine/configure';
 import type { Instrument } from './song';
-import { ENDPATT, FIRSTNOTE, KEYOFF, LOOPSONG, REST } from './song';
+import { ENDPATT, FIRSTNOTE, KEYOFF, LOOPSONG, MADE_WITH, NOTE_END, REST } from './song';
 import { EFFECT_COMMANDS, frameAt, leadOf, patternStarts, resumeLeadOf, songRows, stepAt, voiceSegments, VOICES, type ResumedNote, type SongDoc, type SongSound, type Speed } from './songdoc';
 
 const CMD_TONEPORTA = 3;
@@ -80,6 +81,8 @@ export function exportSong(song: SongDoc, plan: ExportPlan, fps: number): { byte
         const letGo = s.start + Math.max(0, shape.release - (s.from ?? 0));
         const lead = s.from ? resumeLeadOf(shape) : leadOf(shape);
         while (off < rows && frameAt(song, off, fps) - lead < letGo) off++;
+        // (let go sooner than it does: where, marked)
+        if (off > end && out[end].note === REST && !out[end].command) out[end] = { ...out[end], data: NOTE_END };
         if (off >= rows || (next && stepOf(next.start) <= off)) return;
       }
       if (out[off].note === REST) out[off] = { ...out[off], note: KEYOFF };
@@ -96,7 +99,8 @@ export function exportSong(song: SongDoc, plan: ExportPlan, fps: number): { byte
       gaps.add(`steps of ${length} frames (GoatTracker's go from ${TEMPO_FASTEST} to ${TEMPO_SLOWEST})`);
       continue;
     }
-    const free = voices.find((v) => !v[j].command);
+    // (a row with a note's end marked only if it must)
+    const free = voices.find((v) => !v[j].command && !v[j].data) ?? voices.find((v) => !v[j].command);
     if (!free) {
       gaps.add('a tempo change where every voice has an effect');
       continue;
@@ -131,7 +135,7 @@ export function exportSong(song: SongDoc, plan: ExportPlan, fps: number): { byte
   };
   text(song.name, 32);
   text('', 32);
-  text('Made with SIDKid', 32);
+  text(MADE_WITH, 32);
   bytes.push(1);
   for (const o of orders) {
     const entries = o.slice(0, MAX_ORDER);

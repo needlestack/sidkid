@@ -2153,11 +2153,16 @@ function importBytes(bytes: ArrayBuffer, name: string, settings: Partial<Setting
     toast(`${name} can't come across as it plays yet: it has ${imp.gaps.slice(0, 4).join(', ')}`);
     return;
   }
+  // One of SIDKid's own comes back as made, if it plays as GoatTracker plays the file
+  const at = { ...DEFAULT_SETTINGS, ...settings };
+  const shapes = new Map(imp.instruments.map((s) => [s.id!, s]));
+  const own = imp.own ? againstGoat(bytes.slice(0), imp.own, shapes, at, at.ntsc ? 60 : 50) : null;
+  const doc = imp.own && own && !Object.keys(own.differ).length ? imp.own : imp.song;
   addInstruments(imp.instruments, INSTRUMENT_SECONDS * FPS);
   instruments = loadInstruments(INSTRUMENT_SECONDS * FPS);
   byId = new Map(instruments.map((s) => [s.id!, s]));
   beforeSongs();
-  view.songs.push(imp.song);
+  view.songs.push(doc);
   view.current = view.songs.length - 1;
   switchedSong();
   toast(`Imported ${imp.song.name}: its ${imp.instruments.length} instruments are in the Instrument Maker too`);
@@ -2476,6 +2481,50 @@ Analyzer.create()
   .then((a) => (analyzer = a))
   .catch((err) => toast(`Engine failed to start: ${err}`));
 
+/**
+ * A song as Song Maker plays it against a GoatTracker song file as
+ * GoatTracker's player plays it, frame by frame, lined up where
+ * GoatTracker's first row comes in: where they differ (none: the same).
+ * Null if it isn't a song GoatTracker can read.
+ */
+function againstGoat(bytes: ArrayBuffer, doc: SongDoc, shapes: Map<string, Shape>, at: Settings, fps: number) {
+  const a = analyzer!;
+  const plan = songPlan(0, null, { click: false, countIn: false }, doc, shapes, fps);
+  const frames = frameAt(doc, Math.max(1, songRows(doc)), fps) - 4;
+  const mine = a.traceSequence(plan.tables, plan.instruments, plan.seq, frames, at);
+  if (!a.load(bytes)) return null;
+  const theirs = a.traceSong(0, frames + 40, at);
+  const same = (o: Uint8Array, m: Uint8Array) => [0, 1, 2].every((v) => o[v * 7] === m[v * 7] && o[v * 7 + 1] === m[v * 7 + 1] && (o[v * 7 + 4] & 0xf1) === (m[v * 7 + 4] & 0xf1));
+  // Where GoatTracker's playing lines up with Song Maker's (its first row comes a few frames in)
+  let shift = 0;
+  let best = -1;
+  for (let o = 0; o < 30; o++) {
+    let n = 0;
+    for (let f = 0; f < Math.min(300, frames); f++) if (same(theirs[f + o], mine[f])) n++;
+    if (n > best) [best, shift] = [n, o];
+  }
+  const differ: Record<string, number> = {};
+  const first: Record<string, number> = {};
+  const mark = (what: string, f: number) => {
+    differ[what] = (differ[what] ?? 0) + 1;
+    first[what] ??= f;
+  };
+  const pw = (r: Uint8Array, b: number) => r[b + 2] | ((r[b + 3] & 15) << 8);
+  for (let f = 0; f < frames; f++) {
+    const o = theirs[f + shift];
+    const m = mine[f];
+    for (let v = 0; v < 3; v++) {
+      const b = v * 7;
+      if (o[b] !== m[b] || o[b + 1] !== m[b + 1]) mark(`pitch ${v + 1}`, f);
+      if ((o[b + 4] & 0xf1) !== (m[b + 4] & 0xf1)) mark(`waveform ${v + 1}`, f);
+      if (o[b + 4] & 0x40 && Math.abs(pw(o, b) - pw(m, b)) > 2) mark(`pulse ${v + 1}`, f);
+      if (o[b + 5] !== m[b + 5] || o[b + 6] !== m[b + 6]) mark(`envelope ${v + 1}`, f);
+    }
+    if (o[0x16] !== m[0x16] || o[0x17] !== m[0x17] || (o[0x18] & 0x70) !== (m[0x18] & 0x70)) mark('filter', f);
+  }
+  return { shift, frames, differ, first };
+}
+
 // For scripts/browsertest.mjs
 Object.assign(window, {
   songMaker: {
@@ -2547,43 +2596,12 @@ Object.assign(window, {
      * and where they differ (from Song Maker's first frame, lined up)
      */
     exportCheck: () => {
-      const a = analyzer!;
       const plan = songPlan(0, null, { click: false, countIn: false });
       const { bytes, gaps } = exportSong(song(), plan, FPS);
       const at: Settings = { ...settings, ...(song().goat?.pulseOptimization === false ? { pulseOptimization: false } : {}) };
-      const frames = toFrame(Math.max(1, songRows(song()))) - 4;
-      const mine = a.traceSequence(plan.tables, plan.instruments, plan.seq, frames, at);
-      if (!a.load(bytes.slice().buffer)) return { gaps, error: 'not a song GoatTracker can read' };
-      const theirs = a.traceSong(0, frames + 40, at);
-      const same = (o: Uint8Array, m: Uint8Array) => [0, 1, 2].every((v) => o[v * 7] === m[v * 7] && o[v * 7 + 1] === m[v * 7 + 1] && (o[v * 7 + 4] & 0xf1) === (m[v * 7 + 4] & 0xf1));
-      // Where GoatTracker's playing lines up with Song Maker's (its first row comes a few frames in)
-      let shift = 0;
-      let best = -1;
-      for (let o = 0; o < 30; o++) {
-        let n = 0;
-        for (let f = 0; f < Math.min(300, frames); f++) if (same(theirs[f + o], mine[f])) n++;
-        if (n > best) [best, shift] = [n, o];
-      }
-      const differ: Record<string, number> = {};
-      const first: Record<string, number> = {};
-      const mark = (what: string, f: number) => {
-        differ[what] = (differ[what] ?? 0) + 1;
-        first[what] ??= f;
-      };
-      const pw = (r: Uint8Array, b: number) => r[b + 2] | ((r[b + 3] & 15) << 8);
-      for (let f = 0; f < frames; f++) {
-        const o = theirs[f + shift];
-        const m = mine[f];
-        for (let v = 0; v < 3; v++) {
-          const b = v * 7;
-          if (o[b] !== m[b] || o[b + 1] !== m[b + 1]) mark(`pitch ${v + 1}`, f);
-          if ((o[b + 4] & 0xf1) !== (m[b + 4] & 0xf1)) mark(`waveform ${v + 1}`, f);
-          if (o[b + 4] & 0x40 && Math.abs(pw(o, b) - pw(m, b)) > 2) mark(`pulse ${v + 1}`, f);
-          if (o[b + 5] !== m[b + 5] || o[b + 6] !== m[b + 6]) mark(`envelope ${v + 1}`, f);
-        }
-        if (o[0x16] !== m[0x16] || o[0x17] !== m[0x17] || (o[0x18] & 0x70) !== (m[0x18] & 0x70)) mark('filter', f);
-      }
-      return { gaps, shift, frames, differ, first, bytes: bytes.length };
+      const against = againstGoat(bytes.slice().buffer, song(), byId, at, FPS);
+      if (!against) return { gaps, error: 'not a song GoatTracker can read' };
+      return { gaps, ...against, bytes: bytes.length };
     },
     /** The metronome's frames playing from a step: beats and bars */
     clicks: (fromStep: number, countIn: boolean) => {

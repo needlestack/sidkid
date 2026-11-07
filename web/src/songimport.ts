@@ -17,7 +17,7 @@ import type { Settings } from './engine/protocol';
 import { importInstrument, KEY } from './goatimport';
 import { sound, soundTables } from './instruments';
 import type { Shape } from './shape';
-import { parseSong } from './song';
+import { MADE_WITH, NOTE_END, parseSong, REST } from './song';
 import { newId, type Clip, type NoteEffect, type SongDoc, type SongNote, type Speed, type TempoChange, type Track } from './songdoc';
 import { buildTimeline, type Note as GoatNote } from './timeline';
 
@@ -37,6 +37,12 @@ export interface GoatImport {
   firstRow: number;
   /** Frames GoatTracker plays before looping */
   length: number;
+  /**
+   * Made with SIDKid: the song as one of Song Maker's own (the length of
+   * notes that let go by themselves kept, see NOTE_END), to take if it
+   * plays as GoatTracker plays the file
+   */
+  own?: SongDoc;
 }
 
 /** The pattern commands notes' effects are */
@@ -136,18 +142,31 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
     }
   });
 
-  // Tracks: each voice's notes, an instrument a track
-  const tracks: Track[] = [];
+  // Where notes were let go, marked by SIDKid (an instrument that lets go by itself, let go sooner)
+  const ends = new Map<GoatNote, number>();
   tl.notes.forEach((notes, voice) => {
-    const patterns = tl.clips[voice].map((c) => steps(c.start));
-    for (const n of [...new Set(notes.map((x) => x.instrument))]) {
-      const shape = instruments.get(n);
-      if (!shape) continue;
-      const mine = notes.filter((x) => x.instrument === n && x.start < tl.length);
-      if (!mine.length) continue;
-      tracks.push({ id: newId(), instrument: shape.id!, voice, muted: false, clips: clipsOf(mine, patterns, steps, steps(tl.length), (x) => extras.get(x)) });
+    for (const n of notes) {
+      const mark = tl.rows[voice].find((e) => e.frame > n.start && e.frame < n.end && e.data.note === REST && !e.data.command && e.data.data === NOTE_END);
+      if (mark) ends.set(n, mark.frame);
     }
   });
+
+  // Tracks: each voice's notes, an instrument a track (their ends where they were let go, or as marked)
+  const tracksOf = (marked: boolean) => {
+    const tracks: Track[] = [];
+    tl.notes.forEach((notes, voice) => {
+      const patterns = tl.clips[voice].map((c) => steps(c.start));
+      for (const n of [...new Set(notes.map((x) => x.instrument))]) {
+        const shape = instruments.get(n);
+        if (!shape) continue;
+        const mine = notes.filter((x) => x.instrument === n && x.start < tl.length);
+        if (!mine.length) continue;
+        tracks.push({ id: newId(), instrument: shape.id!, voice, muted: false, clips: clipsOf(mine, patterns, steps, steps(tl.length), (x) => extras.get(x), (x) => (marked ? (ends.get(x) ?? x.end) : x.end)) });
+      }
+    });
+    return tracks;
+  };
+  const tracks = tracksOf(false);
 
   const fps = settings.ntsc ? 60 : 50;
   const end = steps(tl.length);
@@ -164,7 +183,10 @@ export function importGoatSong(a: Analyzer, bytes: ArrayBuffer, settings: Settin
     cycling: false,
     goat: { patterns: tl.clips.map((cs) => cs.map((c) => steps(c.start))), end, ...(settings.pulseOptimization ? {} : { pulseOptimization: false }) },
   };
-  return { song, instruments: [...instruments.values()], gaps, firstRow, length: tl.length };
+  // One of SIDKid's own, as made here: its notes' marked ends, played by Song Maker's own rules
+  const { goat: _, ...ours } = song;
+  const own = goat.copyright === MADE_WITH ? { ...ours, tracks: tracksOf(true) } : undefined;
+  return { song, ...(own ? { own } : {}), instruments: [...instruments.values()], gaps, firstRow, length: tl.length };
 }
 
 /**
@@ -237,7 +259,7 @@ function roundest(lo: number, hi: number, ok: (n: number) => boolean): number | 
  * a note is held over from one pattern into the next (a clip's notes stop
  * at its end).
  */
-function clipsOf(notes: GoatNote[], patterns: number[], steps: (frame: number) => number, songEnd: number, extra: (n: GoatNote) => Pick<SongNote, 'slide' | 'effects'> | undefined): Clip[] {
+function clipsOf(notes: GoatNote[], patterns: number[], steps: (frame: number) => number, songEnd: number, extra: (n: GoatNote) => Pick<SongNote, 'slide' | 'effects'> | undefined, endOf: (n: GoatNote) => number): Clip[] {
   const bounds = [...patterns, songEnd];
   // The pattern a step is in, and where it ends
   const patternAt = (s: number) => {
@@ -249,7 +271,7 @@ function clipsOf(notes: GoatNote[], patterns: number[], steps: (frame: number) =
   let clip: Clip | null = null;
   for (const n of notes) {
     const start = steps(n.start);
-    const end = Math.max(start + 1, steps(n.end));
+    const end = Math.max(start + 1, steps(endOf(n)));
     if (!clip || start >= clip.start + clip.length) {
       clip = { start: bounds[patternAt(start)], length: 0, span: 0, notes: [] };
       clips.push(clip);

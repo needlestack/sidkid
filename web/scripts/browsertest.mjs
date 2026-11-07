@@ -1250,8 +1250,8 @@ try {
   const steadyTempo = await tempoOf();
   report(steadyTempo === '[88,[]]', 'song import keeps a steady tempo', steadyTempo);
 
-  // An instrument that lets go by itself: its notes come back as long as they hold the key (the
-  // recorded length, or its own key up when that's later), and still play as they did
+  // An instrument that lets go by itself: its notes come back as long as they were (a short one's end
+  // marked), and play as they did, in GoatTracker and on importing again
   const releaseOf = await sm.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('sidkid.maker2.v1'));
     const ins = saved.instruments.find((i) => i.id === window.songMaker.song().tracks[0].instrument);
@@ -1287,7 +1287,7 @@ try {
   const songsBeforeRelease = await sm.evaluate(() => document.getElementById('song-pick').options.length);
   await (await sm.$('#import-file-input')).uploadFile(roundFile);
   await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeRelease);
-  const releasedNotes = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks.flatMap((t) => t.clips.flatMap((c) => c.notes.map((n) => [c.start + n.start, n.length])))));
+  const releasedNotes = await sm.evaluate(() => JSON.stringify(window.songMaker.song().tracks.flatMap((t) => t.clips.flatMap((c) => c.notes.map((n) => [c.start + n.start, n.length])))) + (window.songMaker.song().goat ? ' as GoatTracker plays it' : ''));
   await sm.evaluate(([id, was]) => {
     const saved = JSON.parse(localStorage.getItem('sidkid.maker2.v1'));
     saved.instruments.find((i) => i.id === id).release = was;
@@ -1295,7 +1295,7 @@ try {
   }, releaseOf);
   await sm.reload();
   await sm.waitForFunction(() => window.songMaker?.ready());
-  report(!Object.keys(selfRelease.differ).length && releasedNotes === '[[0,4],[16,8]]', 'song exports notes of an instrument that lets go itself', `${JSON.stringify(selfRelease.differ)} ${releasedNotes}`);
+  report(!Object.keys(selfRelease.differ).length && releasedNotes === '[[0,1],[16,8]]', 'song exports notes of an instrument that lets go itself', `${JSON.stringify(selfRelease.differ)} ${releasedNotes}`);
 
   // Export as a C64 disk (a program that plays the song, at the player's $1000), a SID file, or its sound
   const exported = await sm.evaluate(async () => {

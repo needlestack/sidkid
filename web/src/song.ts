@@ -16,6 +16,14 @@ export const REST = 0xbd;
 export const KEYOFF = 0xbe;
 export const KEYON = 0xbf;
 export const ENDPATT = 0xff;
+/**
+ * SIDKid's mark on a row (no command, this as its data, which GoatTracker's
+ * players ignore) where a note of an instrument that lets go by itself was
+ * let go, sooner than it does: the note's length, kept for importing it again.
+ */
+export const NOTE_END = 0x01;
+/** The copyright line of songs SIDKid exports */
+export const MADE_WITH = 'Made with SIDKid';
 
 export const CMD_TONEPORTA = 3;
 

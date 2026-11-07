@@ -230,6 +230,12 @@ zoomable timeline, aiming for a GarageBand feel.
   with Song Maker's: exact for a song made here and for the imports (except 2-frame steps, which
   need funk tempo: listed as a gap). Resumes are traced in their song (`resumeTraces` plays the
   note alone with the song's tempo, rows and rests).
+- Notes of an instrument that lets go by itself (fixed key up) export with a key-off once it has
+  (the note's end, or its own key up when later: nothing heard changes), and a short note's own
+  end marked (`NOTE_END`: no command, data $01, which both GoatTracker players ignore). A song
+  with SIDKid's copyright line (`MADE_WITH`) imports as one of Song Maker's own (`GoatImport.own`:
+  no `goat`, marked ends) when it plays as GoatTracker plays the file (`againstGoat`), else as
+  GoatTracker's.
 - Export also makes a C64 disk (.d64), a SID file and a WAV (Export opens a menu; `exportAs`).
   The .sng goes through GoatTracker's own packer/relocator, compiled into the engine
   (`engine/core/gpack.c` includes `greloc.c`, with its assembler `core/asm/` and `player.s`
