@@ -179,7 +179,7 @@ try {
   m2.on('pageerror', (err) => m2Errors.push(err.message));
   m2.on('console', (msg) => msg.type() === 'error' && m2Errors.push(msg.text()));
   await m2.setViewport({ width: 1180, height: 900, deviceScaleFactor: 2 });
-  await m2.goto(`${base}instruments2.html`);
+  await m2.goto(`${base}instruments.html`);
   await m2.evaluate(() => localStorage.clear());
   await m2.reload();
   await m2.waitForFunction(() => window.maker2?.ready(), { timeout: 5000 });

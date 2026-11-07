@@ -6,7 +6,7 @@ Notes for picking the work up again. Last updated 2026-11-06.
 
 - Commit locally; don't push unless asked. The owner prefers running it locally
   (`cd web && npx vite --port 5173 --strictPort`, then http://localhost:5173/songs.html).
-- Two pages: Instrument Maker (`instruments2.html`) and Song Maker (`songs.html`), switched in
+- Two pages: Instrument Maker (`instruments.html`) and Song Maker (`songs.html`), switched in
   the middle of the top bar; `index.html` sends visitors to the Song Maker. The first song player
   and instrument maker were removed on 2026-11-06 (in git history before `6d9282a`).
 - User docs: `README.md` and `docs/quickstart.md` (key points only; assume the reader knows
@@ -28,7 +28,7 @@ Notes for picking the work up again. Last updated 2026-11-06.
 - `npm run c64check` (needs VICE): exported disks booted on PAL and NTSC C64s.
 - Node can't import `src/tables.ts` (extensionless imports). Test pure functions from a copy.
 
-## Instrument Maker (`instruments2.html`, `src/maker2.ts`)
+## Instrument Maker (`instruments.html`, `src/maker2.ts`)
 
 The owner wants to nail instruments before the song editor, and is trying a
 second approach next to the first (keep both): no step list, just shaping on a

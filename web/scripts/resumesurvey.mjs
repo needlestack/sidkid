@@ -12,7 +12,7 @@ import fs from 'fs';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
 const m = await b.newPage();
 m.on('pageerror', (e) => console.log('ERR', e.message));
-await m.goto('http://localhost:5173/instruments2.html');
+await m.goto('http://localhost:5173/instruments.html');
 await m.waitForFunction(() => window.maker2?.ready());
 const shapes = [];
 for (const f of fs.readdirSync('public/examples').filter((f) => f.endsWith('.sng'))) {

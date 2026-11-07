@@ -11,7 +11,7 @@ import fs from 'fs';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
 const p = await b.newPage();
 p.on('pageerror', (e) => console.log('ERR', e.message));
-await p.goto('http://localhost:5173/instruments2.html');
+await p.goto('http://localhost:5173/instruments.html');
 await p.waitForFunction(() => window.maker2?.ready());
 const songs = fs.readdirSync('public/examples').filter((f) => f.endsWith('.sng'));
 const all = [];

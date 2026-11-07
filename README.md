@@ -1,73 +1,31 @@
 # SIDKid
 
-Make Commodore 64 music in the browser. SIDKid is a friendly way into the
-SID chip, built on the GoatTracker 2 engine by Lasse Öörni (Cadaver): shape
-sounds on a timeline, arrange them as tracks and clips, and take the result
-to a real C64.
+Make real Commodore 64 SID music in the browser
 
-**Try it: [needlestack.github.io/sidkid](https://needlestack.github.io/sidkid/)**
+Built on the GoatTracker 2 engine by Lasse Öörni (Cadaver): SIDKid provides
+a familiar, fully graphical interface to the SID chip and many Goattracker 
+features. Build complex instruments with graphical tools, and sequence them
+in a DAW style timeline. Then export the result to audio, .sid or .sng files,
+and take them to VICE or a real C64.
 
-![The Song Maker](docs/images/song-maker.png)
+**Try it out: [needlestack.github.io/sidkid](https://needlestack.github.io/sidkid/)**
 
-- **Instrument Maker**: draw a sound over time: volume envelope, waveforms
-  and pulse width, pitch steps and vibrato, filter sweeps.
-- **Song Maker**: tracks of clips on the SID's three voices, a piano roll,
-  recording from the computer keyboard, tempo changes, slides and vibrato
-  on notes.
-- **Export** as a C64 disk (`.d64`) that loads and plays by itself (drop
-  it on VICE), a SID file, a GoatTracker song, or a WAV. **Import**
-  GoatTracker songs.
-- What you hear is GoatTracker's own player on reSID, so a song plays the
-  same in SIDKid, in GoatTracker and on the C64.
+- **Instrument Maker**: control a sound over time: volume envelope, waveform
+changes, pitch steps, vibrato, and filter sweeps.
+- **Song Maker**: play instruments using the SID's three voices in a timeline with a piano roll. Stack more than three voices and they grab from each other.
+- **Export** songs as a C64 disk (`.d64`) that loads and plays by itself (drop
+  it on VICE), a SID file, a GoatTracker song, or a WAV.
+- **Import** many GoatTracker songs into SIDKid to check them out and play
 
-New here? Read the **[quick start](docs/quickstart.md)**.
+Want to know more? Read the **[quick start](docs/quickstart.md)**.
 
-## Running it locally
+<a href="https://needlestack.github.io/sidkid/instruments.html"><img src="docs/images/instrument-maker.png" width="49%" alt="The Instrument Maker"></a>
+<a href="https://needlestack.github.io/sidkid/songs.html"><img src="docs/images/song-maker.png" width="49%" alt="The Song Maker"></a>
 
-```sh
-cd engine
-make wasm     # build/wasm/sidkid.js + sidkid.wasm (needs Emscripten)
-cd ../web
-npm install
-npm run dev   # http://localhost:5173
-```
+Open the [Instrument Maker](https://needlestack.github.io/sidkid/instruments.html) or the [Song Maker](https://needlestack.github.io/sidkid/songs.html).
 
-## Tests
+Building it or working on it? See [SIDKid for developers](docs/development.md).
 
-```sh
-cd engine && make test   # native vs. GoatTracker's own sources vs. wasm, every example song
-cd web && npm test       # headless Chrome: the AudioWorklet against the native engine, and the two pages
-cd web && npm run c64check   # optional, needs VICE: exported disks booted on PAL and NTSC C64s
-```
-
-`make test` requires the native, reference and wasm builds to write the same
-SID registers every frame and the same audio samples. `npm test` drives both
-pages in Chrome. `node scripts/screenshots.mjs` takes the screenshots in
-`docs/` again.
-
-## Layout
-
-- `vendor/gt2/`: GoatTracker 2.77, untouched, for reference and testing.
-- `engine/core/`: GoatTracker's song model, player, packer/relocator (with
-  its assembler and `player.s`) and reSID. `goattrk2.h`, `gglue.c` and
-  `gpack.c` stand in for the editor; reSID's `wave.cpp` is changed so the
-  noise survives a short test bit, as on the chip.
-- `engine/sidkid.[ch]`: the engine's API (play songs, scan them, play and
-  trace single notes, sequence notes from outside, pack songs for the C64).
-  `engine/tools/` has the native test tools.
-- `web/`: the app (Vite and TypeScript). The engine runs in an
-  AudioWorklet (`src/engine/`). `instruments2.html` and `src/maker2.ts` are
-  the Instrument Maker; `songs.html` and `src/songmaker.ts` the Song Maker,
-  with the song model in `src/songdoc.ts`, GoatTracker import and export
-  in `src/songimport.ts` and `src/songexport.ts`, and the C64 disk in
-  `src/c64export.ts`.
-- `NOTES.md`: working notes, for picking the work up again.
-
-## Deployment
-
-`.github/workflows/deploy.yml` builds the engine with Emscripten, runs the
-engine and browser tests, and publishes the site to GitHub Pages on every
-push to `main`.
 
 ## License
 

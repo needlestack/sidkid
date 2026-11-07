@@ -62,7 +62,7 @@ await shot('export', { x: exp.x - 16, y: exp.y - 16, width: Math.max(ask.right, 
 await page.keyboard.press('Escape');
 
 // --- Instrument Maker: the Lead, with its sections open ---
-await page.goto(`${base}instruments2.html`);
+await page.goto(`${base}instruments.html`);
 await page.waitForFunction(() => window.maker2?.ready());
 await page.evaluate(() => {
   const s = window.maker2.state();
