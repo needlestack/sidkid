@@ -2,10 +2,29 @@
 
 Notes for picking the work up again. Last updated 2026-11-06.
 
+## Where we left off (2026-11-06)
+
+- Live at https://needlestack.github.io/sidkid/ (opens the Instrument Maker; songs.html for the
+  Song Maker). Every push to `main` deploys through `.github/workflows/deploy.yml`, which runs all
+  the engine and browser tests first (about 6 minutes; the owner wants to keep it that way). A
+  failing run publishes nothing, so the last good version stays up. jonathanfield.com/sidkid/ is
+  to redirect there (the owner's server, not this repo).
+- That day: C64 disk/SID/WAV export (Export menu), the noise test-bit fix in reSID, Space only
+  plays, Import from a file, steady tempos and SIDKid's own songs round-tripping through .sng
+  (the song saved inside it), notes that let go by themselves keeping their length, the old pages
+  removed, README for users plus docs/development.md and docs/quickstart.md, Test Song as the
+  starting song, the repeat label and the waiting repeat bar as handles.
+- Offered, not yet taken up: a faint tail on notes of instruments that let go by themselves
+  (showing how long they sound); track colours stored per track and spread apart (they come from
+  a hash of the track id, so every import gets new ones).
+- Not in git: `Test Song.sng` in the repo root (the owner's; its song is in startsong.json now).
+
 ## How we work
 
-- Commit locally; don't push unless asked. The owner prefers running it locally
-  (`cd web && npx vite --port 5173 --strictPort`, then http://localhost:5173/songs.html).
+- Commit locally; push only when the owner says so (they may say "push when it makes sense").
+  The owner also runs it locally (`cd web && npx vite --port 5173 --strictPort`, then
+  http://localhost:5173/). Run the tests (engine `make test` for engine changes, `npm test`) and
+  check them before committing.
 - Two pages: Instrument Maker (`instruments.html`) and Song Maker (`songs.html`), switched in
   the middle of the top bar; `index.html` sends visitors to the Instrument Maker. The first song player
   and instrument maker were removed on 2026-11-06 (in git history before `6d9282a`).
