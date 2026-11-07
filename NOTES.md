@@ -130,6 +130,11 @@ zoomable timeline, aiming for a GarageBand feel.
 1. Song-level filter (a filter lane), voice priority settings, funk tempo for steps under
    3 frames, a usability pass on the tempo lane and the effects.
 2. Maybe: exposing gate frames ("Restart time"), latency calibration, MIDI input.
+3. Eventually one page for both makers (owner, 2026-11-06): a song keeps playing while you switch,
+   and an instrument tweaked while it plays. Hours, not days: one page with two views (shared top
+   bar; the pages share some element ids), keys and ⌘Z only for the view showing, one player for
+   both, instrument edits reaching a playing song directly (not through storage), and the browser
+   tests adapted. Two pages until then.
 
 ## Known loose ends
 
