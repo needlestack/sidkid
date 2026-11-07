@@ -33,6 +33,13 @@ function renderFlags(settings = {}) {
   return flags;
 }
 
+// An exported .sng's GoatTracker part, without the Song Maker song saved after it (see songfile.ts)
+function goatPart(bytes) {
+  const b = Uint8Array.from(bytes);
+  const mark = String.fromCharCode(...b.subarray(b.length - 8));
+  return mark === 'SIDKidSg' ? b.subarray(0, new DataView(b.buffer).getUint32(b.length - 16, true)) : b;
+}
+
 function readWav(path) {
   const wav = readFileSync(path).subarray(44);
   return new Int16Array(wav.buffer, wav.byteOffset, wav.length >> 1);
@@ -1212,7 +1219,7 @@ try {
     return Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer()));
   });
   const roundFile = `${OUT}/roundtrip.sng`;
-  writeFileSync(roundFile, Uint8Array.from(exportedBytes));
+  writeFileSync(roundFile, goatPart(exportedBytes));
   const exportedPlays = await sm.evaluate((n) => JSON.stringify(window.songMaker.trace(n)), roundFrames);
   const tempoOf = () => sm.evaluate(() => JSON.stringify([window.songMaker.song().bpm, window.songMaker.song().tempo ?? []]));
   const exportedTempo = await tempoOf();
@@ -1243,7 +1250,7 @@ try {
     HTMLAnchorElement.prototype.click = click;
     return Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer()));
   });
-  writeFileSync(roundFile, Uint8Array.from(steady));
+  writeFileSync(roundFile, goatPart(steady));
   const songsBeforeSteady = await sm.evaluate(() => document.getElementById('song-pick').options.length);
   await (await sm.$('#import-file-input')).uploadFile(roundFile);
   await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeSteady);
@@ -1283,7 +1290,7 @@ try {
     HTMLAnchorElement.prototype.click = click;
     return { differ: check.differ, bytes: Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer())) };
   });
-  writeFileSync(roundFile, Uint8Array.from(selfRelease.bytes));
+  writeFileSync(roundFile, goatPart(selfRelease.bytes));
   const songsBeforeRelease = await sm.evaluate(() => document.getElementById('song-pick').options.length);
   await (await sm.$('#import-file-input')).uploadFile(roundFile);
   await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeRelease);
@@ -1296,6 +1303,43 @@ try {
   await sm.reload();
   await sm.waitForFunction(() => window.songMaker?.ready());
   report(!Object.keys(selfRelease.differ).length && releasedNotes === '[[0,1],[16,8]]', 'song exports notes of an instrument that lets go itself', `${JSON.stringify(selfRelease.differ)} ${releasedNotes}`);
+
+  // The song itself rides along in its .sng: importing it gives it back as it was made (tracks, ids,
+  // the cycle, its instruments), unless GoatTracker's part has changed
+  const saved = await sm.evaluate(async () => {
+    const s = window.songMaker.song();
+    s.cycle = { start: 4, end: 20 };
+    s.cycling = true;
+    s.tracks[0].muted = true;
+    window.songMaker.render();
+    let href = null;
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      href = this.href;
+    };
+    document.getElementById('export-song').click();
+    [...document.querySelectorAll('.ask button')].find((b) => b.textContent.includes('.sng')).click();
+    HTMLAnchorElement.prototype.click = click;
+    const ins = window.songMaker.instruments();
+    return { doc: JSON.stringify(s), shapes: JSON.stringify(s.tracks.map((t) => ins.find((i) => i.id === t.instrument))), bytes: Array.from(new Uint8Array(await (await fetch(href)).arrayBuffer())) };
+  });
+  writeFileSync(roundFile, Uint8Array.from(saved.bytes));
+  const songsBeforeSaved = await sm.evaluate(() => document.getElementById('song-pick').options.length);
+  await (await sm.$('#import-file-input')).uploadFile(roundFile);
+  await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 1, { timeout: 30000 }, songsBeforeSaved);
+  const restored = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    const ins = window.songMaker.instruments();
+    return { doc: JSON.stringify(s), shapes: JSON.stringify(s.tracks.map((t) => ins.find((i) => i.id === t.instrument))) };
+  });
+  // (a byte of GoatTracker's part changed: from that part, as GoatTracker plays it)
+  const changed = Uint8Array.from(saved.bytes);
+  changed[0x40] ^= 0x20;
+  writeFileSync(roundFile, changed);
+  await (await sm.$('#import-file-input')).uploadFile(roundFile);
+  await sm.waitForFunction((n) => document.getElementById('song-pick').options.length === n + 2, { timeout: 30000 }, songsBeforeSaved);
+  const fallback = await sm.evaluate(() => !window.songMaker.song().cycling);
+  report(restored.doc === saved.doc && restored.shapes === saved.shapes && fallback, 'song comes back as made from its .sng', `song ${restored.doc === saved.doc ? 'same' : 'differs'}, instruments ${restored.shapes === saved.shapes ? 'same' : 'differ'}, changed file from GoatTracker's part ${fallback}`);
 
   // Export as a C64 disk (a program that plays the song, at the player's $1000), a SID file, or its sound
   const exported = await sm.evaluate(async () => {

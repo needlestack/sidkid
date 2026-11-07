@@ -73,6 +73,9 @@ file of your own. Their instruments join the Instrument Maker's.
   `LOAD"*",8,1` and `RUN`) and it plays. It runs at the song's own
   speed on PAL and NTSC machines alike.
 - **SID file (.sid)**: for SID players.
-- **GoatTracker song (.sng)**: to keep working in GoatTracker, which plays
-  it the same way when set to the same chip and clock.
+- **GoatTracker song (.sng)**: also how to keep or move a song. It
+  carries the whole SIDKid song, so importing it gives the song back exactly
+  as you made it. GoatTracker opens it too and plays it the same way, when
+  set to the same chip and clock; once saved from GoatTracker, it comes back
+  as a GoatTracker song.
 - **Sound (.wav)**.

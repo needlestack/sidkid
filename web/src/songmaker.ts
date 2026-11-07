@@ -19,6 +19,7 @@ import { importGoatSong, ROW_TO_NOTE } from './songimport';
 import { diskOf, packSong, playingProgram } from './c64export';
 import { encodeWav, renderSong } from './engine/export';
 import { exportSong } from './songexport';
+import { savedSong, withSong, type SavedSong } from './songfile';
 import { slideSemitones, vibratoCurve, wobbleOf, wobbleRow } from './vibrato';
 import { audible, songRows, type ResumedNote, bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
 import type { Shape } from './shape';
@@ -1995,7 +1996,8 @@ async function exportAs(kind: ExportKind) {
   const at: Settings = { ...settings, ...(song().goat?.pulseOptimization === false ? { pulseOptimization: false } : {}) };
   const model = loadModel();
   let out: Blob | null = null;
-  if (kind === 'sng') out = new Blob([bytes.buffer as ArrayBuffer]);
+  // (the song itself after GoatTracker's part, to come back as made)
+  if (kind === 'sng') out = new Blob([withSong(bytes, song(), usedInstruments(song())).slice().buffer as ArrayBuffer]);
   else if (kind === 'wav') {
     toast(`Making ${file}…`);
     const rendered = await renderSong({ song: bytes.slice().buffer, settings: at, model, subsong: 0, muted: [false, false, false] });
@@ -2137,6 +2139,41 @@ importInput.addEventListener('change', async () => {
   importBytes(await file.arrayBuffer(), file.name.replace(/\.sng$/i, ''), {}, true);
 });
 
+/** The instruments a song's tracks play */
+const usedInstruments = (doc: SongDoc) => [...new Set(doc.tracks.map((t) => t.instrument))].flatMap((id) => byId.get(id) ?? []);
+
+/**
+ * A song saved with SIDKid, as it was: a new song, its instruments joining
+ * the Instrument Maker's (one already there unchanged is shared; one changed
+ * since comes as a copy)
+ */
+function restoreSong(saved: SavedSong) {
+  const doc = structuredClone(saved.song);
+  const added: Shape[] = [];
+  const ids = new Map<string, string>();
+  for (const shape of saved.instruments) {
+    const mine = byId.get(shape.id!);
+    if (mine && JSON.stringify(mine) === JSON.stringify(shape)) continue;
+    const copy = structuredClone(shape);
+    if (mine) {
+      copy.id = newId();
+      ids.set(shape.id!, copy.id);
+    }
+    added.push(copy);
+  }
+  for (const t of doc.tracks) t.instrument = ids.get(t.instrument) ?? t.instrument;
+  if (added.length) {
+    addInstruments(added, INSTRUMENT_SECONDS * FPS);
+    instruments = loadInstruments(INSTRUMENT_SECONDS * FPS);
+    byId = new Map(instruments.map((s) => [s.id!, s]));
+  }
+  beforeSongs();
+  view.songs.push(doc);
+  view.current = view.songs.length - 1;
+  switchedSong();
+  toast(`Imported ${doc.name}${added.length ? `: its ${added.length === 1 ? 'instrument is' : `${added.length} instruments are`} in the Instrument Maker too` : ''}`);
+}
+
 /**
  * Imports a GoatTracker song as a new song, its instruments joining the
  * Instrument Maker's. One that wouldn't play as it does in GoatTracker
@@ -2144,6 +2181,11 @@ importInput.addEventListener('change', async () => {
  */
 function importBytes(bytes: ArrayBuffer, name: string, settings: Partial<Settings> = {}, check = false) {
   if (!analyzer) return;
+  const saved = savedSong(new Uint8Array(bytes));
+  if (saved) {
+    restoreSong(saved);
+    return;
+  }
   const imp = importGoatSong(analyzer, bytes, { ...DEFAULT_SETTINGS, ...settings }, name);
   if (!imp) {
     toast(`${name} isn't a GoatTracker song`);

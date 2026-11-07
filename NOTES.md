@@ -230,6 +230,13 @@ zoomable timeline, aiming for a GarageBand feel.
   with Song Maker's: exact for a song made here and for the imports (except 2-frame steps, which
   need funk tempo: listed as a gap). Resumes are traced in their song (`resumeTraces` plays the
   note alone with the song's tempo, rows and rests).
+- An exported .sng carries the Song Maker song and the instruments it plays after GoatTracker's
+  part (`songfile.ts`: JSON, then the part's length, an FNV-1a checksum and the mark `SIDKidSg`).
+  GoatTracker's loader stops after the last pattern (gt2reloc packs it the same either way), and
+  saving from GoatTracker drops it. Import restores it exactly (`restoreSong`: an instrument
+  already here unchanged is shared, a changed one comes as a copy) when the checksum holds; else
+  from GoatTracker's part as before. It's the way to keep or move songs (decided 2026-11-06: one
+  file, not a SIDKid format of its own).
 - Notes of an instrument that lets go by itself (fixed key up) export with a key-off once it has
   (the note's end, or its own key up when later: nothing heard changes), and a short note's own
   end marked (`NOTE_END`: no command, data $01, which both GoatTracker players ignore). A song
