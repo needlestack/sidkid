@@ -40,6 +40,27 @@ function goatPart(bytes) {
   return mark === 'SIDKidSg' ? b.subarray(0, new DataView(b.buffer).getUint32(b.length - 16, true)) : b;
 }
 
+// Instruments for the Song Maker's tests (the starting ones from before 2026-11-06), so they don't
+// depend on what a first visit starts with
+const NOTE_START = { bits: [], legato: false, gateFrames: 2, firstWave: 0x09, pulseFromSong: false };
+const FILTER_OFF = { types: [], cutoff: { points: [{ t: 0, w: 0xc0 }, { t: 25, w: 0x40 }], loop: null }, resonance: { points: [{ t: 0, w: 8 }], loop: null } };
+const SQUARE = { points: [{ t: 0, w: 0x800 }], loop: null };
+const PLAIN = { notes: [], hold: true, vibrato: null, waveLoop: null, fixedNote: null, release: null, hardRestart: true, ...NOTE_START };
+const TEST_INSTRUMENTS = [
+  { ...PLAIN, id: 'lead', name: 'Lead', ad: 0x09, sr: 0xa9, bars: [{ wave: 0x40, start: 0, end: 10 }], filter: FILTER_OFF, pulse: { points: [{ t: 0, w: 0x300 }, { t: 25, w: 0xc00 }, { t: 50, w: 0x300 }], loop: 0 } },
+  {
+    ...PLAIN,
+    id: 'bass',
+    name: 'Bass',
+    ad: 0x08,
+    sr: 0x88,
+    bars: [{ wave: 0x40, start: 0, end: 3 }, { wave: 0x20, start: 3, end: 13 }],
+    filter: { types: [{ start: 0, end: 30, passband: 0x10 }], cutoff: { points: [{ t: 0, w: 0xd0 }, { t: 25, w: 0x28 }], loop: null }, resonance: { points: [{ t: 0, w: 10 }], loop: null } },
+    pulse: SQUARE,
+  },
+  { ...PLAIN, id: 'snare', name: 'Snare', ad: 0x08, sr: 0x00, bars: [{ wave: 0x80, start: 0, end: 1 }, { wave: 0x40, start: 1, end: 3 }, { wave: 0x80, start: 3, end: 13 }], filter: FILTER_OFF, pulse: SQUARE },
+];
+
 function readWav(path) {
   const wav = readFileSync(path).subarray(44);
   return new Int16Array(wav.buffer, wav.byteOffset, wav.length >> 1);
@@ -377,15 +398,26 @@ try {
   });
   await dragLabel('[data-wave-loop-edge] .wave-repeat', frames10);
   await dragLabel('[data-loop-edge][data-line="pulse"] .width-repeat', frames10);
-  const labelDrag = await m2.evaluate(() => {
+  // (with no repeat, the waiting bar at the end drags right too: the last bar goes on to it)
+  const repeatDrags = await m2.evaluate(() => {
     const s = window.maker2.state();
     const ins = s.instruments[s.current];
     const out = `${ins.waveLoop} ${ins.bars.length} ${ins.pulse.loop} ${ins.pulse.points.length}`;
-    [ins.bars, ins.waveLoop, ins.pulse, s.waveOpen] = JSON.parse(window.__repeatWas);
+    ins.waveLoop = null;
     window.maker2.changed();
     return out;
   });
-  report(labelDrag === '20 3 2 4', 'maker2 repeat labels are handles', labelDrag);
+  await new Promise((r) => setTimeout(r, 200));
+  await dragLabel('[data-wave-loop-edge].pull .edge-bar', frames10);
+  const labelDrag = await m2.evaluate((first) => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    const out = `${first}, ${ins.waveLoop} ${ins.bars.map((b) => b.end).join(',')}`;
+    [ins.bars, ins.waveLoop, ins.pulse, s.waveOpen] = JSON.parse(window.__repeatWas);
+    window.maker2.changed();
+    return out;
+  }, repeatDrags);
+  report(labelDrag === '20 3 2 4, null 10,20,40', 'maker2 repeat labels are handles', labelDrag);
 
   // Hard restart: on by default, off in the gate timer's top bit
   const restart = await m2.evaluate(() => {
@@ -680,6 +712,22 @@ try {
   await sm.reload();
   await sm.waitForFunction(() => window.songMaker?.ready(), { timeout: 5000 });
   report(true, 'song maker page loads');
+
+  // A first visit starts with the starting song on its instruments, and Lead
+  const firstVisit = await sm.evaluate(() => {
+    const s = window.songMaker.song();
+    const ins = window.songMaker.instruments();
+    return `${s.name}: ${s.tracks.map((t) => ins.find((i) => i.id === t.instrument)?.name).join(', ')} / ${ins.map((i) => i.name).join(', ')}`;
+  });
+  report(firstVisit === 'Test Song: Saw Bass, Snare, Minor Arp / Lead, Saw Bass, Snare, Minor Arp', 'song starts with the starting song', firstVisit);
+
+  // The rest from a blank song on instruments of their own, whatever the starting ones are
+  await sm.evaluate((instruments) => {
+    localStorage.clear();
+    localStorage.setItem('sidkid.maker2.v1', JSON.stringify({ instruments, current: 0 }));
+  }, TEST_INSTRUMENTS);
+  await sm.reload();
+  await sm.waitForFunction(() => window.songMaker?.ready(), { timeout: 5000 });
 
   // The tracks start under the ruler (32) and the tempo lane (34)
   const TRACKS_TOP = 66;

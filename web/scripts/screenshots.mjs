@@ -1,5 +1,5 @@
 // The screenshots in docs/ (the quick start), taken from the pages with a
-// small song and the starting instruments, so they can be taken again when
+// starting song and instruments, so they can be taken again when
 // the pages change.
 //
 // Usage: node scripts/screenshots.mjs   (writes docs/images/*.png)
@@ -29,23 +29,11 @@ const shot = async (name, clip) => {
 };
 const box = (q) => page.$eval(q, (e) => e.getBoundingClientRect().toJSON());
 
-// --- Song Maker: a short song on the starting instruments ---
+// --- Song Maker: the song a first visit starts with ---
 await page.goto(`${base}songs.html`);
 await page.evaluate(() => localStorage.clear());
 await page.reload();
 await page.waitForFunction(() => window.songMaker?.ready());
-await page.evaluate(() => {
-  const s = window.songMaker.song();
-  s.name = 'My first song';
-  s.bpm = 110;
-  const riff = (base, len, steps, pattern) => Array.from({ length: steps / len }, (_, i) => ({ start: i * len, length: len - 1, note: base + pattern[i % pattern.length] }));
-  const lead = [0, 3, 7, 10, 12, 10, 7, 3];
-  const bass = [0, 0, 12, 0, 5, 5, 17, 5];
-  s.tracks[0].clips = [{ start: 16, length: 32, span: 32, notes: riff(60, 4, 32, lead) }];
-  s.tracks[1].clips = [{ start: 0, length: 16, span: 48, notes: riff(36, 2, 16, bass) }];
-  s.tracks[2].clips = [{ start: 0, length: 16, span: 48, notes: Array.from({ length: 4 }, (_, i) => ({ start: i * 4 + 2, length: 1, note: 60 })) }];
-  window.songMaker.render();
-});
 await page.click('#zoom-fit').catch(() => {});
 await settle();
 // The first clip open in the editor
@@ -73,9 +61,9 @@ await page.evaluate(() => {
   window.maker2.changed();
 });
 await shot('instrument-maker');
-// The Bass, picked as it would be, its filter open
-const bass = await page.evaluate(() => String(window.maker2.state().instruments.findIndex((i) => i.id === 'bass')));
-await page.select('#instrument', bass);
+// The Minor Arp, picked as it would be, its filter open
+const arp = await page.evaluate(() => String(window.maker2.state().instruments.findIndex((i) => i.id === 'minor-arp')));
+await page.select('#instrument', arp);
 await page.evaluate(() => {
   window.maker2.state().filterOpen = true;
   window.maker2.changed();

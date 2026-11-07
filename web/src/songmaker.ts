@@ -19,6 +19,7 @@ import { importGoatSong, ROW_TO_NOTE } from './songimport';
 import { diskOf, packSong, playingProgram } from './c64export';
 import { encodeWav, renderSong } from './engine/export';
 import { exportSong } from './songexport';
+import START from './startsong.json';
 import { savedSong, withSong, type SavedSong } from './songfile';
 import { slideSemitones, vibratoCurve, wobbleOf, wobbleRow } from './vibrato';
 import { audible, songRows, type ResumedNote, bpmAt, songSpeeds, type NoteEffect, type Speed, clipNotes, frameAt, newId, stepAt as stepOfFrame, songEnd, songFrame, songSequence, songSounds, voiceSegments, VOICES, type Clip, type SongDoc, type SongNote, type Track } from './songdoc';
@@ -101,7 +102,13 @@ function load(): Saved {
   } catch {
     // Unreadable or blocked storage: start afresh
   }
-  return { songs: [defaultSong()], current: 0, zoom: 6, rollZoom: 22, metronome: true, countIn: true };
+  return { songs: [startSong()], current: 0, zoom: 6, rollZoom: 22, metronome: true, countIn: true };
+}
+
+/** The song a first visit starts with (startsong.json), if its instruments are here (they're the starting ones) */
+function startSong(): SongDoc {
+  const doc = structuredClone(START.song) as SongDoc;
+  return doc.tracks.every((t) => byId.has(t.instrument)) ? doc : defaultSong();
 }
 
 const view = load();

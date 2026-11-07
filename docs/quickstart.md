@@ -36,7 +36,7 @@ Click a section's name to fold it; folded, it shows a summary. Select
 anything and press Delete to remove it; ⌘Z undoes. **Advanced** holds
 GoatTracker's note-start settings, which rarely need changing.
 
-![The filter, on the Bass](images/instrument-filter.png)
+![The filter, on the Minor Arp](images/instrument-filter.png)
 
 ## Song Maker
 

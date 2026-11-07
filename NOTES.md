@@ -9,6 +9,10 @@ Notes for picking the work up again. Last updated 2026-11-06.
 - Two pages: Instrument Maker (`instruments.html`) and Song Maker (`songs.html`), switched in
   the middle of the top bar; `index.html` sends visitors to the Song Maker. The first song player
   and instrument maker were removed on 2026-11-06 (in git history before `6d9282a`).
+- A first visit starts with Test Song (`web/src/startsong.json`: the song and its Saw Bass, Snare
+  and Minor Arp, from the owner's export of 2026-11-06) and Lead (`defaultInstruments`). New songs
+  are blank. The Song Maker tests seed instruments of their own (`TEST_INSTRUMENTS`, the starting
+  ones from before) so they don't depend on the starting song.
 - User docs: `README.md` and `docs/quickstart.md` (key points only; assume the reader knows
   synths and GarageBand). `node web/scripts/screenshots.mjs` retakes `docs/images/`.
 - Commit as `Jonathan Field <needlestack@users.noreply.github.com>`.

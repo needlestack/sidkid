@@ -1896,16 +1896,29 @@ plot.addEventListener('pointerdown', (e) => {
     // Where the waveform repeats from: on a place it changes, settling there
     // as the envelope's dots do. Pulled out from the end it makes a repeat
     // (and bars that kept going end there); pushed back onto the end, none.
+    // With no repeat yet, waiting at the end, it also drags right: the bars ending there go on to it.
     before();
     const places = () => [...waveChanges(s), programEnd(s)!];
     const from = waveLooping(s) ? places().indexOf(s.waveLoop!) : places().length - 1;
     // (held where it was grabbed: the bar, or its label beside it)
     const grab = frameAt(e) - (waveLooping(s) ? s.waveLoop! : programEnd(s)!);
+    const waiting = !waveLooping(s);
+    const end = programEnd(s)!;
+    const bars = s.bars;
     dragging = 'wave-loop';
     plot.style.cursor = 'ew-resize';
     move = (e) => {
+      const t = frameAt(e) - grab;
+      if (waiting && Math.round(t) > end) {
+        const to = Math.min(TOTAL, Math.round(t));
+        s.waveLoop = null;
+        s.bars = bars.map((b) => (b.end === end ? { ...b, end: to } : b));
+        render();
+        return;
+      }
+      s.bars = bars;
       const p = places();
-      const at = settleAt(p, frameAt(e) - grab, from < 0 ? p.length - 1 : from);
+      const at = settleAt(p, t, from < 0 ? p.length - 1 : from);
       s.waveLoop = at < p.length - 1 ? p[at] : null;
       render();
     };

@@ -1,0 +1,418 @@
+{
+ "song": {
+  "name": "Test Song",
+  "bpm": 88,
+  "stepsPerBeat": 4,
+  "beatsPerBar": 4,
+  "tracks": [
+   {
+    "id": "ck9bjkhj",
+    "instrument": "saw-bass",
+    "voice": 0,
+    "muted": false,
+    "clips": [
+     {
+      "start": 0,
+      "length": 32,
+      "span": 32,
+      "notes": [
+       {
+        "start": 0,
+        "length": 2,
+        "note": 17
+       },
+       {
+        "start": 2,
+        "length": 1,
+        "note": 17
+       },
+       {
+        "start": 3,
+        "length": 2,
+        "note": 17
+       },
+       {
+        "start": 5,
+        "length": 1,
+        "note": 17
+       },
+       {
+        "start": 6,
+        "length": 4,
+        "note": 17
+       },
+       {
+        "start": 14,
+        "length": 1,
+        "note": 17
+       },
+       {
+        "start": 15,
+        "length": 1,
+        "note": 19
+       },
+       {
+        "start": 16,
+        "length": 2,
+        "note": 20
+       },
+       {
+        "start": 18,
+        "length": 1,
+        "note": 20
+       },
+       {
+        "start": 19,
+        "length": 2,
+        "note": 20
+       },
+       {
+        "start": 21,
+        "length": 1,
+        "note": 20
+       },
+       {
+        "start": 22,
+        "length": 4,
+        "note": 20
+       },
+       {
+        "start": 30,
+        "length": 1,
+        "note": 15
+       },
+       {
+        "start": 31,
+        "length": 1,
+        "note": 16
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "p4y9dn5g",
+    "instrument": "snare-drum",
+    "voice": 1,
+    "muted": false,
+    "clips": [
+     {
+      "start": 0,
+      "length": 32,
+      "span": 32,
+      "notes": [
+       {
+        "start": 4,
+        "length": 1,
+        "note": 41
+       },
+       {
+        "start": 12,
+        "length": 1,
+        "note": 41
+       },
+       {
+        "start": 20,
+        "length": 1,
+        "note": 41
+       },
+       {
+        "start": 28,
+        "length": 1,
+        "note": 41
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "62fqqzt7",
+    "instrument": "minor-arp",
+    "voice": 2,
+    "muted": false,
+    "clips": [
+     {
+      "start": 0,
+      "length": 32,
+      "span": 32,
+      "notes": [
+       {
+        "start": 16,
+        "length": 6,
+        "note": 41
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "cycle": {
+   "start": 0,
+   "end": 32
+  },
+  "cycling": true
+ },
+ "instruments": [
+  {
+   "name": "Saw Bass",
+   "ad": 9,
+   "sr": 87,
+   "bars": [
+    {
+     "wave": 32,
+     "start": 0,
+     "end": 2
+    }
+   ],
+   "pulse": {
+    "points": [
+     {
+      "t": 0,
+      "w": 2048
+     }
+    ],
+    "loop": null
+   },
+   "notes": [
+    {
+     "start": 0,
+     "semis": 1
+    },
+    {
+     "start": 1,
+     "semis": 0
+    }
+   ],
+   "waveLoop": null,
+   "hold": true,
+   "vibrato": null,
+   "filter": {
+    "types": [
+     {
+      "start": 0,
+      "end": 1200,
+      "passband": 16,
+      "voices": 1
+     }
+    ],
+    "cutoff": {
+     "points": [
+      {
+       "t": 0,
+       "w": 128
+      },
+      {
+       "t": 4,
+       "w": 52
+      },
+      {
+       "t": 6,
+       "w": 50
+      }
+     ],
+     "loop": null
+    },
+    "resonance": {
+     "points": [
+      {
+       "t": 0,
+       "w": 0
+      }
+     ],
+     "loop": null
+    }
+   },
+   "fixedNote": null,
+   "release": null,
+   "hardRestart": true,
+   "bits": [],
+   "legato": false,
+   "gateFrames": 2,
+   "firstWave": 9,
+   "pulseFromSong": true,
+   "id": "saw-bass"
+  },
+  {
+   "name": "Snare",
+   "ad": 9,
+   "sr": 4,
+   "bars": [
+    {
+     "wave": 128,
+     "start": 0,
+     "end": 50
+    }
+   ],
+   "pulse": {
+    "points": [
+     {
+      "t": 0,
+      "w": 2048
+     }
+    ],
+    "loop": null
+   },
+   "notes": [
+    {
+     "start": 0,
+     "semis": 0
+    },
+    {
+     "start": 1,
+     "semis": 0
+    }
+   ],
+   "waveLoop": null,
+   "hold": true,
+   "vibrato": null,
+   "filter": {
+    "types": [
+     {
+      "start": 0,
+      "end": 1200,
+      "passband": 16,
+      "voices": 2
+     }
+    ],
+    "cutoff": {
+     "points": [
+      {
+       "t": 0,
+       "w": 154
+      }
+     ],
+     "loop": null
+    },
+    "resonance": {
+     "points": [
+      {
+       "t": 0,
+       "w": 8
+      }
+     ],
+     "loop": null
+    }
+   },
+   "fixedNote": null,
+   "release": 49,
+   "hardRestart": true,
+   "bits": [],
+   "legato": false,
+   "gateFrames": 2,
+   "firstWave": 9,
+   "pulseFromSong": true,
+   "id": "snare-drum"
+  },
+  {
+   "name": "Minor Arp",
+   "ad": 10,
+   "sr": 170,
+   "bars": [
+    {
+     "wave": 16,
+     "start": 0,
+     "end": 30
+    }
+   ],
+   "pulse": {
+    "points": [
+     {
+      "t": 0,
+      "w": 2048
+     }
+    ],
+    "loop": null
+   },
+   "notes": [
+    {
+     "start": 0,
+     "semis": 0
+    },
+    {
+     "start": 5,
+     "semis": 3
+    },
+    {
+     "start": 10,
+     "semis": 7
+    },
+    {
+     "start": 15,
+     "semis": 12
+    },
+    {
+     "start": 20,
+     "semis": 7
+    },
+    {
+     "start": 25,
+     "semis": 3
+    }
+   ],
+   "waveLoop": 0,
+   "hold": true,
+   "vibrato": null,
+   "filter": {
+    "types": [
+     {
+      "start": 0,
+      "end": 62,
+      "passband": 16,
+      "voices": 4
+     }
+    ],
+    "cutoff": {
+     "points": [
+      {
+       "t": 0,
+       "w": 128
+      },
+      {
+       "t": 1,
+       "w": 126
+      },
+      {
+       "t": 16,
+       "w": 81
+      },
+      {
+       "t": 31,
+       "w": 51
+      },
+      {
+       "t": 49,
+       "w": 105
+      },
+      {
+       "t": 60,
+       "w": 127
+      },
+      {
+       "t": 61,
+       "w": 126
+      }
+     ],
+     "loop": 1
+    },
+    "resonance": {
+     "points": [
+      {
+       "t": 0,
+       "w": 8
+      }
+     ],
+     "loop": null
+    }
+   },
+   "fixedNote": null,
+   "release": null,
+   "hardRestart": true,
+   "bits": [],
+   "legato": false,
+   "gateFrames": 2,
+   "firstWave": 9,
+   "pulseFromSong": true,
+   "id": "minor-arp"
+  }
+ ]
+}

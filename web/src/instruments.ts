@@ -4,9 +4,10 @@
 
 import type { TableData } from './engine/configure';
 import type { Instrument } from './song';
-import { FILTER_LOW, layOut, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, type Program, type Step } from './tables';
+import { layOut, WAVE_PULSE, type Program, type Step } from './tables';
 import { wobbleRow } from './vibrato';
 import { defaultFilter, defaultPulse, filterProgram, pulseProgram, waveProgram, type Bar, type Note, type PulseShape, type Shape } from './shape';
+import START from './startsong.json';
 
 export const STORAGE_KEY = 'sidkid.maker2.v1';
 
@@ -45,52 +46,8 @@ export function defaultInstruments(): Shape[] {
       hardRestart: true,
       ...NOTE_START,
     },
-    {
-      id: 'bass',
-      name: 'Bass',
-      ad: 0x08,
-      sr: 0x88,
-      bars: [
-        { wave: WAVE_PULSE, start: 0, end: 3 },
-        { wave: WAVE_SAW, start: 3, end: 13 },
-      ],
-      notes: [],
-      hold: true,
-      vibrato: null,
-      // A resonant low pass closing down: the classic bass pluck
-      filter: {
-        types: [{ start: 0, end: 30, passband: FILTER_LOW }],
-        cutoff: { points: [{ t: 0, w: 0xd0 }, { t: 25, w: 0x28 }], loop: null },
-        resonance: { points: [{ t: 0, w: 10 }], loop: null },
-      },
-      pulse: defaultPulse(),
-      waveLoop: null,
-      fixedNote: null,
-      release: null,
-      hardRestart: true,
-      ...NOTE_START,
-    },
-    {
-      id: 'snare',
-      name: 'Snare',
-      ad: 0x08,
-      sr: 0x00,
-      bars: [
-        { wave: WAVE_NOISE, start: 0, end: 1 },
-        { wave: WAVE_PULSE, start: 1, end: 3 },
-        { wave: WAVE_NOISE, start: 3, end: 13 },
-      ],
-      notes: [],
-      hold: true,
-      vibrato: null,
-      filter: defaultFilter(),
-      pulse: defaultPulse(),
-      waveLoop: null,
-      fixedNote: null,
-      release: null,
-      hardRestart: true,
-      ...NOTE_START,
-    },
+    // The starting song's (startsong.json)
+    ...(structuredClone(START.instruments) as Shape[]),
   ];
 }
 
