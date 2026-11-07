@@ -350,6 +350,43 @@ try {
   });
   report(letGo === '1111110000 / 11111110000000 0,4,7,0,4,7,0,4,7,0,4,7,0,4', 'maker2 fixed key up', letGo);
 
+  // A repeat's "↻ repeat" label is its start's handle too: dragged, the start moves (held where grabbed), nothing is added
+  await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    window.__repeatWas = JSON.stringify([ins.bars, ins.waveLoop, ins.pulse, s.waveOpen]);
+    ins.bars = [{ wave: 0x40, start: 0, end: 10 }, { wave: 0x20, start: 10, end: 20 }, { wave: 0x10, start: 20, end: 30 }];
+    ins.waveLoop = 10;
+    ins.pulse = { points: [{ t: 0, w: 0x400 }, { t: 10, w: 0x800 }, { t: 20, w: 0x600 }, { t: 30, w: 0x400 }], loop: 1 };
+    s.waveOpen = true;
+    window.maker2.changed();
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  const dragLabel = async (label, by) => {
+    const b = await m2.$eval(label, (e) => e.getBoundingClientRect().toJSON());
+    await m2.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await m2.mouse.down();
+    await m2.mouse.move(b.x + b.width / 2 + by, b.y + b.height / 2, { steps: 5 });
+    await m2.mouse.up();
+    await new Promise((r) => setTimeout(r, 100));
+  };
+  const frames10 = await m2.evaluate(() => {
+    const a = document.querySelector('[data-wave-loop-edge] .edge-bar').getBoundingClientRect();
+    const b = document.querySelector('[data-wave-loop-end-edge] .edge-bar').getBoundingClientRect();
+    return (b.left - a.left) / 2;
+  });
+  await dragLabel('[data-wave-loop-edge] .wave-repeat', frames10);
+  await dragLabel('[data-loop-edge][data-line="pulse"] .width-repeat', frames10);
+  const labelDrag = await m2.evaluate(() => {
+    const s = window.maker2.state();
+    const ins = s.instruments[s.current];
+    const out = `${ins.waveLoop} ${ins.bars.length} ${ins.pulse.loop} ${ins.pulse.points.length}`;
+    [ins.bars, ins.waveLoop, ins.pulse, s.waveOpen] = JSON.parse(window.__repeatWas);
+    window.maker2.changed();
+    return out;
+  });
+  report(labelDrag === '20 3 2 4', 'maker2 repeat labels are handles', labelDrag);
+
   // Hard restart: on by default, off in the gate timer's top bit
   const restart = await m2.evaluate(() => {
     const s = window.maker2.state();

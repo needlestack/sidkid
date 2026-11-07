@@ -1373,6 +1373,7 @@ function drawWaveRepeat(top: number, bottom: number, withIcons: boolean, ghostBa
     const g = el('g', { class: `width-loop-edge wave ${cls}${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '' }, plot);
     el('rect', { x: x(at) - 6, y: top, width: 12, height: bottom - top, class: 'hit' }, g);
     el('rect', { x: x(at) - 1.5, y: top + 2, width: 3, height: bottom - top - 4, rx: 1.5, class: 'edge-bar' }, g);
+    return g;
   };
   if (!waveLooping(s)) {
     // At the end: ↻ to pull a repeat out, and → to hold there or not
@@ -1405,10 +1406,17 @@ function drawWaveRepeat(top: number, bottom: number, withIcons: boolean, ghostBa
       el('rect', { x: x(a + n * period), y: r.top + 5, width: x(z + n * period) - x(a + n * period), height: r.h - 10, rx: 5, class: `bar-body ghost ${LANE_COLORS[b.wave]}` }, plot);
     }
   }
-  if (withIcons) el('text', { x: x(from) + 10, y: top + 12, class: 'wave-repeat' }, plot).textContent = '↻ repeat';
-  edge(from, 'wave-loop');
+  // (its label is the start's handle too)
+  const start = edge(from, 'wave-loop');
+  if (withIcons) repeatLabel(start, x(from), top, 'wave-repeat');
   edge(end, 'wave-loop-end');
   return () => {};
+}
+
+/** A repeat's "↻ repeat" label, beside its start and part of its handle */
+function repeatLabel(handle: SVGGElement, at: number, top: number, cls: string) {
+  el('rect', { x: at + 6, y: top + 1, width: 58, height: 15, class: 'hit' }, handle);
+  el('text', { x: at + 10, y: top + 12, class: cls }, handle).textContent = '↻ repeat';
 }
 
 const WIDTH_PAD = 7;
@@ -1489,8 +1497,7 @@ function drawLine(r: LineLane) {
       el('rect', { x: x(t), y: span.top + 1, width: Math.min(x(TOTAL), x(t + period)) - x(t), height: span.h - 2, class: 'width-loop again' }, plot);
     }
     el('rect', { x: x(from), y: span.top + 1, width: x(to) - x(from), height: span.h - 2, class: 'width-loop' }, plot);
-    el('text', { x: x(from) + 10, y: span.top + 12, class: 'width-repeat' }, plot).textContent = '↻ repeat';
-    // Both ends drag: the start from point to point, the end in time
+    // Both ends drag: the start from point to point (its label too), the end in time
     for (const [at, which] of [
       [from, 'loop'],
       [to, 'loop-end'],
@@ -1498,6 +1505,7 @@ function drawLine(r: LineLane) {
       const edge = el('g', { class: `width-loop-edge${dragging === which ? ' dragging' : ''}`, [`data-${which}-edge`]: '', 'data-line': r.key }, plot);
       el('rect', { x: x(at) - 6, y: span.top, width: 12, height: span.h, class: 'hit' }, edge);
       el('rect', { x: x(at) - 1.5, y: span.top + 2, width: 3, height: span.h - 4, rx: 1.5, class: 'edge-bar' }, edge);
+      if (which === 'loop') repeatLabel(edge, x(from), span.top, 'width-repeat');
     }
   }
   if (r.mid !== null) el('line', { x1: 0, x2: width, y1: laneY(r, r.mid), y2: laneY(r, r.mid), class: 'width-square' }, plot);
@@ -1891,11 +1899,13 @@ plot.addEventListener('pointerdown', (e) => {
     before();
     const places = () => [...waveChanges(s), programEnd(s)!];
     const from = waveLooping(s) ? places().indexOf(s.waveLoop!) : places().length - 1;
+    // (held where it was grabbed: the bar, or its label beside it)
+    const grab = frameAt(e) - (waveLooping(s) ? s.waveLoop! : programEnd(s)!);
     dragging = 'wave-loop';
     plot.style.cursor = 'ew-resize';
     move = (e) => {
       const p = places();
-      const at = settleAt(p, frameAt(e), from < 0 ? p.length - 1 : from);
+      const at = settleAt(p, frameAt(e) - grab, from < 0 ? p.length - 1 : from);
       s.waveLoop = at < p.length - 1 ? p[at] : null;
       render();
     };
@@ -2094,6 +2104,8 @@ plot.addEventListener('pointerdown', (e) => {
     // end, there is none.
     const pulse = laneUnder(target, e)!.line;
     const from = pulse.loop ?? pulse.points.length - 1;
+    // (held where it was grabbed: the bar, or its label beside it)
+    const grab = frameAt(e) - pulse.points[from].t;
     before();
     dragging = 'loop';
     plot.style.cursor = 'ew-resize';
@@ -2102,7 +2114,7 @@ plot.addEventListener('pointerdown', (e) => {
       const last = pts.length - 1;
       const at = settleAt(
         pts.map((p) => p.t),
-        frameAt(e),
+        frameAt(e) - grab,
         from,
       );
       pulse.loop = at < last ? at : null;
