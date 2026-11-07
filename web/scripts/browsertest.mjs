@@ -1116,9 +1116,17 @@ try {
 
   // Recording: R plays, a held key becomes a note on the selected track (no count-in here)
   await sm.click('#count-in');
-  await sm.mouse.click(arrBox.x - 100, arrBox.y + TRACKS_TOP + 20);
+  // (the first track picked by its "Voice" label: its instrument menu would take the keys)
+  await sm.click('.track-head .voice-label');
   await sm.keyboard.press('r');
-  await sm.waitForFunction(() => window.songMaker.playing());
+  const recording = await sm.waitForFunction(() => window.songMaker.playing(), { timeout: 10000 }).then(
+    () => true,
+    () => false,
+  );
+  if (!recording) {
+    const why = await sm.evaluate(() => `focus ${document.activeElement?.tagName}.${document.activeElement?.className}, asking ${[...document.querySelectorAll('.ask')].some((e) => !e.hidden)}`);
+    report(false, 'song records played notes', `R didn't start playing: ${why}`);
+  }
   await new Promise((r) => setTimeout(r, 500));
   await sm.keyboard.down('a');
   await new Promise((r) => setTimeout(r, 500));
